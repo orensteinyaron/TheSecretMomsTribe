@@ -13,6 +13,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const APIFY_TOKEN = process.env.APIFY_TOKEN;
@@ -56,8 +58,8 @@ async function scanGoogleTrends() {
 
 async function generateBriefing(signals) {
   console.log('[Research] Generating briefing from signals...');
-  // TODO: Use Anthropic API to analyze signals and produce
-  // top 5 content opportunities in the specified JSON format.
+  // TODO: Use Anthropic API (model: CLAUDE_MODEL) to analyze signals
+  // and produce top 5 content opportunities in the specified JSON format.
   // See research.instructions.md for output schema.
   return [];
 }

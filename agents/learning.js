@@ -11,6 +11,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -30,7 +32,7 @@ async function fetchWeeklyPerformance() {
 }
 
 async function analyzePerformance(data) {
-  // TODO: Use Anthropic API to analyze:
+  // TODO: Use Anthropic API (model: CLAUDE_MODEL) to analyze:
   // - Which content types performed best (wow vs trust vs cta)
   // - Which pillars got most engagement
   // - Which hooks stopped the scroll

@@ -12,6 +12,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -41,7 +43,7 @@ async function getTodaysBriefing() {
 
 async function generateContent(briefing) {
   console.log('[Content] Generating content from briefing...');
-  // TODO: Use Anthropic API to generate 4 content items:
+  // TODO: Use Anthropic API (model: CLAUDE_MODEL) to generate 4 content items:
   // - 3 TikTok posts (native format)
   // - 1 Instagram post (Reel-first)
   // Follow content.instructions.md for voice, format, quality checks.
