@@ -3,7 +3,7 @@
 
 **Brand:** The Secret Moms Tribe | IG: @thesecretmomstribe | TT: @secret.moms.tribe
 **Mission:** #1 AI-powered media & product platform for moms (kids ages 1-16)
-**Supabase:** fvxaykkmzsbrggjgdfjj | **Repo:** orensteinyaron/-TheSecretMomsTribe
+**Supabase:** fvxaykkmzsbrggjgdfjj | **Repo:** orensteinyaron/TheSecretMomsTribe
 
 ---
 
