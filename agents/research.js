@@ -48,7 +48,6 @@ const TIKTOK_HASHTAGS = [
 
 const GOOGLE_TRENDS_QUERIES = [
   'parenting tips', 'mom hacks', 'toddler activities',
-  'teen problems', 'school lunch ideas',
 ];
 
 // --- Scrapers ---
@@ -125,20 +124,20 @@ async function scanTikTokTrends() {
 }
 
 async function scanGoogleTrends() {
-  console.log('[Research] Scanning Google Trends (5 queries)...');
+  console.log('[Research] Scanning Google Trends (3 queries)...');
   try {
     const run = await apify.actor('apify/google-trends-scraper').call({
       searchTerms: GOOGLE_TRENDS_QUERIES,
       isMultiple: false,
       timeRange: 'now 7-d',
       geo: 'US',
-      maxItems: 20,
+      maxItems: 10,
     });
 
     const { items } = await apify.dataset(run.defaultDatasetId).listItems();
     console.log(`[Research] Google Trends raw results: ${items.length}`);
 
-    const signals = items.slice(0, 15).map((t) => ({
+    const signals = items.slice(0, 10).map((t) => ({
       source: 'google_trends',
       title: t.searchTerm || t.term || t.title || '',
       url: t.shareUrl || '',
@@ -149,7 +148,41 @@ async function scanGoogleTrends() {
     console.log(`[Research] Google Trends signals: ${signals.length}`);
     return signals;
   } catch (err) {
-    console.warn(`[Research] Google Trends scraper failed: ${err.message}`);
+    console.warn(`[Research] Google Trends scraper failed (non-fatal): ${err.message}`);
+    return [];
+  }
+}
+
+async function scanRedditFallback() {
+  console.log('[Research] Running Reddit fallback scan (r/Parenting only)...');
+  try {
+    const run = await apify.actor('trudax/reddit-scraper-lite').call({
+      startUrls: [{ url: 'https://www.reddit.com/r/Parenting/' }],
+      sort: 'hot',
+      time: 'day',
+      maxItems: 10,
+      maxPostCount: 10,
+      maxComments: 0,
+      proxy: { useApifyProxy: true },
+    });
+
+    const { items } = await apify.dataset(run.defaultDatasetId).listItems();
+    console.log(`[Research] Reddit fallback raw results: ${items.length}`);
+
+    const signals = items.slice(0, 10).map((p) => ({
+      source: 'reddit_fallback',
+      title: p.title || '',
+      content: (p.body || p.selftext || p.text || '').slice(0, 500),
+      url: p.url || p.permalink || '',
+      subreddit: p.subreddit || p.communityName || 'Parenting',
+      upvotes: p.score || p.upVotes || p.ups || 0,
+      comments: p.numberOfComments || p.numComments || p.commentCount || 0,
+    }));
+
+    console.log(`[Research] Reddit fallback signals: ${signals.length}`);
+    return signals;
+  } catch (err) {
+    console.warn(`[Research] Reddit fallback also failed (non-fatal): ${err.message}`);
     return [];
   }
 }
@@ -419,6 +452,13 @@ async function main() {
     tiktok: tiktok.status === 'fulfilled' ? tiktok.value : [],
     google_trends: googleTrends.status === 'fulfilled' ? googleTrends.value : [],
   };
+
+  // Fallback: if Google Trends returned < 2 results, supplement with extra Reddit scan
+  if (sources.google_trends.length < 2) {
+    console.warn(`[Research] Google Trends returned only ${sources.google_trends.length} results — running Reddit fallback`);
+    const fallback = await scanRedditFallback();
+    sources.reddit = [...sources.reddit, ...fallback];
+  }
 
   // Log results per source
   for (const [name, data] of Object.entries(sources)) {
