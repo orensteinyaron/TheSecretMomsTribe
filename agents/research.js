@@ -33,21 +33,31 @@ const apify = new ApifyClient({ token: APIFY_TOKEN });
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 const REDDIT_SUBREDDITS = [
+  // Parenting
   'https://www.reddit.com/r/Parenting/',
   'https://www.reddit.com/r/Mommit/',
   'https://www.reddit.com/r/teenagers/',
   'https://www.reddit.com/r/Toddlers/',
   'https://www.reddit.com/r/NewParents/',
   'https://www.reddit.com/r/breakingmom/',
+  // Tech & AI (for ai_magic + tech_for_moms)
+  'https://www.reddit.com/r/ChatGPT/',
+  'https://www.reddit.com/r/LifeProTips/',
+  'https://www.reddit.com/r/apps/',
 ];
 
 const TIKTOK_HASHTAGS = [
-  'momtok', 'parentingtips', 'momlife',
-  'toddlermom', 'teenmom', 'momhack',
+  // Parenting
+  'momtok', 'parentingtips', 'momlife', 'toddlermom',
+  // AI & Tech
+  'aitips', 'aihacks', 'techformoms',
+  // Health & Wellness
+  'momhealth', 'mentalload',
 ];
 
 const GOOGLE_TRENDS_QUERIES = [
-  'parenting tips', 'mom hacks', 'toddler activities',
+  'parenting tips', 'AI for parents', 'best apps for moms',
+  'mom burnout', 'mom hacks',
 ];
 
 // --- Scrapers ---
@@ -216,59 +226,68 @@ async function fetchRecentTopics() {
 
 const SYSTEM_PROMPT = `You are the content strategist for Secret Moms Tribe (SMT), a parenting content brand on TikTok and Instagram targeting moms of kids ages 1-16.
 
+## Brand Identity
+The mom who always knows things first. Finds the AI hacks, the apps, the science, the tricks — and shares them before anyone else does.
+
 ## Brand Voice
 Warm, knowing mom friend. Uses "we" and "us." Slight humor, never condescending. She knows things other moms don't — that's the "secret."
 
-## Content Pillars
-1. baby_toddler — ages 1-4 (bedtime stories, sleep, milestones, first foods, tantrums)
-2. school_years — ages 5-10 (homework, meal planning, activities, learning hacks)
-3. tween — ages 10-13 (body changes, friendship drama, screen time, confidence)
-4. teen — ages 13-16 (talking to teens, mental health, social media, independence)
-5. mental_load — the invisible work of motherhood (organization, overwhelm, self-care)
+## Content Categories (5 categories — scan for ALL)
+1. ai_magic (30%) — Shows AI doing something useful for a mom on screen. Always has: the prompt/input + the AI output. Examples: AI writes bedtime story, AI generates school lunches from fridge photo, AI writes the hard email to teacher, AI creates conversation starters for teen.
+2. parenting_insights (25%) — Science-backed, behavior-based, emotionally resonant. Always reframes something moms feel guilty about. Examples: why your teen says "fine", toddler meltdowns are nervous system not defiance, the 10 minute rule that changes bedtime.
+3. tech_for_moms (20%) — Apps, tools, shortcuts. Specific and actionable. Always leads with the result not the tool. Examples: app that scans fridge and plans dinner, Chrome extension for focus, 3 phone settings every mom should change tonight.
+4. mom_health (15%) — Mental load, burnout, sleep, physical health. Never preachy, always practical. Examples: the 90 second reset when you're about to snap, why you're always tired, the thing nobody tells you about mom brain.
+5. trending_culture (10%) — News, studies, viral moments reframed for moms. Always timely with a SMT angle. Examples: new screen time study (what it actually means), that viral parenting debate (here's the nuance).
 
 ## Content Types
-- wow: AI-magic outputs that make viewers say "I need this" (personalized bedtime story, custom meal plan, conversation scripts). Show the OUTPUT, not the process. This is what goes viral.
-- trust: Relatable mom moments, memes, "am I the only one who..." content. Builds community. Gets shares.
-- cta: Save/share-driven content. Only when organic and earned. Never hard-sell.
+- wow: AI-magic outputs, tech reveals, actionable tools that make viewers say "I need this." Show the OUTPUT, not the process.
+- trust: Relatable mom moments, memes, guilt reframes. Builds community. Gets shares.
+- cta: Save/share-driven. Only when organic and earned. Never hard-sell.
 
-## KEY LESSONS (follow strictly)
-- Meme/relatable content outperforms educational content 25:1
-- Educational series format DOES NOT WORK at this audience scale
-- Cross-posting fails — each platform needs NATIVE content
+## KEY LESSONS
+- Meme/relatable content outperforms educational 25:1
 - ALWAYS lead with emotion, never with information
 - Hook MUST grab attention in 0-3 seconds
-- "Wow" content shows the magic OUTPUT in 1 frame, not the process
+- Show the OUTPUT not the process (especially AI magic and tech)
+- Apps/tools perform best when you show the RESULT first
+- Cross-posting fails — each platform needs NATIVE content
 
-## Content Mix Target (across the 5 opportunities)
-- 3x wow
+## Category Mix Target (across 5 opportunities)
+- 1-2x ai_magic
+- 1x parenting_insights
+- 1x tech_for_moms
+- 0-1x mom_health
+- 0-1x trending_culture
+At least 3 different categories must be represented. Never more than 2 from same category.
+
+## Content Type Distribution
+- 2-3x wow
 - 1-2x trust
 - 0-1x cta
 
 ## Quality Requirements
-- At least 3 different pillars represented
-- At least 1 opportunity must be TikTok-native, at least 1 Instagram-native
-- Every opportunity must have a clear EMOTIONAL angle (not informational)
-- Every suggested_hook must work in 0-3 seconds
+- At least 3 different categories represented
+- At least 1 TikTok-native, at least 1 Instagram-native
+- Every opportunity has a clear EMOTIONAL angle
+- Every suggested_hook works in 0-3 seconds
 - Do NOT repeat topics from the "Topics to AVOID" list
 
 ## Output Format
 Return a JSON array of exactly 5 objects. Each object:
 {
   "topic": "Short topic title (5-8 words)",
-  "pillar": "baby_toddler | school_years | tween | teen | mental_load",
+  "category": "ai_magic | parenting_insights | tech_for_moms | mom_health | trending_culture",
   "angle": "The specific creative angle for SMT (1-2 sentences)",
   "source": "reddit | tiktok | google_trends | cross_signal",
   "source_url": "URL to the primary source signal (empty string if none)",
   "reasoning": "Why this will resonate with our audience (1-2 sentences)",
   "content_type": "wow | trust | cta",
   "platform_fit": "tiktok | instagram | both",
-  "priority": 1,
+  "priority": 1-5 (integer, 1 = highest),
   "suggested_hook": "The opening line or first 3 seconds (be specific and punchy)"
 }
 
-Priority: 1 = highest, 5 = lowest.
-
-Return ONLY the JSON array. No markdown fences, no explanation, no commentary.`;
+Return ONLY the JSON array. No markdown fences, no explanation.`;
 
 function buildUserPrompt(sources, recentTopics) {
   const sections = [];
@@ -312,7 +331,7 @@ function buildUserPrompt(sources, recentTopics) {
 
 // --- Validation ---
 
-const VALID_PILLARS = ['baby_toddler', 'school_years', 'tween', 'teen', 'mental_load'];
+const VALID_CATEGORIES = ['ai_magic', 'parenting_insights', 'tech_for_moms', 'mom_health', 'trending_culture'];
 const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 const VALID_PLATFORM_FIT = ['tiktok', 'instagram', 'both'];
 
@@ -326,8 +345,8 @@ function validateOpportunities(opportunities) {
     const prefix = `Opportunity ${i + 1}`;
 
     if (!opp.topic) throw new Error(`${prefix}: missing topic`);
-    if (!opp.pillar || !VALID_PILLARS.includes(opp.pillar)) {
-      throw new Error(`${prefix}: invalid pillar "${opp.pillar}"`);
+    if (!opp.category || !VALID_CATEGORIES.includes(opp.category)) {
+      throw new Error(`${prefix}: invalid category "${opp.category}"`);
     }
     if (!opp.angle) throw new Error(`${prefix}: missing angle`);
     if (!opp.content_type || !VALID_CONTENT_TYPES.includes(opp.content_type)) {
@@ -346,14 +365,14 @@ function validateOpportunities(opportunities) {
   }
 
   // Soft checks (warn but don't fail)
-  const pillars = new Set(opportunities.map((o) => o.pillar));
-  if (pillars.size < 3) {
-    console.warn(`[Research] Soft warning: only ${pillars.size} distinct pillars (target: 3+)`);
+  const categories = new Set(opportunities.map((o) => o.category));
+  if (categories.size < 3) {
+    console.warn(`[Research] Soft warning: only ${categories.size} distinct categories (target: 3+)`);
   }
 
   const wowCount = opportunities.filter((o) => o.content_type === 'wow').length;
   if (wowCount < 2) {
-    console.warn(`[Research] Soft warning: only ${wowCount} wow opportunities (target: 3)`);
+    console.warn(`[Research] Soft warning: only ${wowCount} wow opportunities (target: 2-3)`);
   }
 
   const platforms = new Set(opportunities.map((o) => o.platform_fit));
@@ -364,12 +383,16 @@ function validateOpportunities(opportunities) {
     console.warn('[Research] Soft warning: no Instagram-native opportunities');
   }
 
-  const mix = {};
+  const catMix = {};
   for (const opp of opportunities) {
-    mix[opp.content_type] = (mix[opp.content_type] || 0) + 1;
+    catMix[opp.category] = (catMix[opp.category] || 0) + 1;
   }
-  console.log(`[Research] Content mix: ${JSON.stringify(mix)}`);
-  console.log(`[Research] Pillars: ${[...pillars].join(', ')}`);
+  const typeMix = {};
+  for (const opp of opportunities) {
+    typeMix[opp.content_type] = (typeMix[opp.content_type] || 0) + 1;
+  }
+  console.log(`[Research] Categories: ${JSON.stringify(catMix)}`);
+  console.log(`[Research] Content types: ${JSON.stringify(typeMix)}`);
 
   return opportunities;
 }

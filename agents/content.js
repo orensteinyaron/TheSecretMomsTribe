@@ -86,19 +86,22 @@ async function getRecentHooks() {
 function assignOpportunities(opportunities) {
   const sorted = [...opportunities].sort((a, b) => a.priority - b.priority);
 
-  // Best wow opportunity → carousel
-  const carouselOpp = sorted.find((o) => o.content_type === 'wow') || sorted[0];
+  // Carousel: best ai_magic or tech_for_moms (wow content that shows steps)
+  const carouselOpp = sorted.find((o) =>
+    o.category === 'ai_magic' || o.category === 'tech_for_moms' || o.content_type === 'wow'
+  ) || sorted[0];
 
-  // Best trust opportunity → static image
-  const staticOpp = sorted.find((o) => o !== carouselOpp && o.content_type === 'trust')
-    || sorted.find((o) => o !== carouselOpp) || sorted[1];
+  // Static: best trust content (parenting_insights, mom_health, trending_culture)
+  const staticOpp = sorted.find((o) =>
+    o !== carouselOpp && (o.content_type === 'trust' || o.category === 'mom_health' || o.category === 'trending_culture')
+  ) || sorted.find((o) => o !== carouselOpp) || sorted[1];
 
-  // Next best → TikTok slideshow (wow or trust both work)
+  // Slideshow: next best (any category works for TikTok)
   const slideshowOpp = sorted.find((o) => o !== carouselOpp && o !== staticOpp) || sorted[2] || sorted[0];
 
-  console.log(`[Content] Carousel: "${carouselOpp.topic}" (${carouselOpp.content_type})`);
-  console.log(`[Content] Static:   "${staticOpp.topic}" (${staticOpp.content_type})`);
-  console.log(`[Content] Slideshow:"${slideshowOpp.topic}" (${slideshowOpp.content_type})`);
+  console.log(`[Content] Carousel:  "${carouselOpp.topic}" [${carouselOpp.category}]`);
+  console.log(`[Content] Static:    "${staticOpp.topic}" [${staticOpp.category}]`);
+  console.log(`[Content] Slideshow: "${slideshowOpp.topic}" [${slideshowOpp.category}]`);
 
   return { carousel: carouselOpp, static: staticOpp, slideshow: slideshowOpp };
 }
@@ -107,12 +110,24 @@ function assignOpportunities(opportunities) {
 
 const SYSTEM_PROMPT = `You are the content writer for Secret Moms Tribe (SMT). You produce ready-to-post social media content for a parenting brand targeting moms of kids ages 1-16.
 
+## Brand Identity
+The mom who always knows things first. Finds the AI hacks, the apps, the science, the tricks — and shares them before anyone else does.
+
 ## Brand Voice
 - Warm, knowing mom friend. Uses "we" and "us"
 - Slight humor, never condescending
 - She knows things other moms don't — that's the "secret"
 - Empathetic but empowering — "you've got this"
-- Conversational, not clinical. Never preachy.
+- For AI Magic: excited discovery tone — "wait till you see this"
+- For Tech: practical insider — "I've been testing this all week"
+- For Health: gentle real talk — "can we talk about this?"
+
+## Content Categories
+1. ai_magic — Shows AI doing something useful. Always show BOTH the prompt/input AND the output.
+2. parenting_insights — Science-backed, emotionally resonant. Reframes mom guilt.
+3. tech_for_moms — Apps, tools, shortcuts. Name specific tools. Lead with RESULT not tool name.
+4. mom_health — Mental load, burnout, sleep. Never preachy, always practical.
+5. trending_culture — News, studies, viral moments reframed for moms.
 
 ## Content Philosophy
 - Never show the process. Show the MAGIC — the output, not the tool
@@ -124,7 +139,9 @@ const SYSTEM_PROMPT = `You are the content writer for Secret Moms Tribe (SMT). Y
 - Every hook must stop the scroll in 0-3 seconds
 - "Wow" content shows the AI-generated OUTPUT (the story, the plan, the script)
 - "Trust" content taps into shared mom experiences — viewer thinks "that's literally me"
-- Instagram captions include keywords for discovery (not just hashtags)
+- AI Magic content MUST show both input AND output
+- Tech content MUST name specific apps/tools (not generic advice)
+- Instagram captions include keywords for discovery
 - Each piece of content must have a clear emotional payoff
 
 Return ONLY valid JSON. No markdown fences, no explanation.`;
@@ -135,12 +152,15 @@ async function generateCarousel(opportunity) {
   const prompt = `Create an Instagram CAROUSEL post (5-7 slides) for this opportunity:
 
 Topic: ${opportunity.topic}
-Pillar: ${opportunity.pillar}
+Category: ${opportunity.category}
 Content Type: ${opportunity.content_type}
 Angle: ${opportunity.angle}
 Suggested Hook: ${opportunity.suggested_hook}
 
-This carousel shows AI-generated magic content slide by slide.
+This carousel shows the content slide by slide.
+For ai_magic: show the INPUT/prompt on slide 2, then the OUTPUT across remaining slides.
+For tech_for_moms: show the result first, then the steps.
+For parenting_insights: show the reframe across slides.
 Slide 1 = hook. Slides 2-6 = the actual content. Final slide = CTA.
 
 Return this EXACT JSON structure:
@@ -172,12 +192,15 @@ async function generateStaticImage(opportunity) {
   const prompt = `Create an Instagram STATIC IMAGE post (single image with text) for this opportunity:
 
 Topic: ${opportunity.topic}
-Pillar: ${opportunity.pillar}
+Category: ${opportunity.category}
 Content Type: ${opportunity.content_type}
 Angle: ${opportunity.angle}
 Suggested Hook: ${opportunity.suggested_hook}
 
-This is a relatable meme or powerful quote graphic. Single image. Must be instantly shareable.
+This is a relatable meme, powerful quote, or shareable fact graphic.
+For parenting_insights: a guilt-reframing statement or surprising fact.
+For mom_health: a practical truth bomb about burnout/sleep/mental load.
+For trending_culture: a hot take or nuanced perspective on a trending topic. Single image. Must be instantly shareable.
 
 Return this EXACT JSON structure:
 {
@@ -206,12 +229,15 @@ async function generateTikTokSlideshow(opportunity) {
   const prompt = `Create a TikTok PHOTO SLIDESHOW post (3-7 image slides with text) for this opportunity:
 
 Topic: ${opportunity.topic}
-Pillar: ${opportunity.pillar}
+Category: ${opportunity.category}
 Content Type: ${opportunity.content_type}
 Angle: ${opportunity.angle}
 Suggested Hook: ${opportunity.suggested_hook}
 
-This is TikTok's native photo slideshow format — images with text, NO video required.
+This is TikTok's native photo slideshow format.
+For ai_magic: slide 1 = hook, slide 2 = the prompt/input, slides 3-6 = the AI output.
+For tech_for_moms: slide 1 = the result/hook, then step by step.
+For parenting_insights: slide 1 = hook, then the insight revealed across slides. — images with text, NO video required.
 Slide 1 = hook. Middle slides = content. Last slide = CTA.
 
 Return this EXACT JSON structure:
@@ -290,6 +316,7 @@ async function writeContentQueue(items, briefingId) {
     ai_magic_output: item.ai_magic_output || null,
     image_prompt: item.image_prompt || null,
     audio_suggestion: item.audio_suggestion || null,
+    // _category and _format are local metadata, not written to DB
   }));
 
   const { data, error } = await supabase
@@ -344,6 +371,8 @@ async function main() {
         ...post,
         platform: 'instagram',
         content_type: carouselOpp.content_type,
+        _category: carouselOpp.category,
+        _format: 'carousel',
       });
       console.log(`[Content] IG Carousel: "${post.hook.slice(0, 60)}..."`);
     } catch (err) {
@@ -361,6 +390,8 @@ async function main() {
         ...post,
         platform: 'instagram',
         content_type: staticOpp.content_type,
+        _category: staticOpp.category,
+        _format: 'static',
       });
       console.log(`[Content] IG Static: "${post.hook.slice(0, 60)}..."`);
     } catch (err) {
@@ -378,6 +409,8 @@ async function main() {
         ...post,
         platform: 'tiktok',
         content_type: slideshowOpp.content_type,
+        _category: slideshowOpp.category,
+        _format: 'slideshow',
       });
       console.log(`[Content] TT Slideshow: "${post.hook.slice(0, 60)}..."`);
     } catch (err) {
@@ -402,8 +435,9 @@ async function main() {
   // Print summary
   console.log('\n=== GENERATED CONTENT ===');
   for (const item of contentItems) {
-    const format = item.platform === 'tiktok' ? 'TT SLIDESHOW' : (item.ai_magic_output ? 'IG CAROUSEL' : 'IG STATIC');
-    console.log(`\n[${format}] [${item.content_type.toUpperCase()}]`);
+    const format = item._format === 'slideshow' ? 'TT SLIDESHOW' : item._format === 'carousel' ? 'IG CAROUSEL' : 'IG STATIC';
+    const cat = item._category || 'unknown';
+    console.log(`\n[${format}] [${item.content_type.toUpperCase()}] [${cat}]`);
     console.log(`  Hook: "${item.hook}"`);
     console.log(`  Caption: ${item.caption.slice(0, 120)}...`);
     console.log(`  Hashtags: ${item.hashtags.join(' ')}`);
