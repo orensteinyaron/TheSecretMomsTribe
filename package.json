@@ -1,0 +1,20 @@
+{
+  "name": "smt",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "scrape:ig": "node scripts/scrape-instagram.js",
+    "scrape:tt": "node scripts/scrape-tiktok.js",
+    "scrape:all": "node scripts/scrape-instagram.js && node scripts/scrape-tiktok.js",
+    "report": "node scripts/baseline-report.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.101.1",
+    "apify-client": "^2.22.3"
+  }
+}
