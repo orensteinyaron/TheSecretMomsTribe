@@ -58,7 +58,7 @@ async function scanReddit() {
   try {
     const run = await apify.actor('trudax/reddit-scraper-lite').call({
       startUrls: REDDIT_SUBREDDITS.map((url) => ({ url })),
-      sort: 'TOP',
+      sort: 'top',
       time: 'day',
       maxItems: 20,
       maxPostCount: 20,
