@@ -1,45 +1,54 @@
 :root {
+  /* Brand palette */
+  --brand-purple: #63246a;
+  --brand-pink: #b74780;
+  --brand-black: #000000;
+  --brand-gray: #efedea;
+  --brand-white: #fcfcfa;
+  --brand-purple-light: #7d3585;
+  --brand-pink-light: #d4699e;
+
   /* Background */
-  --bg-primary: #0F0F23;
-  --bg-secondary: #1A1A2E;
-  --bg-card: #16213E;
-  --bg-card-hover: #1C2A4A;
+  --bg-primary: #0a0012;
+  --bg-secondary: #1a0a24;
+  --bg-card: #1e1030;
+  --bg-card-hover: #2a1840;
 
   /* Text */
-  --text-primary: #F8F8FF;
-  --text-secondary: rgba(248, 248, 255, 0.6);
-  --text-muted: rgba(248, 248, 255, 0.35);
+  --text-primary: var(--brand-white);
+  --text-secondary: rgba(252, 252, 250, 0.6);
+  --text-muted: rgba(252, 252, 250, 0.35);
 
-  /* Pillar accent colors */
-  --pillar-ai-magic: #B8A9C9;
-  --pillar-parenting: #C9A090;
-  --pillar-tech: #D4A853;
-  --pillar-health: #8B9E8B;
-  --pillar-trending: #74B9FF;
+  /* Pillar accent colors (all from brand family) */
+  --pillar-ai-magic: var(--brand-purple);
+  --pillar-parenting: var(--brand-pink);
+  --pillar-tech: var(--brand-purple);
+  --pillar-health: var(--brand-purple-light);
+  --pillar-trending: var(--brand-pink);
 
   /* Platform */
   --platform-ig: #E1306C;
   --platform-tt: #111111;
 
   /* Content type */
-  --type-wow: #6C5CE7;
-  --type-trust: #00B894;
-  --type-cta: #FDCB6E;
+  --type-wow: var(--brand-purple);
+  --type-trust: var(--brand-pink);
+  --type-cta: var(--brand-pink-light);
 
   /* Image status */
   --status-pending: #666;
-  --status-generating: #F0C040;
+  --status-generating: var(--brand-pink-light);
   --status-generated: #00B894;
   --status-failed: #E74C3C;
 
   /* Actions */
   --btn-approve: #00B894;
   --btn-reject: #E74C3C;
-  --btn-bank: #D4A853;
-  --btn-edit: #74B9FF;
+  --btn-bank: var(--brand-pink);
+  --btn-edit: var(--brand-purple-light);
 
   /* Typography */
-  --font-serif: 'DM Serif Display', Georgia, serif;
+  --font-serif: Georgia, 'Times New Roman', serif;
   --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
@@ -98,7 +107,7 @@ body {
 
 .tab.active {
   color: var(--text-primary);
-  border-bottom-color: var(--pillar-tech);
+  border-bottom-color: var(--brand-pink);
 }
 
 .tab-count {
@@ -190,7 +199,7 @@ body {
 
 .hashtag {
   font-size: 11px;
-  color: var(--pillar-trending);
+  color: var(--brand-pink-light);
   opacity: 0.7;
 }
 
@@ -403,7 +412,7 @@ body {
   font-size: 28px;
   font-weight: 700;
   font-family: var(--font-serif);
-  color: var(--pillar-tech);
+  color: var(--brand-pink);
 }
 
 .cost-breakdown {
@@ -431,7 +440,7 @@ body {
 
 .cost-bar {
   flex: 1;
-  background: var(--pillar-tech);
+  background: var(--brand-pink);
   border-radius: 4px 4px 0 0;
   min-height: 2px;
   position: relative;

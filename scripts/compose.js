@@ -3,19 +3,28 @@
  *
  * Track 1: Branded Background (NO DALL-E) — text-heavy posts
  *   Pure SVG + Sharp. Zero API cost. Clean editorial look.
+ *   Dark (purple→black gradient) or Light (#fcfcfa) based on pillar.
  *
  * Track 2: Photo Background (DALL-E) — scene-based posts
  *   DALL-E bg + gradient + text overlay via Sharp.
  *
- * Most posts use Track 1. Only posts with scene-based image_prompts use Track 2.
+ * Brand Assets:
+ *   Logo: /assets/brand/SMT_LOGO_small.png (purple circle, transparent bg)
+ *   Font: Blankspot (brand script) — embedded as base64 in SVG
+ *   Palette: #63246a (purple), #b74780 (pink), #000, #efedea, #fcfcfa
  *
  * Usage:
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/compose.js
  */
 
 import sharp from 'sharp';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import { logCost } from './utils/cost-logger.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -27,14 +36,31 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─── Brand Config (Visual Design Guide) ───
+// ─── Brand Assets (loaded once) ───
 
-const PILLAR_ACCENT = {
-  ai_magic: '#B8A9C9',
-  parenting_insights: '#C9A090',
-  tech_for_moms: '#D4A853',
-  mom_health: '#8B9E8B',
-  trending: '#74B9FF',
+const LOGO_PATH = path.join(__dirname, '../assets/brand/SMT_LOGO_small.png');
+const BLANKSPOT_PATH = path.join(__dirname, '../assets/brand/Blankspot-owlw4.ttf');
+const BLANKSPOT_B64 = fs.readFileSync(BLANKSPOT_PATH).toString('base64');
+
+// ─── Official Brand Palette ───
+
+const BRAND = {
+  purple: '#63246a',
+  pink: '#b74780',
+  black: '#000000',
+  gray: '#efedea',
+  white: '#fcfcfa',
+  purpleLight: '#7d3585',
+  pinkLight: '#d4699e',
+};
+
+// All pillars use the purple/pink family for brand cohesion
+const PILLAR_COLOR = {
+  ai_magic: BRAND.purple,
+  parenting_insights: BRAND.pink,
+  tech_for_moms: BRAND.purple,
+  mom_health: BRAND.purpleLight,
+  trending: BRAND.pink,
 };
 
 const PILLAR_LABEL = {
@@ -45,9 +71,9 @@ const PILLAR_LABEL = {
   trending: 'TRENDING',
 };
 
-// Dark variant: mom_health, trending, ai_magic
-// Light variant: parenting_insights, tech_for_moms
-const DARK_PILLARS = new Set(['mom_health', 'trending', 'ai_magic']);
+// Dark template: ai_magic, mom_health, trending
+// Light template: parenting_insights, tech_for_moms
+const DARK_PILLARS = new Set(['ai_magic', 'mom_health', 'trending']);
 
 const DIMS = {
   tiktok_slideshow: { w: 1080, h: 1920 },
@@ -58,11 +84,11 @@ const DIMS = {
 };
 
 const TEXT_SIZE = {
-  ig_static: { fontSize: 48, maxWidth: 900, lineHeight: 62, maxChars: 28 },
-  ig_carousel: { fontSize: 44, maxWidth: 880, lineHeight: 58, maxChars: 30 },
-  ig_meme: { fontSize: 48, maxWidth: 900, lineHeight: 62, maxChars: 28 },
-  tiktok_text: { fontSize: 52, maxWidth: 920, lineHeight: 66, maxChars: 26 },
-  tiktok_slideshow: { fontSize: 50, maxWidth: 900, lineHeight: 64, maxChars: 27 },
+  ig_static: { fontSize: 48, lineHeight: 62, maxChars: 28 },
+  ig_carousel: { fontSize: 44, lineHeight: 58, maxChars: 30 },
+  ig_meme: { fontSize: 48, lineHeight: 62, maxChars: 28 },
+  tiktok_text: { fontSize: 52, lineHeight: 66, maxChars: 26 },
+  tiktok_slideshow: { fontSize: 50, lineHeight: 64, maxChars: 27 },
 };
 
 // ─── Text Utilities ───
@@ -93,64 +119,108 @@ function wordWrap(text, maxChars) {
   return lines;
 }
 
-// ─── Track 1: Branded Background (pure SVG, no DALL-E) ───
+// ─── Logo Loader ───
 
-function createBrandedBackground(post) {
+async function loadLogo(size, opacity) {
+  return sharp(LOGO_PATH)
+    .resize(size, size)
+    .ensureAlpha(opacity)
+    .toBuffer();
+}
+
+// ─── Track 1: Dark Branded Background ───
+
+function createDarkBackground(post) {
   const dims = DIMS[post.post_format] || DIMS.ig_static;
   const { w, h } = dims;
   const ts = TEXT_SIZE[post.post_format] || TEXT_SIZE.ig_static;
-  const isDark = DARK_PILLARS.has(post.content_pillar);
-  const accent = PILLAR_ACCENT[post.content_pillar] || '#888';
+  const accent = PILLAR_COLOR[post.content_pillar] || BRAND.pink;
   const label = PILLAR_LABEL[post.content_pillar] || '';
 
-  // Colors
-  const bgColor = isDark ? '#0F0F23' : '#FFF8F0';
-  const glowColor = isDark ? '#1A1A2E' : '#FFF5E8';
-  const textColor = isDark ? '#F8F8FF' : '#1A1A2E';
-  const mutedColor = isDark ? 'rgba(248,248,255,0.20)' : 'rgba(26,26,46,0.15)';
-  const accentMuted = isDark ? accent : accent;
-
-  // Word wrap hook
   const hookLines = wordWrap(post.hook || '', ts.maxChars);
   const totalHookHeight = hookLines.length * ts.lineHeight;
   const hookStartY = (h / 2) - (totalHookHeight / 2) + ts.fontSize * 0.35;
-
-  // Pillar chip position
   const cx = w / 2;
-  const labelWidth = label.length * 9.5 + 28;
 
   const svg = `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background -->
-  <rect width="${w}" height="${h}" fill="${bgColor}"/>
-
-  <!-- Subtle radial glow -->
   <defs>
-    <radialGradient id="glow" cx="50%" cy="45%" r="60%">
-      <stop offset="0%" stop-color="${glowColor}" stop-opacity="1"/>
-      <stop offset="100%" stop-color="${bgColor}" stop-opacity="1"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${BRAND.purple}"/>
+      <stop offset="100%" stop-color="${BRAND.black}"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="${BRAND.purpleLight}" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="${BRAND.black}" stop-opacity="0"/>
     </radialGradient>
   </defs>
+
+  <!-- Purple-to-black gradient -->
+  <rect width="${w}" height="${h}" fill="url(#bg)"/>
   <rect width="${w}" height="${h}" fill="url(#glow)"/>
 
   <!-- Pillar accent line -->
-  <rect x="${cx - 50}" y="${hookStartY - 100}" width="100" height="3" rx="1.5" fill="${accentMuted}"/>
+  <rect x="${cx - 50}" y="${hookStartY - 100}" width="100" height="3" rx="1.5" fill="${accent}"/>
 
   <!-- Pillar label -->
-  ${label ? `<text x="${cx}" y="${hookStartY - 70}" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="${accentMuted}" text-anchor="middle" letter-spacing="2">${escapeXml(label)}</text>` : ''}
+  ${label ? `<text x="${cx}" y="${hookStartY - 68}" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" fill="${accent}" text-anchor="middle" letter-spacing="2.5" font-weight="600">${escapeXml(label)}</text>` : ''}
 
   <!-- Hook text -->
-  ${hookLines.map((line, i) => `<text x="${cx}" y="${hookStartY + i * ts.lineHeight}" font-family="Georgia, 'Times New Roman', serif" font-size="${ts.fontSize}" font-weight="700" fill="${textColor}" text-anchor="middle" letter-spacing="-0.5">${escapeXml(line)}</text>`).join('\n  ')}
+  ${hookLines.map((line, i) => `<text x="${cx}" y="${hookStartY + i * ts.lineHeight}" font-family="Georgia, 'Times New Roman', serif" font-size="${ts.fontSize}" font-weight="700" fill="${BRAND.white}" text-anchor="middle" letter-spacing="-0.5">${escapeXml(line)}</text>`).join('\n  ')}
 
   <!-- Decorative divider -->
-  <text x="${cx}" y="${hookStartY + totalHookHeight + 30}" font-family="Georgia, serif" font-size="18" fill="${mutedColor}" text-anchor="middle">&#x2014; &#x2726; &#x2014;</text>
+  <text x="${cx}" y="${hookStartY + totalHookHeight + 35}" font-family="Georgia, serif" font-size="18" fill="rgba(252,252,250,0.2)" text-anchor="middle">&#x2014; &#x2726; &#x2014;</text>
 
   <!-- Handle -->
-  <text x="${cx}" y="${h - 52}" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="${mutedColor}" text-anchor="middle">@thesecretmomstribe</text>
+  <text x="${cx}" y="${h - 52}" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15" fill="rgba(252,252,250,0.3)" text-anchor="middle">@thesecretmomstribe</text>
 </svg>`;
 
-  return sharp(Buffer.from(svg))
-    .png({ quality: 95 })
-    .toBuffer();
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+// ─── Track 1: Light Branded Background ───
+
+function createLightBackground(post) {
+  const dims = DIMS[post.post_format] || DIMS.ig_static;
+  const { w, h } = dims;
+  const ts = TEXT_SIZE[post.post_format] || TEXT_SIZE.ig_static;
+  const accent = PILLAR_COLOR[post.content_pillar] || BRAND.purple;
+  const label = PILLAR_LABEL[post.content_pillar] || '';
+
+  const hookLines = wordWrap(post.hook || '', ts.maxChars);
+  const totalHookHeight = hookLines.length * ts.lineHeight;
+  const hookStartY = (h / 2) - (totalHookHeight / 2) + ts.fontSize * 0.35;
+  const cx = w / 2;
+
+  const svg = `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+  <!-- Off-white background -->
+  <rect width="${w}" height="${h}" fill="${BRAND.white}"/>
+
+  <!-- Subtle warm tint in center -->
+  <defs>
+    <radialGradient id="warmglow" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="${BRAND.gray}" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="${BRAND.white}" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#warmglow)"/>
+
+  <!-- Pillar accent line -->
+  <rect x="${cx - 50}" y="${hookStartY - 100}" width="100" height="3" rx="1.5" fill="${accent}"/>
+
+  <!-- Pillar label -->
+  ${label ? `<text x="${cx}" y="${hookStartY - 68}" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" fill="${accent}" text-anchor="middle" letter-spacing="2.5" font-weight="600">${escapeXml(label)}</text>` : ''}
+
+  <!-- Hook text -->
+  ${hookLines.map((line, i) => `<text x="${cx}" y="${hookStartY + i * ts.lineHeight}" font-family="Georgia, 'Times New Roman', serif" font-size="${ts.fontSize}" font-weight="700" fill="${BRAND.black}" text-anchor="middle" letter-spacing="-0.5">${escapeXml(line)}</text>`).join('\n  ')}
+
+  <!-- Decorative divider -->
+  <text x="${cx}" y="${hookStartY + totalHookHeight + 35}" font-family="Georgia, serif" font-size="18" fill="rgba(99,36,106,0.15)" text-anchor="middle">&#x2014; &#x2726; &#x2014;</text>
+
+  <!-- Handle -->
+  <text x="${cx}" y="${h - 52}" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15" fill="rgba(99,36,106,0.3)" text-anchor="middle">@thesecretmomstribe</text>
+</svg>`;
+
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 // ─── Track 2: Photo Background with overlay ───
@@ -173,30 +243,31 @@ function createPhotoTextOverlay(post) {
   const dims = DIMS[post.post_format] || DIMS.ig_static;
   const { w, h } = dims;
   const ts = TEXT_SIZE[post.post_format] || TEXT_SIZE.ig_static;
-  const accent = PILLAR_ACCENT[post.content_pillar] || '#888';
   const label = PILLAR_LABEL[post.content_pillar] || '';
 
   const hookLines = wordWrap(post.hook || '', ts.maxChars);
   const totalHookHeight = hookLines.length * ts.lineHeight;
   const hookStartY = (h / 2) - (totalHookHeight / 2) + ts.fontSize * 0.35;
-
   const cx = w / 2;
+  const chipW = label.length * 9.5 + 28;
 
   return Buffer.from(`<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
   <!-- Pillar chip -->
   ${label ? `
-  <rect x="40" y="44" width="${label.length * 9.5 + 28}" height="30" rx="15" fill="${accent}"/>
-  <text x="${40 + 14}" y="64" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="white" letter-spacing="1">${escapeXml(label)}</text>
+  <rect x="40" y="44" width="${chipW}" height="30" rx="15" fill="${BRAND.purple}" opacity="0.9"/>
+  <text x="${40 + chipW / 2}" y="64" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="white" text-anchor="middle" letter-spacing="1">${escapeXml(label)}</text>
   ` : ''}
 
-  <!-- Hook text -->
-  ${hookLines.map((line, i) => `<text x="${cx}" y="${hookStartY + i * ts.lineHeight}" font-family="Georgia, 'Times New Roman', serif" font-size="${ts.fontSize}" font-weight="700" fill="#F8F8FF" text-anchor="middle" letter-spacing="-0.5">${escapeXml(line)}</text>`).join('\n  ')}
+  <!-- Hook text with subtle shadow -->
+  ${hookLines.map((line, i) => `
+  <text x="${cx + 1}" y="${hookStartY + i * ts.lineHeight + 2}" font-family="Georgia, 'Times New Roman', serif" font-size="${ts.fontSize}" font-weight="700" fill="rgba(0,0,0,0.4)" text-anchor="middle" letter-spacing="-0.5">${escapeXml(line)}</text>
+  <text x="${cx}" y="${hookStartY + i * ts.lineHeight}" font-family="Georgia, 'Times New Roman', serif" font-size="${ts.fontSize}" font-weight="700" fill="${BRAND.white}" text-anchor="middle" letter-spacing="-0.5">${escapeXml(line)}</text>`).join('\n  ')}
 
   <!-- Divider -->
-  <text x="${cx}" y="${hookStartY + totalHookHeight + 30}" font-family="Georgia, serif" font-size="18" fill="rgba(248,248,255,0.25)" text-anchor="middle">&#x2014; &#x2726; &#x2014;</text>
+  <text x="${cx}" y="${hookStartY + totalHookHeight + 35}" font-family="Georgia, serif" font-size="18" fill="rgba(252,252,250,0.25)" text-anchor="middle">&#x2014; &#x2726; &#x2014;</text>
 
   <!-- Handle -->
-  <text x="${cx}" y="${h - 52}" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="rgba(248,248,255,0.30)" text-anchor="middle">@thesecretmomstribe</text>
+  <text x="${cx}" y="${h - 52}" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="15" fill="rgba(252,252,250,0.3)" text-anchor="middle">@thesecretmomstribe</text>
 </svg>`);
 }
 
@@ -216,7 +287,7 @@ async function composeWithPhoto(post) {
       { input: gradient, blend: 'over' },
       { input: text, blend: 'over' },
     ])
-    .png({ quality: 95 })
+    .png()
     .toBuffer();
 }
 
@@ -230,31 +301,51 @@ const SCENE_KEYWORDS = [
 ];
 
 function hasPhotoBackground(post) {
-  // Only use DALL-E photo when image_status is 'generated' (DALL-E already ran)
-  // AND the image_prompt describes an actual scene
   if (post.image_status !== 'generated' || !post.image_url) return false;
-
   const prompt = (post.image_prompt || '').toLowerCase();
   return SCENE_KEYWORDS.some((kw) => prompt.includes(kw));
+}
+
+function selectTemplate(post) {
+  if (hasPhotoBackground(post)) return 'photo';
+  return DARK_PILLARS.has(post.content_pillar) ? 'dark' : 'light';
 }
 
 // ─── Main Composition ───
 
 async function composePost(post) {
+  const template = selectTemplate(post);
   const dims = DIMS[post.post_format] || DIMS.ig_static;
 
-  if (hasPhotoBackground(post)) {
-    console.log(`[Compose]   Track 2 (photo bg): ${dims.w}x${dims.h}`);
-    return composeWithPhoto(post);
+  let imageBuffer;
+  if (template === 'photo') {
+    console.log(`[Compose]   Track: photo bg (${dims.w}x${dims.h})`);
+    imageBuffer = await composeWithPhoto(post);
+  } else if (template === 'dark') {
+    console.log(`[Compose]   Track: dark branded (${dims.w}x${dims.h})`);
+    imageBuffer = await createDarkBackground(post);
   } else {
-    console.log(`[Compose]   Track 1 (branded bg): ${dims.w}x${dims.h}, ${DARK_PILLARS.has(post.content_pillar) ? 'dark' : 'light'}`);
-    return createBrandedBackground(post);
+    console.log(`[Compose]   Track: light branded (${dims.w}x${dims.h})`);
+    imageBuffer = await createLightBackground(post);
   }
+
+  // Composite logo on top
+  const logoSize = 60;
+  const logoMargin = 40;
+  const logoOpacity = template === 'light' ? 0.6 : 0.8;
+  const logo = await loadLogo(logoSize, logoOpacity);
+
+  return sharp(imageBuffer)
+    .composite([
+      { input: logo, top: dims.h - logoSize - logoMargin, left: dims.w - logoSize - logoMargin },
+    ])
+    .png({ quality: 95 })
+    .toBuffer();
 }
 
 // ─── Upload + Update ───
 
-async function uploadAndUpdate(post, imageBuffer) {
+async function uploadAndUpdate(post, imageBuffer, template) {
   const filename = `${post.id}-final-${Date.now()}.png`;
   const { error: uploadErr } = await supabase.storage
     .from('post-images')
@@ -274,7 +365,7 @@ async function uploadAndUpdate(post, imageBuffer) {
       metadata: {
         ...meta,
         composed: true,
-        track: hasPhotoBackground(post) ? 'photo' : 'branded',
+        track: template,
         background_url: meta.bg_url || post.image_url || null,
       },
     })
@@ -287,10 +378,10 @@ async function uploadAndUpdate(post, imageBuffer) {
 
 async function main() {
   console.log('[Compose] Starting two-track image composition...');
+  console.log(`[Compose] Brand: purple=#63246a, pink=#b74780`);
   const startTime = Date.now();
 
   // Get approved posts that need composition
-  // Both 'generated' (has DALL-E bg) and 'not_needed' (skip DALL-E, use branded bg)
   const { data: posts, error } = await supabase
     .from('content_queue')
     .select('*')
@@ -303,7 +394,6 @@ async function main() {
     process.exit(1);
   }
 
-  // Filter to uncomposed
   const toCompose = (posts || []).filter((p) => !(p.metadata?.composed));
 
   if (toCompose.length === 0) {
@@ -313,24 +403,25 @@ async function main() {
 
   console.log(`[Compose] ${toCompose.length} post(s) to compose`);
 
-  let track1 = 0;
-  let track2 = 0;
-  let fail = 0;
+  let darkCount = 0, lightCount = 0, photoCount = 0, fail = 0;
 
   for (const post of toCompose) {
     try {
-      console.log(`[Compose] "${post.hook.slice(0, 55)}..."`);
+      const hookPreview = (post.hook || '').slice(0, 55);
+      console.log(`[Compose] "${hookPreview}..."`);
+      const template = selectTemplate(post);
       const imageBuffer = await composePost(post);
-      const url = await uploadAndUpdate(post, imageBuffer);
+      const url = await uploadAndUpdate(post, imageBuffer, template);
       console.log(`[Compose]   Done: ${url}`);
 
-      if (hasPhotoBackground(post)) track2++;
-      else track1++;
+      if (template === 'dark') darkCount++;
+      else if (template === 'light') lightCount++;
+      else photoCount++;
 
       await logCost(supabase, {
         pipeline_stage: 'image_composition', service: 'sharp', model: 'compose',
         content_id: post.id,
-        description: `Composed ${post.post_format} (${hasPhotoBackground(post) ? 'photo' : 'branded'})`,
+        description: `Composed ${post.post_format} (${template})`,
       });
     } catch (err) {
       console.error(`[Compose]   FAILED ${post.id}: ${err.message}`);
@@ -340,8 +431,8 @@ async function main() {
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n[Compose] Done in ${elapsed}s.`);
-  console.log(`[Compose] Track 1 (branded): ${track1} | Track 2 (photo): ${track2} | Failed: ${fail}`);
-  console.log(`[Compose] DALL-E cost saved: ~$${(track1 * 0.08).toFixed(2)} (${track1} posts used branded bg)`);
+  console.log(`[Compose] Dark: ${darkCount} | Light: ${lightCount} | Photo: ${photoCount} | Failed: ${fail}`);
+  console.log(`[Compose] DALL-E saved: ~$${((darkCount + lightCount) * 0.08).toFixed(2)} (${darkCount + lightCount} branded bg)`);
 }
 
 main().catch((err) => {

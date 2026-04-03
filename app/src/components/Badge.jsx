@@ -1,9 +1,9 @@
 const PILLAR_COLORS = {
-  ai_magic: 'var(--pillar-ai-magic)',
-  parenting_insights: 'var(--pillar-parenting)',
-  tech_for_moms: 'var(--pillar-tech)',
-  mom_health: 'var(--pillar-health)',
-  trending: 'var(--pillar-trending)',
+  ai_magic: '#63246a',
+  parenting_insights: '#b74780',
+  tech_for_moms: '#63246a',
+  mom_health: '#7d3585',
+  trending: '#b74780',
 };
 
 const PILLAR_LABELS = {
