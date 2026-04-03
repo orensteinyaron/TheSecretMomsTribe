@@ -159,9 +159,33 @@ async function uploadToStorage(dalleUrl, postId, suffix = '') {
   return urlData.publicUrl;
 }
 
+// --- Scene detection: does this post need a DALL-E photo? ---
+
+const SCENE_KEYWORDS = [
+  'hands', 'child', 'mother', 'mom', 'toddler', 'kid',
+  'kitchen', 'bedroom', 'table', 'walking', 'sitting',
+  'holding', 'photograph', 'shot of', 'overhead', 'close-up',
+  'back of', 'shoulder', 'feet', 'park', 'living room',
+];
+
+function needsDallE(post) {
+  if (!post.image_prompt) return false;
+  const prompt = post.image_prompt.toLowerCase();
+  return SCENE_KEYWORDS.some((kw) => prompt.includes(kw));
+}
+
 // --- Process a single post ---
 
 async function processPost(post) {
+  // Check if this post actually needs a DALL-E photo
+  if (!needsDallE(post)) {
+    console.log(`[ImageGen] ${post.id}: text-heavy post, skipping DALL-E → branded bg in compose.js`);
+    await supabase.from('content_queue')
+      .update({ image_status: 'not_needed' })
+      .eq('id', post.id);
+    return 0; // No images generated, $0 cost
+  }
+
   const size = SIZE_MAP[post.post_format] || '1024x1024';
   console.log(`[ImageGen] Processing ${post.id} (${post.post_format}, ${size})...`);
 
@@ -290,7 +314,8 @@ async function main() {
   console.log(`[ImageGen] Found ${posts.length} post(s) to generate images for`);
 
   let totalImages = 0;
-  let successCount = 0;
+  let dalleCount = 0;
+  let skippedCount = 0;
   let failCount = 0;
 
   // Process sequentially to avoid DALL-E rate limits
@@ -298,7 +323,9 @@ async function main() {
     const count = await processPost(post);
     if (count > 0) {
       totalImages += count;
-      successCount++;
+      dalleCount++;
+    } else if (count === 0 && !needsDallE(post)) {
+      skippedCount++;
     } else {
       failCount++;
     }
@@ -306,8 +333,9 @@ async function main() {
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n[ImageGen Agent] Done in ${elapsed}s.`);
-  console.log(`[ImageGen] ${successCount} posts succeeded, ${failCount} failed`);
-  console.log(`[ImageGen] ${totalImages} total images generated`);
+  console.log(`[ImageGen] DALL-E generated: ${dalleCount} | Skipped (branded bg): ${skippedCount} | Failed: ${failCount}`);
+  console.log(`[ImageGen] ${totalImages} total DALL-E images`);
+  console.log(`[ImageGen] Saved: ~$${(skippedCount * 0.08).toFixed(2)} by using branded backgrounds`);
 
   await printCostSummary(supabase);
 }

@@ -1,22 +1,20 @@
 /**
- * SMT Image Composition Script
+ * SMT Image Composition Pipeline — Two-Track System
  *
- * Composites brand typography onto DALL-E background images using Sharp.
- * Zero LLM tokens — pure image processing.
+ * Track 1: Branded Background (NO DALL-E) — text-heavy posts
+ *   Pure SVG + Sharp. Zero API cost. Clean editorial look.
  *
- * Flow:
- *   1. Query content_queue WHERE status=approved AND image_status=generated AND not yet composed
- *   2. Download bg image, resize to target dimensions
- *   3. Overlay gradient + text SVG (hook, pillar chip, handle)
- *   4. Upload final composite to Supabase Storage
- *   5. Update content_queue with final image URL
+ * Track 2: Photo Background (DALL-E) — scene-based posts
+ *   DALL-E bg + gradient + text overlay via Sharp.
+ *
+ * Most posts use Track 1. Only posts with scene-based image_prompts use Track 2.
  *
  * Usage:
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/compose.js
  */
 
-import { createClient } from '@supabase/supabase-js';
 import sharp from 'sharp';
+import { createClient } from '@supabase/supabase-js';
 import { logCost } from './utils/cost-logger.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -29,18 +27,9 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// --- Dimensions by format ---
+// ─── Brand Config (Visual Design Guide) ───
 
-const DIMENSIONS = {
-  tiktok_slideshow: { width: 1080, height: 1920 },
-  tiktok_text: { width: 1080, height: 1920 },
-  ig_carousel: { width: 1080, height: 1350 },
-  ig_static: { width: 1080, height: 1350 },
-  ig_meme: { width: 1080, height: 1350 },
-  video_script: { width: 1080, height: 1350 },
-};
-
-const PILLAR_COLORS = {
+const PILLAR_ACCENT = {
   ai_magic: '#B8A9C9',
   parenting_insights: '#C9A090',
   tech_for_moms: '#D4A853',
@@ -48,15 +37,35 @@ const PILLAR_COLORS = {
   trending: '#74B9FF',
 };
 
-const PILLAR_LABELS = {
-  ai_magic: 'AI Magic',
-  parenting_insights: 'Parenting',
-  tech_for_moms: 'Tech for Moms',
-  mom_health: 'Mom Health',
-  trending: 'Trending',
+const PILLAR_LABEL = {
+  ai_magic: 'AI MAGIC',
+  parenting_insights: 'PARENTING',
+  tech_for_moms: 'TECH FOR MOMS',
+  mom_health: 'MOM HEALTH',
+  trending: 'TRENDING',
 };
 
-// --- Text utilities ---
+// Dark variant: mom_health, trending, ai_magic
+// Light variant: parenting_insights, tech_for_moms
+const DARK_PILLARS = new Set(['mom_health', 'trending', 'ai_magic']);
+
+const DIMS = {
+  tiktok_slideshow: { w: 1080, h: 1920 },
+  tiktok_text: { w: 1080, h: 1920 },
+  ig_carousel: { w: 1080, h: 1350 },
+  ig_static: { w: 1080, h: 1350 },
+  ig_meme: { w: 1080, h: 1350 },
+};
+
+const TEXT_SIZE = {
+  ig_static: { fontSize: 48, maxWidth: 900, lineHeight: 62, maxChars: 28 },
+  ig_carousel: { fontSize: 44, maxWidth: 880, lineHeight: 58, maxChars: 30 },
+  ig_meme: { fontSize: 48, maxWidth: 900, lineHeight: 62, maxChars: 28 },
+  tiktok_text: { fontSize: 52, maxWidth: 920, lineHeight: 66, maxChars: 26 },
+  tiktok_slideshow: { fontSize: 50, maxWidth: 900, lineHeight: 64, maxChars: 27 },
+};
+
+// ─── Text Utilities ───
 
 function escapeXml(str) {
   return str
@@ -70,242 +79,272 @@ function escapeXml(str) {
 function wordWrap(text, maxChars) {
   const words = text.split(/\s+/);
   const lines = [];
-  let currentLine = '';
-
+  let current = '';
   for (const word of words) {
-    if (currentLine.length + word.length + 1 > maxChars && currentLine) {
-      lines.push(currentLine.trim());
-      currentLine = word;
+    const test = current ? `${current} ${word}` : word;
+    if (test.length > maxChars && current) {
+      lines.push(current);
+      current = word;
     } else {
-      currentLine += (currentLine ? ' ' : '') + word;
+      current = test;
     }
   }
-  if (currentLine) lines.push(currentLine.trim());
+  if (current) lines.push(current);
   return lines;
 }
 
-// --- SVG generators ---
+// ─── Track 1: Branded Background (pure SVG, no DALL-E) ───
 
-function createGradientOverlay(width, height) {
-  return Buffer.from(`
-    <svg width="${width}" height="${height}">
-      <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="black" stop-opacity="0.3"/>
-          <stop offset="40%" stop-color="black" stop-opacity="0.1"/>
-          <stop offset="60%" stop-color="black" stop-opacity="0.1"/>
-          <stop offset="100%" stop-color="black" stop-opacity="0.4"/>
-        </linearGradient>
-      </defs>
-      <rect width="${width}" height="${height}" fill="url(#g)"/>
-    </svg>
-  `);
+function createBrandedBackground(post) {
+  const dims = DIMS[post.post_format] || DIMS.ig_static;
+  const { w, h } = dims;
+  const ts = TEXT_SIZE[post.post_format] || TEXT_SIZE.ig_static;
+  const isDark = DARK_PILLARS.has(post.content_pillar);
+  const accent = PILLAR_ACCENT[post.content_pillar] || '#888';
+  const label = PILLAR_LABEL[post.content_pillar] || '';
+
+  // Colors
+  const bgColor = isDark ? '#0F0F23' : '#FFF8F0';
+  const glowColor = isDark ? '#1A1A2E' : '#FFF5E8';
+  const textColor = isDark ? '#F8F8FF' : '#1A1A2E';
+  const mutedColor = isDark ? 'rgba(248,248,255,0.20)' : 'rgba(26,26,46,0.15)';
+  const accentMuted = isDark ? accent : accent;
+
+  // Word wrap hook
+  const hookLines = wordWrap(post.hook || '', ts.maxChars);
+  const totalHookHeight = hookLines.length * ts.lineHeight;
+  const hookStartY = (h / 2) - (totalHookHeight / 2) + ts.fontSize * 0.35;
+
+  // Pillar chip position
+  const cx = w / 2;
+  const labelWidth = label.length * 9.5 + 28;
+
+  const svg = `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="${w}" height="${h}" fill="${bgColor}"/>
+
+  <!-- Subtle radial glow -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="${glowColor}" stop-opacity="1"/>
+      <stop offset="100%" stop-color="${bgColor}" stop-opacity="1"/>
+    </radialGradient>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#glow)"/>
+
+  <!-- Pillar accent line -->
+  <rect x="${cx - 50}" y="${hookStartY - 100}" width="100" height="3" rx="1.5" fill="${accentMuted}"/>
+
+  <!-- Pillar label -->
+  ${label ? `<text x="${cx}" y="${hookStartY - 70}" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="${accentMuted}" text-anchor="middle" letter-spacing="2">${escapeXml(label)}</text>` : ''}
+
+  <!-- Hook text -->
+  ${hookLines.map((line, i) => `<text x="${cx}" y="${hookStartY + i * ts.lineHeight}" font-family="Georgia, 'Times New Roman', serif" font-size="${ts.fontSize}" font-weight="700" fill="${textColor}" text-anchor="middle" letter-spacing="-0.5">${escapeXml(line)}</text>`).join('\n  ')}
+
+  <!-- Decorative divider -->
+  <text x="${cx}" y="${hookStartY + totalHookHeight + 30}" font-family="Georgia, serif" font-size="18" fill="${mutedColor}" text-anchor="middle">&#x2014; &#x2726; &#x2014;</text>
+
+  <!-- Handle -->
+  <text x="${cx}" y="${h - 52}" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="${mutedColor}" text-anchor="middle">@thesecretmomstribe</text>
+</svg>`;
+
+  return sharp(Buffer.from(svg))
+    .png({ quality: 95 })
+    .toBuffer();
 }
 
-function createTextOverlayTikTok(width, height, { hook, pillar }) {
-  const pillarColor = PILLAR_COLORS[pillar] || '#666';
-  const pillarLabel = PILLAR_LABELS[pillar] || pillar || '';
-  const lines = wordWrap(hook || '', 22);
-  const lineHeight = 58;
-  const startY = (height - lines.length * lineHeight) / 2;
+// ─── Track 2: Photo Background with overlay ───
 
-  // Pillar chip dimensions
-  const chipWidth = pillarLabel.length * 10 + 24;
-
-  return Buffer.from(`
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <style>
-        .hook { font-family: Georgia, serif; font-size: 48px; font-weight: bold; fill: white; text-anchor: middle; }
-        .handle { font-family: Helvetica, sans-serif; font-size: 18px; fill: rgba(255,255,255,0.5); text-anchor: middle; }
-        .chip-text { font-family: Helvetica, sans-serif; font-size: 14px; font-weight: bold; fill: white; }
-      </style>
-      ${pillarLabel ? `
-        <rect x="32" y="32" width="${chipWidth}" height="28" rx="14" fill="${pillarColor}"/>
-        <text x="${32 + chipWidth / 2}" y="51" class="chip-text" text-anchor="middle">${escapeXml(pillarLabel)}</text>
-      ` : ''}
-      ${lines.map((line, i) =>
-        `<text x="${width / 2}" y="${startY + i * lineHeight}" class="hook">${escapeXml(line)}</text>`
-      ).join('\n      ')}
-      <text x="${width / 2}" y="${height - 60}" class="handle">@thesecretmomstribe</text>
-    </svg>
-  `);
+function createGradientOverlay(w, h) {
+  return Buffer.from(`<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="black" stop-opacity="0.45"/>
+      <stop offset="30%" stop-color="black" stop-opacity="0.15"/>
+      <stop offset="70%" stop-color="black" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="black" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#g)"/>
+</svg>`);
 }
 
-function createTextOverlayCarousel(width, height, { hook, pillar }) {
-  const pillarColor = PILLAR_COLORS[pillar] || '#666';
-  const pillarLabel = PILLAR_LABELS[pillar] || pillar || '';
-  const lines = wordWrap(hook || '', 24);
-  const lineHeight = 52;
-  const startY = (height - lines.length * lineHeight) / 2;
+function createPhotoTextOverlay(post) {
+  const dims = DIMS[post.post_format] || DIMS.ig_static;
+  const { w, h } = dims;
+  const ts = TEXT_SIZE[post.post_format] || TEXT_SIZE.ig_static;
+  const accent = PILLAR_ACCENT[post.content_pillar] || '#888';
+  const label = PILLAR_LABEL[post.content_pillar] || '';
 
-  const chipWidth = pillarLabel.length * 10 + 24;
+  const hookLines = wordWrap(post.hook || '', ts.maxChars);
+  const totalHookHeight = hookLines.length * ts.lineHeight;
+  const hookStartY = (h / 2) - (totalHookHeight / 2) + ts.fontSize * 0.35;
 
-  return Buffer.from(`
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <style>
-        .hook { font-family: Georgia, serif; font-size: 42px; font-weight: bold; fill: white; text-anchor: middle; }
-        .handle { font-family: Helvetica, sans-serif; font-size: 18px; fill: rgba(255,255,255,0.5); text-anchor: middle; }
-        .swipe { font-family: Helvetica, sans-serif; font-size: 16px; fill: rgba(255,255,255,0.4); text-anchor: middle; }
-        .chip-text { font-family: Helvetica, sans-serif; font-size: 14px; font-weight: bold; fill: white; }
-      </style>
-      ${pillarLabel ? `
-        <rect x="32" y="32" width="${chipWidth}" height="28" rx="14" fill="${pillarColor}"/>
-        <text x="${32 + chipWidth / 2}" y="51" class="chip-text" text-anchor="middle">${escapeXml(pillarLabel)}</text>
-      ` : ''}
-      ${lines.map((line, i) =>
-        `<text x="${width / 2}" y="${startY + i * lineHeight}" class="hook">${escapeXml(line)}</text>`
-      ).join('\n      ')}
-      <text x="${width / 2}" y="${height - 90}" class="swipe">Swipe →</text>
-      <text x="${width / 2}" y="${height - 60}" class="handle">@thesecretmomstribe</text>
-    </svg>
-  `);
+  const cx = w / 2;
+
+  return Buffer.from(`<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+  <!-- Pillar chip -->
+  ${label ? `
+  <rect x="40" y="44" width="${label.length * 9.5 + 28}" height="30" rx="15" fill="${accent}"/>
+  <text x="${40 + 14}" y="64" font-family="Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="white" letter-spacing="1">${escapeXml(label)}</text>
+  ` : ''}
+
+  <!-- Hook text -->
+  ${hookLines.map((line, i) => `<text x="${cx}" y="${hookStartY + i * ts.lineHeight}" font-family="Georgia, 'Times New Roman', serif" font-size="${ts.fontSize}" font-weight="700" fill="#F8F8FF" text-anchor="middle" letter-spacing="-0.5">${escapeXml(line)}</text>`).join('\n  ')}
+
+  <!-- Divider -->
+  <text x="${cx}" y="${hookStartY + totalHookHeight + 30}" font-family="Georgia, serif" font-size="18" fill="rgba(248,248,255,0.25)" text-anchor="middle">&#x2014; &#x2726; &#x2014;</text>
+
+  <!-- Handle -->
+  <text x="${cx}" y="${h - 52}" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="rgba(248,248,255,0.30)" text-anchor="middle">@thesecretmomstribe</text>
+</svg>`);
 }
 
-function createTextOverlayStatic(width, height, { hook }) {
-  const quotedHook = `\u201C${hook || ''}\u201D`;
-  const lines = wordWrap(quotedHook, 24);
-  const lineHeight = 54;
-  const startY = (height - lines.length * lineHeight) / 2;
+async function composeWithPhoto(post) {
+  const dims = DIMS[post.post_format] || DIMS.ig_static;
 
-  return Buffer.from(`
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <style>
-        .hook { font-family: Georgia, serif; font-size: 44px; font-weight: bold; fill: white; text-anchor: middle; }
-        .handle { font-family: Helvetica, sans-serif; font-size: 18px; fill: rgba(255,255,255,0.5); text-anchor: middle; }
-      </style>
-      ${lines.map((line, i) =>
-        `<text x="${width / 2}" y="${startY + i * lineHeight}" class="hook">${escapeXml(line)}</text>`
-      ).join('\n      ')}
-      <text x="${width / 2}" y="${height - 60}" class="handle">@thesecretmomstribe</text>
-    </svg>
-  `);
-}
-
-function createTextOverlay(width, height, post) {
-  const format = post.post_format;
-  const opts = { hook: post.hook, pillar: post.content_pillar };
-
-  if (format === 'tiktok_slideshow' || format === 'tiktok_text') {
-    return createTextOverlayTikTok(width, height, opts);
-  }
-  if (format === 'ig_carousel') {
-    return createTextOverlayCarousel(width, height, opts);
-  }
-  // ig_static, ig_meme, video_script
-  return createTextOverlayStatic(width, height, opts);
-}
-
-// --- Composition ---
-
-async function composePost(post) {
-  const dims = DIMENSIONS[post.post_format] || { width: 1080, height: 1350 };
-  const bgUrl = post.image_url;
-
-  console.log(`[Compose] Processing ${post.id} (${post.post_format}, ${dims.width}x${dims.height})...`);
-
-  // Download background
-  const bgResponse = await fetch(bgUrl);
+  const bgResponse = await fetch(post.image_url);
   if (!bgResponse.ok) throw new Error(`Failed to download bg: ${bgResponse.status}`);
   const bgBuffer = Buffer.from(await bgResponse.arrayBuffer());
 
-  // Create overlays
-  const gradient = createGradientOverlay(dims.width, dims.height);
-  const textOverlay = createTextOverlay(dims.width, dims.height, post);
+  const gradient = createGradientOverlay(dims.w, dims.h);
+  const text = createPhotoTextOverlay(post);
 
-  // Composite
-  const result = await sharp(bgBuffer)
-    .resize(dims.width, dims.height, { fit: 'cover' })
+  return sharp(bgBuffer)
+    .resize(dims.w, dims.h, { fit: 'cover', position: 'centre' })
     .composite([
       { input: gradient, blend: 'over' },
-      { input: textOverlay, blend: 'over' },
+      { input: text, blend: 'over' },
     ])
-    .png()
+    .png({ quality: 95 })
     .toBuffer();
-
-  // Upload to Supabase Storage
-  const filename = `${post.id}-final-${Date.now()}.png`;
-  const { error: uploadError } = await supabase.storage
-    .from('post-images')
-    .upload(filename, result, { contentType: 'image/png', upsert: true });
-
-  if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
-
-  const { data: urlData } = supabase.storage.from('post-images').getPublicUrl(filename);
-  const finalUrl = urlData.publicUrl;
-
-  // Update content_queue
-  const metadata = { ...(post.metadata || {}), bg_url: bgUrl, composed: true };
-  const { error: dbError } = await supabase
-    .from('content_queue')
-    .update({ image_url: finalUrl, metadata })
-    .eq('id', post.id);
-
-  if (dbError) throw new Error(`DB update failed: ${dbError.message}`);
-
-  // Log cost ($0 — this is local processing)
-  await logCost(supabase, {
-    pipeline_stage: 'image_composition',
-    service: 'sharp',
-    model: 'compose',
-    content_id: post.id,
-    description: `Composed ${post.post_format} image`,
-    metadata: { width: dims.width, height: dims.height },
-  });
-
-  console.log(`[Compose] ${post.id}: uploaded ${finalUrl}`);
-  return finalUrl;
 }
 
-// --- Main ---
+// ─── Track Selection ───
+
+const SCENE_KEYWORDS = [
+  'hands', 'child', 'mother', 'mom', 'toddler', 'kid',
+  'kitchen', 'bedroom', 'table', 'walking', 'sitting',
+  'holding', 'photograph', 'shot of', 'overhead', 'close-up',
+  'back of', 'shoulder', 'feet', 'park', 'living room',
+];
+
+function hasPhotoBackground(post) {
+  // Only use DALL-E photo when image_status is 'generated' (DALL-E already ran)
+  // AND the image_prompt describes an actual scene
+  if (post.image_status !== 'generated' || !post.image_url) return false;
+
+  const prompt = (post.image_prompt || '').toLowerCase();
+  return SCENE_KEYWORDS.some((kw) => prompt.includes(kw));
+}
+
+// ─── Main Composition ───
+
+async function composePost(post) {
+  const dims = DIMS[post.post_format] || DIMS.ig_static;
+
+  if (hasPhotoBackground(post)) {
+    console.log(`[Compose]   Track 2 (photo bg): ${dims.w}x${dims.h}`);
+    return composeWithPhoto(post);
+  } else {
+    console.log(`[Compose]   Track 1 (branded bg): ${dims.w}x${dims.h}, ${DARK_PILLARS.has(post.content_pillar) ? 'dark' : 'light'}`);
+    return createBrandedBackground(post);
+  }
+}
+
+// ─── Upload + Update ───
+
+async function uploadAndUpdate(post, imageBuffer) {
+  const filename = `${post.id}-final-${Date.now()}.png`;
+  const { error: uploadErr } = await supabase.storage
+    .from('post-images')
+    .upload(filename, imageBuffer, { contentType: 'image/png', upsert: true });
+
+  if (uploadErr) throw new Error(`Upload failed: ${uploadErr.message}`);
+
+  const { data: urlData } = supabase.storage
+    .from('post-images')
+    .getPublicUrl(filename);
+
+  const meta = post.metadata || {};
+  await supabase
+    .from('content_queue')
+    .update({
+      image_url: urlData.publicUrl,
+      metadata: {
+        ...meta,
+        composed: true,
+        track: hasPhotoBackground(post) ? 'photo' : 'branded',
+        background_url: meta.bg_url || post.image_url || null,
+      },
+    })
+    .eq('id', post.id);
+
+  return urlData.publicUrl;
+}
+
+// ─── Runner ───
 
 async function main() {
-  console.log('[Compose] Starting image composition for approved posts...');
+  console.log('[Compose] Starting two-track image composition...');
   const startTime = Date.now();
 
-  // Find posts with generated images that haven't been composed yet
+  // Get approved posts that need composition
+  // Both 'generated' (has DALL-E bg) and 'not_needed' (skip DALL-E, use branded bg)
   const { data: posts, error } = await supabase
     .from('content_queue')
     .select('*')
     .eq('status', 'approved')
-    .eq('image_status', 'generated')
+    .in('image_status', ['generated', 'not_needed'])
     .order('created_at', { ascending: true });
 
   if (error) {
-    console.error('[Compose] Query failed:', error);
+    console.error('[Compose] Query failed:', error.message);
     process.exit(1);
   }
 
-  // Filter to only uncomposed posts
-  const uncomposed = (posts || []).filter(p => {
-    const meta = p.metadata || {};
-    return !meta.composed && p.image_url;
-  });
+  // Filter to uncomposed
+  const toCompose = (posts || []).filter((p) => !(p.metadata?.composed));
 
-  if (uncomposed.length === 0) {
-    console.log('[Compose] No posts needing composition. Done.');
-    process.exit(0);
+  if (toCompose.length === 0) {
+    console.log('[Compose] No posts need composition. Done.');
+    return;
   }
 
-  console.log(`[Compose] Found ${uncomposed.length} post(s) to compose`);
+  console.log(`[Compose] ${toCompose.length} post(s) to compose`);
 
-  let success = 0;
+  let track1 = 0;
+  let track2 = 0;
   let fail = 0;
 
-  for (const post of uncomposed) {
+  for (const post of toCompose) {
     try {
-      await composePost(post);
-      success++;
+      console.log(`[Compose] "${post.hook.slice(0, 55)}..."`);
+      const imageBuffer = await composePost(post);
+      const url = await uploadAndUpdate(post, imageBuffer);
+      console.log(`[Compose]   Done: ${url}`);
+
+      if (hasPhotoBackground(post)) track2++;
+      else track1++;
+
+      await logCost(supabase, {
+        pipeline_stage: 'image_composition', service: 'sharp', model: 'compose',
+        content_id: post.id,
+        description: `Composed ${post.post_format} (${hasPhotoBackground(post) ? 'photo' : 'branded'})`,
+      });
     } catch (err) {
-      console.error(`[Compose] ${post.id} FAILED: ${err.message}`);
+      console.error(`[Compose]   FAILED ${post.id}: ${err.message}`);
       fail++;
     }
   }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`\n[Compose] Done in ${elapsed}s. ${success} succeeded, ${fail} failed.`);
+  console.log(`\n[Compose] Done in ${elapsed}s.`);
+  console.log(`[Compose] Track 1 (branded): ${track1} | Track 2 (photo): ${track2} | Failed: ${fail}`);
+  console.log(`[Compose] DALL-E cost saved: ~$${(track1 * 0.08).toFixed(2)} (${track1} posts used branded bg)`);
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('[Compose] Fatal error:', err);
   process.exit(1);
 });
