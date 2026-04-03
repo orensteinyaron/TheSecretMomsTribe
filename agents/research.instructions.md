@@ -124,6 +124,7 @@ For each opportunity, produce:
 {
   "topic": "Short topic title (5-8 words)",
   "category": "ai_magic | parenting_insights | tech_for_moms | mom_health | trending_culture",
+  "age_range": "toddler | little_kid | school_age | teen | universal",
   "angle": "The specific creative angle for SMT (1-2 sentences)",
   "source": "reddit | tiktok | google_trends | cross_signal",
   "source_url": "URL to the primary source signal (empty string if none)",
@@ -135,7 +136,11 @@ For each opportunity, produce:
 }
 ```
 
-Note: `category` replaces the old `pillar` field.
+`age_range` maps to: toddler (1-3), little_kid (4-7),
+school_age (8-12), teen (13-16), universal (all ages).
+
+Prioritize opportunities that fill gaps in the last 7 days
+of the age_range × content_pillar coverage matrix.
 
 ---
 
@@ -179,10 +184,12 @@ SET opportunities = EXCLUDED.opportunities,
 
 1. **No duplicates** — check last 7 days of briefings
 2. **Category diversity** — at least 3 different categories
-3. **Platform diversity** — at least 1 TikTok-native, 1 IG-native
-4. **Freshness** — all signals from last 48 hours
-5. **Emotional hook** — every opportunity has a clear emotional angle
-6. **Actionable** — viewer knows exactly what to do or feel after seeing it
+3. **Age range diversity** — at least 2 different age ranges
+4. **Platform diversity** — at least 1 TikTok-native, 1 IG-native
+5. **Freshness** — all signals from last 48 hours
+6. **Emotional hook** — every opportunity has a clear emotional angle
+7. **Actionable** — viewer knows exactly what to do or feel after seeing it
+8. **Coverage gaps** — prioritize uncovered age_range × category cells
 
 ---
 

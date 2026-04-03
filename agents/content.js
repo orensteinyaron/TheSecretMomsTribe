@@ -1,16 +1,16 @@
 /**
  * SMT Content Generation Agent
  *
- * Triggered after Research Agent completes (or manually).
- * Reads today's briefing → generates 3 autonomous content items:
- *   1. IG Carousel (5-7 slides) — wow content
- *   2. IG Static Image — trust/meme content
- *   3. TikTok Slideshow — text + images, no video
+ * Reads today's briefing + 3 brand DNA docs → generates a batch
+ * of 4 posts with full metadata (age_range, content_pillar, post_format).
  *
- * Zero video production dependencies. All formats are
- * publishable with image generation + text only.
+ * Daily batch:
+ *   1. TikTok slideshow
+ *   2. TikTok text-on-screen OR slideshow
+ *   3. IG carousel (5-7 slides)
+ *   4. IG static OR meme
  *
- * See: agents/content.instructions.md for full runtime spec.
+ * Zero video dependencies. All formats publishable with images + text.
  *
  * Usage:
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... ANTHROPIC_API_KEY=... node agents/content.js
@@ -18,6 +18,11 @@
 
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
@@ -33,12 +38,23 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !ANTHROPIC_API_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
+// --- Load DNA docs ---
+
+function loadDNA() {
+  const promptsDir = resolve(__dirname, '../prompts');
+  const brandVoice = readFileSync(resolve(promptsDir, 'brand-voice.md'), 'utf-8');
+  const contentDNA = readFileSync(resolve(promptsDir, 'content-dna.md'), 'utf-8');
+  const visualDesign = readFileSync(resolve(promptsDir, 'visual-design.md'), 'utf-8');
+  console.log(`[Content] Loaded DNA docs: brand-voice (${brandVoice.length}), content-dna (${contentDNA.length}), visual-design (${visualDesign.length})`);
+  return { brandVoice, contentDNA, visualDesign };
+}
+
 // --- Briefing ---
 
 async function getLatestBriefing() {
   const today = new Date().toISOString().split('T')[0];
 
-  let { data, error } = await supabase
+  let { data } = await supabase
     .from('daily_briefings')
     .select('*')
     .eq('briefing_date', today)
@@ -46,7 +62,7 @@ async function getLatestBriefing() {
 
   if (!data) {
     console.warn(`[Content] No briefing for ${today}, fetching most recent...`);
-    ({ data, error } = await supabase
+    ({ data } = await supabase
       .from('daily_briefings')
       .select('*')
       .order('briefing_date', { ascending: false })
@@ -54,8 +70,8 @@ async function getLatestBriefing() {
       .single());
   }
 
-  if (error || !data) {
-    console.error('[Content] No briefing found:', error?.message);
+  if (!data) {
+    console.error('[Content] No briefing found.');
     process.exit(1);
   }
 
@@ -63,395 +79,304 @@ async function getLatestBriefing() {
   return data;
 }
 
-// --- Dedup ---
+// --- Coverage gap analysis ---
+
+async function getCoverageGaps() {
+  try {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const { data } = await supabase
+      .from('content_queue')
+      .select('age_range, content_pillar, content_type, platform')
+      .gte('created_at', sevenDaysAgo.toISOString());
+
+    if (!data || data.length === 0) return { covered: [], gaps: 'No content in last 7 days — all cells are open.' };
+
+    const covered = data.map((r) => `${r.age_range}×${r.content_pillar}`);
+    const coveredSet = new Set(covered);
+
+    const ageRanges = ['toddler', 'little_kid', 'school_age', 'teen'];
+    const pillars = ['ai_magic', 'parenting_insights', 'tech_for_moms', 'mom_health', 'trending'];
+    const uncovered = [];
+
+    for (const age of ageRanges) {
+      for (const pillar of pillars) {
+        if (!coveredSet.has(`${age}×${pillar}`)) {
+          uncovered.push(`${age}×${pillar}`);
+        }
+      }
+    }
+
+    console.log(`[Content] Coverage: ${coveredSet.size} cells covered, ${uncovered.length} gaps`);
+    return {
+      covered: [...coveredSet],
+      gaps: uncovered.length > 0
+        ? `Uncovered cells to prioritize: ${uncovered.slice(0, 10).join(', ')}`
+        : 'Good coverage across all cells.',
+    };
+  } catch {
+    return { covered: [], gaps: 'Unable to fetch coverage data.' };
+  }
+}
+
+// --- Recent hooks for dedup ---
 
 async function getRecentHooks() {
   try {
     const fourteenDaysAgo = new Date();
     fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-
     const { data } = await supabase
       .from('content_queue')
       .select('hook')
       .gte('created_at', fourteenDaysAgo.toISOString());
-
-    return (data || []).map((r) => r.hook.toLowerCase());
+    return (data || []).map((r) => r.hook).filter(Boolean);
   } catch {
     return [];
   }
 }
 
-// --- Assignment ---
+// --- Build system prompt from DNA ---
 
-function assignOpportunities(opportunities) {
-  const sorted = [...opportunities].sort((a, b) => a.priority - b.priority);
+function buildSystemPrompt(dna) {
+  return `You are the content generation engine for Secret Moms Tribe (SMT).
 
-  // Carousel: best ai_magic or tech_for_moms (wow content that shows steps)
-  const carouselOpp = sorted.find((o) =>
-    o.category === 'ai_magic' || o.category === 'tech_for_moms' || o.content_type === 'wow'
-  ) || sorted[0];
+THE FOLLOWING BRAND DOCUMENTS ARE THE LAW. Follow them exactly.
 
-  // Static: best trust content (parenting_insights, mom_health, trending_culture)
-  const staticOpp = sorted.find((o) =>
-    o !== carouselOpp && (o.content_type === 'trust' || o.category === 'mom_health' || o.category === 'trending_culture')
-  ) || sorted.find((o) => o !== carouselOpp) || sorted[1];
+=== BRAND VOICE BIBLE ===
+${dna.brandVoice}
 
-  // Slideshow: next best (any category works for TikTok)
-  const slideshowOpp = sorted.find((o) => o !== carouselOpp && o !== staticOpp) || sorted[2] || sorted[0];
+=== CONTENT DNA FRAMEWORK ===
+${dna.contentDNA}
 
-  console.log(`[Content] Carousel:  "${carouselOpp.topic}" [${carouselOpp.category}]`);
-  console.log(`[Content] Static:    "${staticOpp.topic}" [${staticOpp.category}]`);
-  console.log(`[Content] Slideshow: "${slideshowOpp.topic}" [${slideshowOpp.category}]`);
+=== VISUAL DESIGN GUIDE ===
+${dna.visualDesign}
 
-  return { carousel: carouselOpp, static: staticOpp, slideshow: slideshowOpp };
+CRITICAL RULES:
+- Before outputting any post, apply The SMT Test: "Would the friend in the group chat say this?"
+- If it sounds like a blog, textbook, or generic momfluencer → rewrite.
+- If it sounds like a text message you'd screenshot and forward → ship it.
+- Return ONLY valid JSON. No markdown fences, no explanation.`;
 }
 
-// --- System Prompt ---
+// --- Generate batch ---
 
-const SYSTEM_PROMPT = `You are the content writer for Secret Moms Tribe (SMT). You produce ready-to-post social media content for a parenting brand targeting moms of kids ages 1-16.
+async function generateBatch(briefing, dna, coverageGaps, recentHooks) {
+  const systemPrompt = buildSystemPrompt(dna);
 
-## Brand Identity
-The mom who always knows things first. Finds the AI hacks, the apps, the science, the tricks — and shares them before anyone else does.
+  const userPrompt = `Generate a batch of exactly 4 posts for today.
 
-## Brand Voice
-- Warm, knowing mom friend. Uses "we" and "us"
-- Slight humor, never condescending
-- She knows things other moms don't — that's the "secret"
-- Empathetic but empowering — "you've got this"
-- For AI Magic: excited discovery tone — "wait till you see this"
-- For Tech: practical insider — "I've been testing this all week"
-- For Health: gentle real talk — "can we talk about this?"
+## Today's Briefing Opportunities
+${JSON.stringify(briefing.opportunities, null, 2)}
 
-## Content Categories
-1. ai_magic — Shows AI doing something useful. Always show BOTH the prompt/input AND the output.
-2. parenting_insights — Science-backed, emotionally resonant. Reframes mom guilt.
-3. tech_for_moms — Apps, tools, shortcuts. Name specific tools. Lead with RESULT not tool name.
-4. mom_health — Mental load, burnout, sleep. Never preachy, always practical.
-5. trending_culture — News, studies, viral moments reframed for moms.
+## Coverage Gaps (last 7 days)
+${coverageGaps.gaps}
 
-## Content Philosophy
-- Never show the process. Show the MAGIC — the output, not the tool
-- Always lead with EMOTION, never with information
-- Meme/relatable content outperforms educational 25:1
-- Model B aesthetic: no faces shown, warm tones, cozy vibes
+## Recent Hooks to AVOID (do not duplicate)
+${recentHooks.slice(0, 20).map((h) => `- "${h}"`).join('\n') || 'None yet.'}
 
-## KEY RULES
-- Every hook must stop the scroll in 0-3 seconds
-- "Wow" content shows the AI-generated OUTPUT (the story, the plan, the script)
-- "Trust" content taps into shared mom experiences — viewer thinks "that's literally me"
-- AI Magic content MUST show both input AND output
-- Tech content MUST name specific apps/tools (not generic advice)
-- Instagram captions include keywords for discovery
-- Each piece of content must have a clear emotional payoff
+## Batch Requirements
 
-Return ONLY valid JSON. No markdown fences, no explanation.`;
+Generate exactly 4 posts with these formats:
+1. TikTok slideshow (post_format: "tiktok_slideshow")
+2. TikTok text-on-screen OR slideshow (post_format: "tiktok_text" or "tiktok_slideshow")
+3. IG carousel 5-7 slides (post_format: "ig_carousel")
+4. IG static or meme (post_format: "ig_static" or "ig_meme")
 
-// --- IG Carousel Generator (5-7 slides) ---
+## HARD RULES
+- At least 2 different age_range values across the 4 posts
+- At least 2 different content_pillar values across the 4 posts
+- Never 3+ posts with same age_range
+- Max 1 "universal" age_range per batch
+- No duplicate topics within the batch
+- Prioritize uncovered cells from coverage gaps
+- Follow ALL voice rules from Brand Voice Bible
+- Use hook formulas from Content DNA Framework
+- Follow caption structure rules per platform (TikTok: 2-3 lines max 40 words, IG: 100-180 words)
+- Follow visual design rules from Visual Design Guide
+- Hashtags: 5-8 per post, NEVER use #momlife or #parenting (mega-tags)
+- Emoji: only 👀 🤍 💛, max 1-2 per caption
 
-async function generateCarousel(opportunity) {
-  const prompt = `Create an Instagram CAROUSEL post (5-7 slides) for this opportunity:
+## Output: JSON array of exactly 4 objects
 
-Topic: ${opportunity.topic}
-Category: ${opportunity.category}
-Content Type: ${opportunity.content_type}
-Angle: ${opportunity.angle}
-Suggested Hook: ${opportunity.suggested_hook}
-
-This carousel shows the content slide by slide.
-For ai_magic: show the INPUT/prompt on slide 2, then the OUTPUT across remaining slides.
-For tech_for_moms: show the result first, then the steps.
-For parenting_insights: show the reframe across slides.
-Slide 1 = hook. Slides 2-6 = the actual content. Final slide = CTA.
-
-Return this EXACT JSON structure:
+Each object must have ALL these fields:
 {
-  "hook": "Bold text for slide 1 that stops the scroll. Short, punchy, emotional.",
-  "caption": "Full Instagram caption. Start with hook, expand in 3-5 short paragraphs. Conversational, warm. Include keywords for IG search. End with subtle CTA. Use line breaks.",
-  "hashtags": ["#momlife", "#parenting", "...8-10 total, mix niche + broad"],
-  "ai_magic_output": "The FULL magic content structured for slides. Use --- as slide separators. Slide 1 is the hook (already in hook field — skip it here). Write slides 2 through 6-7, each with a clear heading and 1-3 sentences of genuinely useful content. Final slide should be a warm CTA. Minimum 200 words total across all slides.",
-  "image_prompt": ["Slide 1: [detailed DALL-E prompt — branded background, warm earth tones, bold white text overlay with the hook, no faces, cozy aesthetic]", "Slide 2: [prompt for this slide's visual — warm tones, text overlay with slide content, Model B aesthetic]", "...one prompt per slide, matching the ai_magic_output slides"]
+  "platform": "tiktok" | "instagram",
+  "post_format": "tiktok_slideshow" | "tiktok_text" | "ig_carousel" | "ig_static" | "ig_meme",
+  "content_type": "wow" | "trust" | "cta",
+  "content_pillar": "ai_magic" | "parenting_insights" | "tech_for_moms" | "mom_health" | "trending",
+  "age_range": "toddler" | "little_kid" | "school_age" | "teen" | "universal",
+  "hook": "The first thing the viewer sees. Must stop the scroll in 0-2 seconds.",
+  "caption": "Full caption following platform rules (TikTok: 2-3 lines, IG: 100-180 words).",
+  "hashtags": ["5-8 hashtags, mix niche + medium, NEVER mega-tags"],
+  "ai_magic_output": "For wow posts: the FULL magic content with --- slide separators. For AI Magic pillar: show BOTH the input prompt AND the output. Minimum 200 words. null for trust/cta posts.",
+  "image_prompt": "JSON array of per-slide DALL-E prompts following Visual Design Guide. Include: dimensions (1080x1920 for TikTok, 1080x1350 for IG), colors per pillar, serif hook text, no faces, warm editorial style. For static: single prompt string.",
+  "audio_suggestion": "TikTok only. 'Original audio — [style]' or trending sound. null for IG."
 }
 
-IMPORTANT: image_prompt must be a JSON array of strings, one per slide. Each prompt describes a warm, cozy image with text overlay matching that slide's content. Model B aesthetic: no faces, warm earth tones, soft pastels.
+Return ONLY the JSON array of 4 objects. No explanation.`;
 
-Return ONLY the JSON object.`;
-
+  console.log(`[Content] Calling Claude (${CLAUDE_MODEL})...`);
   const msg = await anthropic.messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 3000,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 8000,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
   });
 
-  return parseResponse(msg.content[0].text);
-}
-
-// --- IG Static Image Generator ---
-
-async function generateStaticImage(opportunity) {
-  const prompt = `Create an Instagram STATIC IMAGE post (single image with text) for this opportunity:
-
-Topic: ${opportunity.topic}
-Category: ${opportunity.category}
-Content Type: ${opportunity.content_type}
-Angle: ${opportunity.angle}
-Suggested Hook: ${opportunity.suggested_hook}
-
-This is a relatable meme, powerful quote, or shareable fact graphic.
-For parenting_insights: a guilt-reframing statement or surprising fact.
-For mom_health: a practical truth bomb about burnout/sleep/mental load.
-For trending_culture: a hot take or nuanced perspective on a trending topic. Single image. Must be instantly shareable.
-
-Return this EXACT JSON structure:
-{
-  "hook": "The main text displayed on the image. Must be punchy, relatable, and make a mom immediately tap 'share'. Max 2 sentences.",
-  "caption": "Full Instagram caption. Expand on the image text with 2-4 short paragraphs. Conversational, warm. IG keywords for discovery. Subtle CTA (share with a mom who needs this). Line breaks for readability.",
-  "hashtags": ["#momlife", "#parenting", "...8-10 total, mix niche + broad"],
-  "ai_magic_output": null,
-  "image_prompt": "Detailed DALL-E prompt for ONE image. Style: warm, cozy background (soft blurred kitchen, living room, or nature). Bold readable text overlay with the hook text. Colors: warm earth tones or soft pastels. No faces (Model B). The text should be the visual centerpiece — large, clean typography. Think: the kind of image a mom screenshots and sends to her group chat."
-}
-
-Return ONLY the JSON object.`;
-
-  const msg = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 1500,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  return parseResponse(msg.content[0].text);
-}
-
-// --- TikTok Slideshow Generator ---
-
-async function generateTikTokSlideshow(opportunity) {
-  const prompt = `Create a TikTok PHOTO SLIDESHOW post (3-7 image slides with text) for this opportunity:
-
-Topic: ${opportunity.topic}
-Category: ${opportunity.category}
-Content Type: ${opportunity.content_type}
-Angle: ${opportunity.angle}
-Suggested Hook: ${opportunity.suggested_hook}
-
-This is TikTok's native photo slideshow format.
-For ai_magic: slide 1 = hook, slide 2 = the prompt/input, slides 3-6 = the AI output.
-For tech_for_moms: slide 1 = the result/hook, then step by step.
-For parenting_insights: slide 1 = hook, then the insight revealed across slides. — images with text, NO video required.
-Slide 1 = hook. Middle slides = content. Last slide = CTA.
-
-Return this EXACT JSON structure:
-{
-  "hook": "Text overlay on slide 1. Must stop the scroll. Short, punchy, emotional. TikTok-native tone (raw, unfiltered, not polished).",
-  "caption": "Short TikTok caption. 1-3 sentences max. Conversational. Subtle CTA (save this, share with a mom).",
-  "hashtags": ["#momlife", "#parenting", "...3-5 total, highly relevant"],
-  "ai_magic_output": ${opportunity.content_type === 'wow' ? '"The FULL magic content for the slideshow. Use --- as slide separators. Each slide gets a short punchy heading + 1-2 sentences. Content should be genuinely useful and complete. 5-7 slides total. Minimum 150 words."' : '"The relatable/meme content for slides. Use --- as slide separators. 3-5 slides. Each slide is a punchy observation or moment that builds on the theme. Think: story arc from relatable moment → emotional payoff."'},
-  "image_prompt": ["Slide 1: [DALL-E prompt — bold text overlay with hook, warm aesthetic, no faces, TikTok vertical format 9:16]", "Slide 2: [prompt matching slide content]", "...one per slide"],
-  "audio_suggestion": "Trending TikTok sound suggestion OR 'Original audio — [style description]'. Pick what fits the content mood."
-}
-
-IMPORTANT: image_prompt must be a JSON array, one per slide. TikTok vertical 9:16 format. Model B: no faces, warm tones.
-
-Return ONLY the JSON object.`;
-
-  const msg = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 2500,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  return parseResponse(msg.content[0].text);
-}
-
-// --- Response Parsing ---
-
-function parseResponse(text) {
-  let cleaned = text.trim();
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+  let text = msg.content[0].text.trim();
+  if (text.startsWith('```')) {
+    text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
   }
+
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(text);
   } catch (err) {
-    console.error('[Content] JSON parse failed. Raw response:');
-    console.error(cleaned.slice(0, 500));
+    console.error('[Content] JSON parse failed. Raw:');
+    console.error(text.slice(0, 500));
     throw new Error(`JSON parse failed: ${err.message}`);
   }
 }
 
 // --- Validation ---
 
-function validatePost(post, format) {
-  if (!post.hook || post.hook.length < 10) {
-    throw new Error(`${format} post missing valid hook`);
-  }
-  if (!post.caption || post.caption.length < 20) {
-    throw new Error(`${format} post missing valid caption`);
-  }
-  if (!Array.isArray(post.hashtags) || post.hashtags.length < 3) {
-    throw new Error(`${format} post needs at least 3 hashtags`);
-  }
-  post.hashtags = post.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`));
+const VALID_AGE_RANGES = ['toddler', 'little_kid', 'school_age', 'teen', 'universal'];
+const VALID_PILLARS = ['ai_magic', 'parenting_insights', 'tech_for_moms', 'mom_health', 'trending'];
+const VALID_POST_FORMATS = ['tiktok_slideshow', 'tiktok_text', 'ig_carousel', 'ig_static', 'ig_meme', 'video_script'];
+const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 
-  // Normalize image_prompt to string for Supabase (text column)
-  if (Array.isArray(post.image_prompt)) {
-    post.image_prompt = JSON.stringify(post.image_prompt);
+function validateBatch(posts) {
+  if (!Array.isArray(posts) || posts.length < 3 || posts.length > 4) {
+    throw new Error(`Expected 3-4 posts, got ${Array.isArray(posts) ? posts.length : typeof posts}`);
   }
 
-  return post;
+  // Validate each post
+  for (let i = 0; i < posts.length; i++) {
+    const p = posts[i];
+    const prefix = `Post ${i + 1}`;
+
+    if (!p.hook || p.hook.length < 10) throw new Error(`${prefix}: missing/short hook`);
+    if (!p.caption || p.caption.length < 20) throw new Error(`${prefix}: missing/short caption`);
+    if (!Array.isArray(p.hashtags) || p.hashtags.length < 3) throw new Error(`${prefix}: needs 3+ hashtags`);
+    if (!VALID_POST_FORMATS.includes(p.post_format)) throw new Error(`${prefix}: invalid post_format "${p.post_format}"`);
+    if (!VALID_AGE_RANGES.includes(p.age_range)) throw new Error(`${prefix}: invalid age_range "${p.age_range}"`);
+    if (!VALID_PILLARS.includes(p.content_pillar)) throw new Error(`${prefix}: invalid content_pillar "${p.content_pillar}"`);
+    if (!VALID_CONTENT_TYPES.includes(p.content_type)) throw new Error(`${prefix}: invalid content_type "${p.content_type}"`);
+
+    // Enforce platform from post_format
+    p.platform = p.post_format.startsWith('tiktok') ? 'tiktok' : 'instagram';
+
+    // Normalize hashtags
+    p.hashtags = p.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`));
+
+    // Normalize image_prompt to string
+    if (Array.isArray(p.image_prompt)) {
+      p.image_prompt = JSON.stringify(p.image_prompt);
+    }
+  }
+
+  // Batch-level quality gates
+  const ageRanges = new Set(posts.map((p) => p.age_range));
+  const pillars = new Set(posts.map((p) => p.content_pillar));
+
+  if (ageRanges.size < 2) {
+    console.warn(`[Content] QUALITY GATE FAIL: only ${ageRanges.size} age range(s): ${[...ageRanges].join(', ')}`);
+  }
+  if (pillars.size < 2) {
+    console.warn(`[Content] QUALITY GATE FAIL: only ${pillars.size} pillar(s): ${[...pillars].join(', ')}`);
+  }
+
+  const universalCount = posts.filter((p) => p.age_range === 'universal').length;
+  if (universalCount > 1) {
+    console.warn(`[Content] QUALITY GATE: ${universalCount} universal posts (max 1 recommended)`);
+  }
+
+  // Log the matrix
+  console.log(`[Content] Age ranges: ${[...ageRanges].join(', ')}`);
+  console.log(`[Content] Pillars: ${[...pillars].join(', ')}`);
+  console.log(`[Content] Formats: ${posts.map((p) => p.post_format).join(', ')}`);
+
+  return posts;
 }
 
 // --- Write to Supabase ---
 
-async function writeContentQueue(items, briefingId) {
-  const rows = items.map((item) => ({
+async function writeContentQueue(posts, briefingId) {
+  const rows = posts.map((p) => ({
     briefing_id: briefingId,
-    platform: item.platform,
-    content_type: item.content_type,
+    platform: p.platform,
+    content_type: p.content_type,
     status: 'draft',
-    hook: item.hook,
-    caption: item.caption,
-    hashtags: item.hashtags,
-    ai_magic_output: item.ai_magic_output || null,
-    image_prompt: item.image_prompt || null,
-    audio_suggestion: item.audio_suggestion || null,
-    // _category and _format are local metadata, not written to DB
+    hook: p.hook,
+    caption: p.caption,
+    hashtags: p.hashtags,
+    ai_magic_output: p.ai_magic_output || null,
+    image_prompt: p.image_prompt || null,
+    audio_suggestion: p.audio_suggestion || null,
+    age_range: p.age_range,
+    content_pillar: p.content_pillar,
+    post_format: p.post_format,
+    launch_bank: false,
+    quality_rating: null,
   }));
 
-  const { data, error } = await supabase
-    .from('content_queue')
-    .insert(rows)
-    .select();
+  const { error } = await supabase.from('content_queue').insert(rows);
 
   if (error) {
     console.error('[Content] Failed to write content queue:', error);
     process.exit(1);
   }
 
-  console.log(`[Content] ${rows.length} items written to content_queue`);
-  return data;
+  console.log(`[Content] ${rows.length} posts written to content_queue`);
 }
 
 // --- Main ---
 
 async function main() {
   console.log('[Content Agent] Starting content generation...');
-  console.log('[Content Agent] Formats: IG Carousel + IG Static + TT Slideshow');
+  console.log('[Content Agent] Batch: 2 TikTok + 1 IG Carousel + 1 IG Static');
   const startTime = Date.now();
 
-  const briefing = await getLatestBriefing();
-  const opportunities = briefing.opportunities || [];
+  // Load DNA docs
+  const dna = loadDNA();
 
-  if (opportunities.length === 0) {
+  // Get briefing
+  const briefing = await getLatestBriefing();
+  if (!briefing.opportunities?.length) {
     console.error('[Content] Briefing has no opportunities. Aborting.');
     process.exit(1);
   }
 
+  // Coverage analysis
+  const coverageGaps = await getCoverageGaps();
+
+  // Dedup
   const recentHooks = await getRecentHooks();
   console.log(`[Content] Recent hooks to avoid: ${recentHooks.length}`);
 
-  const { carousel: carouselOpp, static: staticOpp, slideshow: slideshowOpp } = assignOpportunities(opportunities);
+  // Generate batch via Claude
+  const rawPosts = await generateBatch(briefing, dna, coverageGaps, recentHooks);
 
-  // Generate all 3 formats in parallel
-  console.log('[Content] Generating all 3 content items in parallel...');
-  const [carouselResult, staticResult, slideshowResult] = await Promise.allSettled([
-    generateCarousel(carouselOpp),
-    generateStaticImage(staticOpp),
-    generateTikTokSlideshow(slideshowOpp),
-  ]);
-
-  const contentItems = [];
-
-  // Process carousel
-  if (carouselResult.status === 'fulfilled') {
-    try {
-      const post = validatePost(carouselResult.value, 'ig_carousel');
-      contentItems.push({
-        ...post,
-        platform: 'instagram',
-        content_type: carouselOpp.content_type,
-        _category: carouselOpp.category,
-        _format: 'carousel',
-      });
-      console.log(`[Content] IG Carousel: "${post.hook.slice(0, 60)}..."`);
-    } catch (err) {
-      console.error(`[Content] IG Carousel validation failed: ${err.message}`);
-    }
-  } else {
-    console.error(`[Content] IG Carousel generation failed: ${carouselResult.reason?.message}`);
-  }
-
-  // Process static
-  if (staticResult.status === 'fulfilled') {
-    try {
-      const post = validatePost(staticResult.value, 'ig_static');
-      contentItems.push({
-        ...post,
-        platform: 'instagram',
-        content_type: staticOpp.content_type,
-        _category: staticOpp.category,
-        _format: 'static',
-      });
-      console.log(`[Content] IG Static: "${post.hook.slice(0, 60)}..."`);
-    } catch (err) {
-      console.error(`[Content] IG Static validation failed: ${err.message}`);
-    }
-  } else {
-    console.error(`[Content] IG Static generation failed: ${staticResult.reason?.message}`);
-  }
-
-  // Process slideshow
-  if (slideshowResult.status === 'fulfilled') {
-    try {
-      const post = validatePost(slideshowResult.value, 'tt_slideshow');
-      contentItems.push({
-        ...post,
-        platform: 'tiktok',
-        content_type: slideshowOpp.content_type,
-        _category: slideshowOpp.category,
-        _format: 'slideshow',
-      });
-      console.log(`[Content] TT Slideshow: "${post.hook.slice(0, 60)}..."`);
-    } catch (err) {
-      console.error(`[Content] TT Slideshow validation failed: ${err.message}`);
-    }
-  } else {
-    console.error(`[Content] TT Slideshow generation failed: ${slideshowResult.reason?.message}`);
-  }
-
-  if (contentItems.length === 0) {
-    console.error('[Content] No content generated. Aborting.');
-    process.exit(1);
-  }
+  // Validate
+  const posts = validateBatch(rawPosts);
 
   // Write to Supabase
-  await writeContentQueue(contentItems, briefing.id);
+  await writeContentQueue(posts, briefing.id);
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n[Content Agent] Done in ${elapsed}s.`);
-  console.log(`[Content Agent] ${contentItems.length} posts written to content_queue.`);
+  console.log(`[Content Agent] ${posts.length} posts written to content_queue.`);
 
-  // Print summary
-  console.log('\n=== GENERATED CONTENT ===');
-  for (const item of contentItems) {
-    const format = item._format === 'slideshow' ? 'TT SLIDESHOW' : item._format === 'carousel' ? 'IG CAROUSEL' : 'IG STATIC';
-    const cat = item._category || 'unknown';
-    console.log(`\n[${format}] [${item.content_type.toUpperCase()}] [${cat}]`);
-    console.log(`  Hook: "${item.hook}"`);
-    console.log(`  Caption: ${item.caption.slice(0, 120)}...`);
-    console.log(`  Hashtags: ${item.hashtags.join(' ')}`);
-    if (item.ai_magic_output) {
-      const slideCount = (item.ai_magic_output.match(/---/g) || []).length + 1;
-      console.log(`  Magic output: ${slideCount} slides, ${item.ai_magic_output.length} chars`);
-    }
-    if (item.image_prompt) {
-      const promptStr = typeof item.image_prompt === 'string' ? item.image_prompt : JSON.stringify(item.image_prompt);
-      const isArray = promptStr.startsWith('[');
-      console.log(`  Image prompts: ${isArray ? 'per-slide array' : 'single image'} (${promptStr.length} chars)`);
-    }
-    if (item.audio_suggestion) {
-      console.log(`  Audio: ${item.audio_suggestion.slice(0, 80)}`);
+  // Summary
+  console.log('\n=== GENERATED BATCH ===');
+  for (const p of posts) {
+    console.log(`\n[${p.post_format}] [${p.content_type}] [${p.content_pillar}] [${p.age_range}]`);
+    console.log(`  Hook: "${p.hook}"`);
+    console.log(`  Caption: ${p.caption.slice(0, 100)}...`);
+    console.log(`  Hashtags: ${p.hashtags.join(' ')}`);
+    if (p.ai_magic_output) {
+      const slides = (p.ai_magic_output.match(/---/g) || []).length + 1;
+      console.log(`  Magic: ${slides} sections, ${p.ai_magic_output.length} chars`);
     }
   }
 }

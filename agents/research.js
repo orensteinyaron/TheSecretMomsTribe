@@ -272,11 +272,22 @@ At least 3 different categories must be represented. Never more than 2 from same
 - Every suggested_hook works in 0-3 seconds
 - Do NOT repeat topics from the "Topics to AVOID" list
 
+## Age Ranges
+Tag each opportunity with the most relevant age range:
+- toddler (1-3)
+- little_kid (4-7)
+- school_age (8-12)
+- teen (13-16)
+- universal (all ages — max 1 per batch of 5)
+
+Ensure at least 2 different age ranges across the 5 opportunities.
+
 ## Output Format
 Return a JSON array of exactly 5 objects. Each object:
 {
   "topic": "Short topic title (5-8 words)",
   "category": "ai_magic | parenting_insights | tech_for_moms | mom_health | trending_culture",
+  "age_range": "toddler | little_kid | school_age | teen | universal",
   "angle": "The specific creative angle for SMT (1-2 sentences)",
   "source": "reddit | tiktok | google_trends | cross_signal",
   "source_url": "URL to the primary source signal (empty string if none)",

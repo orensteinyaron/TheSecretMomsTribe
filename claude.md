@@ -13,6 +13,13 @@ Yaron approves. Claude executes. See `docs/chat-decisions.md` for context.
 
 ---
 
+## Brand DNA (source of truth — these override everything)
+- `/prompts/brand-voice.md` — Voice, tone, language rules, the SMT Test
+- `/prompts/content-dna.md` — Content mix, hook formulas, quality gates, topic matrix
+- `/prompts/visual-design.md` — Colors, typography, layouts, image generation rules
+
+---
+
 ## Project Map
 | Area | Location |
 |---|---|
