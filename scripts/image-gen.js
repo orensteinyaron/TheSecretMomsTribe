@@ -57,8 +57,44 @@ const PROMPT_PREFIX = `CRITICAL RULES:
 IMAGE REQUEST:
 `;
 
+// --- Strip text/typography instructions from prompts ---
+// DALL-E should only generate backgrounds; text is composited by compose.js
+
+const TEXT_KEYWORDS = /text overlay|font|heading|reads:|"[^"]{3,}"|pillar chip|handle|serif|typography|text:|overlay:|headline|quotation|caption|@thesecretmomstribe|swipe|slide \d/i;
+
+function stripTextInstructions(rawPrompt) {
+  if (!rawPrompt) return '';
+
+  // Handle JSON formats (object or array)
+  let promptText = rawPrompt;
+  try {
+    const parsed = JSON.parse(rawPrompt);
+    if (Array.isArray(parsed)) {
+      // Array of slide prompts — extract scene descriptions
+      promptText = parsed
+        .map(p => typeof p === 'string' ? p : (p?.description || p?.scene || JSON.stringify(p)))
+        .join(' ');
+    } else if (typeof parsed === 'object') {
+      // Object with description key
+      promptText = parsed.description || parsed.scene || JSON.stringify(parsed);
+    }
+  } catch {
+    // Plain string, use as-is
+  }
+
+  // Remove lines/sentences containing text-related keywords
+  const cleaned = promptText
+    .split(/[.\n]/)
+    .filter(line => !TEXT_KEYWORDS.test(line))
+    .join('. ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return cleaned || promptText; // Fallback to original if everything was stripped
+}
+
 function enhancePrompt(rawPrompt) {
-  let prompt = rawPrompt || '';
+  let prompt = stripTextInstructions(rawPrompt);
   // Ensure no-faces rule is explicit
   if (!prompt.toLowerCase().includes('no face')) {
     prompt = prompt + ' No faces visible.';
@@ -151,7 +187,7 @@ async function processPost(post) {
 
       console.log(`[ImageGen] Generating hero image...`);
       const dalleUrl = await generateImage(promptText, size);
-      heroUrl = await uploadToStorage(dalleUrl, post.id, '-hero');
+      heroUrl = await uploadToStorage(dalleUrl, post.id, '-bg');
       console.log(`[ImageGen] Hero uploaded: ${heroUrl}`);
       await logCost(supabase, {
         pipeline_stage: 'image_generation', service: 'openai',
@@ -202,6 +238,7 @@ async function processPost(post) {
       image_status: 'generated',
       image_url: heroUrl,
       slide_images: slideImages.length > 0 ? slideImages : [],
+      metadata: { ...(post.metadata || {}), bg_url: heroUrl },
     };
 
     const { error } = await supabase.from('content_queue')

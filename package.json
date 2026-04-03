@@ -16,6 +16,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
     "@supabase/supabase-js": "^2.101.1",
-    "apify-client": "^2.22.3"
+    "apify-client": "^2.22.3",
+    "sharp": "^0.34.5"
   }
 }
