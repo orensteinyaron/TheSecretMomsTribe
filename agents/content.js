@@ -164,57 +164,79 @@ CRITICAL RULES:
 async function generateBatch(briefing, dna, coverageGaps, recentHooks) {
   const systemPrompt = buildSystemPrompt(dna);
 
-  const userPrompt = `Generate a batch of exactly 4 posts for today.
+  const numOpps = briefing.opportunities.length;
 
-## Today's Briefing Opportunities
+  const userPrompt = `Generate a post for EVERY good opportunity below. Be GREEDY — stockpile everything good. AI Magic and Tech posts are rare, always generate them.
+
+## Today's Briefing Opportunities (${numOpps} total)
 ${JSON.stringify(briefing.opportunities, null, 2)}
 
-## Coverage Gaps (last 7 days)
+## Coverage Gaps (last 7 days — for reference, NOT a constraint)
 ${coverageGaps.gaps}
 
 ## Recent Hooks to AVOID (do not duplicate)
 ${recentHooks.slice(0, 20).map((h) => `- "${h}"`).join('\n') || 'None yet.'}
 
-## Batch Requirements
+## For Each Opportunity, Generate One Post
 
-Generate exactly 4 posts with these formats:
-1. TikTok slideshow (post_format: "tiktok_slideshow")
-2. TikTok text-on-screen OR slideshow (post_format: "tiktok_text" or "tiktok_slideshow")
-3. IG carousel 5-7 slides (post_format: "ig_carousel")
-4. IG static or meme (post_format: "ig_static" or "ig_meme")
+Pick the best post_format for each opportunity:
+- TikTok slideshow (tiktok_slideshow) — best for step-by-step, lists, swaps
+- TikTok text-on-screen (tiktok_text) — best for single powerful statements
+- IG carousel (ig_carousel) — best for 5-7 slide deep dives
+- IG static (ig_static) — best for single powerful quotes/statements
+- IG meme (ig_meme) — best for relatable humor
 
-## HARD RULES
-- At least 2 different age_range values across the 4 posts
-- At least 2 different content_pillar values across the 4 posts
-- Never 3+ posts with same age_range
-- Max 1 "universal" age_range per batch
-- No duplicate topics within the batch
-- Prioritize uncovered cells from coverage gaps
+## QUALITY RULES (these still apply to EVERY post)
 - Follow ALL voice rules from Brand Voice Bible
 - Use hook formulas from Content DNA Framework
-- Follow caption structure rules per platform (TikTok: 2-3 lines max 40 words, IG: 100-180 words)
-- Follow visual design rules from Visual Design Guide
+- Follow caption structure per platform (TikTok: 2-3 lines max 40 words, IG: 100-180 words)
 - Hashtags: 5-8 per post, NEVER use #momlife or #parenting (mega-tags)
 - Emoji: only 👀 🤍 💛, max 1-2 per caption
+- No duplicate topics within this batch
+- Apply The SMT Test to every hook
 
-## Output: JSON array of exactly 4 objects
+## IMPORTANT: Every post MUST include image_prompt and slides
 
-Each object must have ALL these fields:
+### image_prompt (REQUIRED for ALL posts)
+A single DALL-E prompt for the hero/cover image. Describe:
+- Camera angle (close-up, over-shoulder, overhead, etc)
+- Subject (hands, back of head, child's feet — NO FACES EVER)
+- Action/gesture being performed
+- Environment (kitchen, living room, park, bedroom)
+- Lighting: warm/golden hour always
+- Colors: warm amber, soft cream, dusty blush, muted sage
+- Mood: tender, real, quiet, editorial-warm
+- Style: editorial photography, not stock, not AI-looking
+
+### slides (REQUIRED for slideshow and carousel posts)
+JSON array of slide objects. Each slide:
+{
+  "slide_number": 1,
+  "text": "The text shown on this slide",
+  "type": "hook" | "content" | "cta",
+  "image_prompt": "DALL-E prompt for this specific slide's background, or null for text-on-color slides"
+}
+Only the hook slide and CTA slide typically need image_prompts. Content slides use brand color backgrounds.
+
+## Output: JSON array of objects (one per opportunity)
+
+Each object:
 {
   "platform": "tiktok" | "instagram",
   "post_format": "tiktok_slideshow" | "tiktok_text" | "ig_carousel" | "ig_static" | "ig_meme",
   "content_type": "wow" | "trust" | "cta",
   "content_pillar": "ai_magic" | "parenting_insights" | "tech_for_moms" | "mom_health" | "trending",
   "age_range": "toddler" | "little_kid" | "school_age" | "teen" | "universal",
-  "hook": "The first thing the viewer sees. Must stop the scroll in 0-2 seconds.",
-  "caption": "Full caption following platform rules (TikTok: 2-3 lines, IG: 100-180 words).",
-  "hashtags": ["5-8 hashtags, mix niche + medium, NEVER mega-tags"],
-  "ai_magic_output": "For wow posts: the FULL magic content with --- slide separators. For AI Magic pillar: show BOTH the input prompt AND the output. Minimum 200 words. null for trust/cta posts.",
-  "image_prompt": "JSON array of per-slide DALL-E prompts following Visual Design Guide. Include: dimensions (1080x1920 for TikTok, 1080x1350 for IG), colors per pillar, serif hook text, no faces, warm editorial style. For static: single prompt string.",
-  "audio_suggestion": "TikTok only. 'Original audio — [style]' or trending sound. null for IG."
+  "hook": "First thing viewer sees. Stops scroll in 0-2 seconds.",
+  "caption": "Full caption following platform rules.",
+  "hashtags": ["5-8 hashtags"],
+  "ai_magic_output": "For wow: FULL magic content, min 200 words. Show input AND output for AI Magic. null for trust/cta.",
+  "image_prompt": "REQUIRED. Single DALL-E prompt for hero/cover image. NO FACES.",
+  "slides": [{"slide_number": 1, "text": "...", "type": "hook", "image_prompt": "...or null"}],
+  "audio_suggestion": "TikTok only. null for IG."
 }
 
-Return ONLY the JSON array of 4 objects. No explanation.`;
+Return ONLY the JSON array. No explanation.`;
 
   console.log(`[Content] Calling Claude (${CLAUDE_MODEL})...`);
   const msg = await anthropic.messages.create({
@@ -246,22 +268,29 @@ const VALID_POST_FORMATS = ['tiktok_slideshow', 'tiktok_text', 'ig_carousel', 'i
 const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 
 function validateBatch(posts) {
-  if (!Array.isArray(posts) || posts.length < 3 || posts.length > 4) {
-    throw new Error(`Expected 3-4 posts, got ${Array.isArray(posts) ? posts.length : typeof posts}`);
+  if (!Array.isArray(posts) || posts.length === 0) {
+    throw new Error(`Expected 1+ posts, got ${Array.isArray(posts) ? posts.length : typeof posts}`);
   }
 
-  // Validate each post
+  const valid = [];
+
   for (let i = 0; i < posts.length; i++) {
     const p = posts[i];
     const prefix = `Post ${i + 1}`;
 
-    if (!p.hook || p.hook.length < 10) throw new Error(`${prefix}: missing/short hook`);
-    if (!p.caption || p.caption.length < 20) throw new Error(`${prefix}: missing/short caption`);
-    if (!Array.isArray(p.hashtags) || p.hashtags.length < 3) throw new Error(`${prefix}: needs 3+ hashtags`);
-    if (!VALID_POST_FORMATS.includes(p.post_format)) throw new Error(`${prefix}: invalid post_format "${p.post_format}"`);
-    if (!VALID_AGE_RANGES.includes(p.age_range)) throw new Error(`${prefix}: invalid age_range "${p.age_range}"`);
-    if (!VALID_PILLARS.includes(p.content_pillar)) throw new Error(`${prefix}: invalid content_pillar "${p.content_pillar}"`);
-    if (!VALID_CONTENT_TYPES.includes(p.content_type)) throw new Error(`${prefix}: invalid content_type "${p.content_type}"`);
+    // Hard quality gates per post — skip invalid ones instead of failing entire batch
+    try {
+      if (!p.hook || p.hook.length < 10) throw new Error('missing/short hook');
+      if (!p.caption || p.caption.length < 20) throw new Error('missing/short caption');
+      if (!Array.isArray(p.hashtags) || p.hashtags.length < 3) throw new Error('needs 3+ hashtags');
+      if (!VALID_POST_FORMATS.includes(p.post_format)) throw new Error(`invalid post_format "${p.post_format}"`);
+      if (!VALID_AGE_RANGES.includes(p.age_range)) throw new Error(`invalid age_range "${p.age_range}"`);
+      if (!VALID_PILLARS.includes(p.content_pillar)) throw new Error(`invalid content_pillar "${p.content_pillar}"`);
+      if (!VALID_CONTENT_TYPES.includes(p.content_type)) throw new Error(`invalid content_type "${p.content_type}"`);
+    } catch (err) {
+      console.warn(`[Content] ${prefix} skipped: ${err.message}`);
+      continue;
+    }
 
     // Enforce platform from post_format
     p.platform = p.post_format.startsWith('tiktok') ? 'tiktok' : 'instagram';
@@ -269,34 +298,32 @@ function validateBatch(posts) {
     // Normalize hashtags
     p.hashtags = p.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`));
 
-    // Normalize image_prompt to string
+    // Normalize image_prompt to string if array
     if (Array.isArray(p.image_prompt)) {
       p.image_prompt = JSON.stringify(p.image_prompt);
     }
+
+    // Ensure slides is array or null
+    if (p.slides && !Array.isArray(p.slides)) {
+      p.slides = null;
+    }
+
+    valid.push(p);
   }
 
-  // Batch-level quality gates
-  const ageRanges = new Set(posts.map((p) => p.age_range));
-  const pillars = new Set(posts.map((p) => p.content_pillar));
-
-  if (ageRanges.size < 2) {
-    console.warn(`[Content] QUALITY GATE FAIL: only ${ageRanges.size} age range(s): ${[...ageRanges].join(', ')}`);
-  }
-  if (pillars.size < 2) {
-    console.warn(`[Content] QUALITY GATE FAIL: only ${pillars.size} pillar(s): ${[...pillars].join(', ')}`);
+  if (valid.length === 0) {
+    throw new Error('No valid posts in batch after validation');
   }
 
-  const universalCount = posts.filter((p) => p.age_range === 'universal').length;
-  if (universalCount > 1) {
-    console.warn(`[Content] QUALITY GATE: ${universalCount} universal posts (max 1 recommended)`);
-  }
-
-  // Log the matrix
+  // Log batch composition (informational, not constraints)
+  const ageRanges = new Set(valid.map((p) => p.age_range));
+  const pillars = new Set(valid.map((p) => p.content_pillar));
+  console.log(`[Content] Batch: ${valid.length} posts validated`);
   console.log(`[Content] Age ranges: ${[...ageRanges].join(', ')}`);
   console.log(`[Content] Pillars: ${[...pillars].join(', ')}`);
-  console.log(`[Content] Formats: ${posts.map((p) => p.post_format).join(', ')}`);
+  console.log(`[Content] Formats: ${valid.map((p) => p.post_format).join(', ')}`);
 
-  return posts;
+  return valid;
 }
 
 // --- Write to Supabase ---
@@ -316,6 +343,8 @@ async function writeContentQueue(posts, briefingId) {
     age_range: p.age_range,
     content_pillar: p.content_pillar,
     post_format: p.post_format,
+    slides: p.slides || [],
+    image_status: 'pending',
     launch_bank: false,
     quality_rating: null,
   }));
@@ -334,7 +363,7 @@ async function writeContentQueue(posts, briefingId) {
 
 async function main() {
   console.log('[Content Agent] Starting content generation...');
-  console.log('[Content Agent] Batch: 2 TikTok + 1 IG Carousel + 1 IG Static');
+  console.log('[Content Agent] Greedy mode: generating for ALL good opportunities');
   const startTime = Date.now();
 
   // Load DNA docs
