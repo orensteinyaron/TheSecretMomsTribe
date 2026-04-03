@@ -19,6 +19,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { logCost, printCostSummary } from './utils/cost-logger.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -152,6 +153,13 @@ async function processPost(post) {
       const dalleUrl = await generateImage(promptText, size);
       heroUrl = await uploadToStorage(dalleUrl, post.id, '-hero');
       console.log(`[ImageGen] Hero uploaded: ${heroUrl}`);
+      await logCost(supabase, {
+        pipeline_stage: 'image_generation', service: 'openai',
+        model: `dall-e-3-${size}-hd`,
+        content_id: post.id,
+        description: `Hero image for ${post.platform} ${post.post_format}`,
+        metadata: { size, quality: 'hd', style: 'natural', type: 'hero' },
+      });
     }
 
     // Process slide-level images if slides exist
@@ -170,6 +178,13 @@ async function processPost(post) {
               image_url: slideUrl,
             });
             console.log(`[ImageGen] Slide ${slide.slide_number} uploaded: ${slideUrl}`);
+            await logCost(supabase, {
+              pipeline_stage: 'image_generation', service: 'openai',
+              model: `dall-e-3-${size}-hd`,
+              content_id: post.id,
+              description: `Slide ${slide.slide_number} image`,
+              metadata: { size, quality: 'hd', style: 'natural', type: 'slide', slide_number: slide.slide_number },
+            });
           } catch (err) {
             console.warn(`[ImageGen] Slide ${slide.slide_number} failed: ${err.message}`);
             slideImages.push({
@@ -256,7 +271,8 @@ async function main() {
   console.log(`\n[ImageGen Agent] Done in ${elapsed}s.`);
   console.log(`[ImageGen] ${successCount} posts succeeded, ${failCount} failed`);
   console.log(`[ImageGen] ${totalImages} total images generated`);
-  console.log(`[ImageGen] Estimated cost: ~$${(totalImages * 0.08).toFixed(2)}`);
+
+  await printCostSummary(supabase);
 }
 
 main().catch((err) => {

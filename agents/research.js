@@ -13,6 +13,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { ApifyClient } from 'apify-client';
 import Anthropic from '@anthropic-ai/sdk';
+import { logCost, printCostSummary } from '../scripts/utils/cost-logger.js';
 
 // --- Config ---
 
@@ -92,6 +93,11 @@ async function scanReddit() {
       }));
 
     console.log(`[Research] Reddit after filter: ${filtered.length} posts`);
+    await logCost(supabase, {
+      pipeline_stage: 'scraping', service: 'apify', model: 'apify-reddit',
+      description: `Reddit scrape (${REDDIT_SUBREDDITS.length} subs)`,
+      metadata: { source: 'reddit', items_found: filtered.length },
+    });
     return filtered;
   } catch (err) {
     console.warn(`[Research] Reddit scraper failed: ${err.message}`);
@@ -126,6 +132,11 @@ async function scanTikTokTrends() {
       }));
 
     console.log(`[Research] TikTok after filter: ${filtered.length} videos`);
+    await logCost(supabase, {
+      pipeline_stage: 'scraping', service: 'apify', model: 'apify-tiktok',
+      description: `TikTok hashtag scrape (${TIKTOK_HASHTAGS.length} tags)`,
+      metadata: { source: 'tiktok', items_found: filtered.length },
+    });
     return filtered;
   } catch (err) {
     console.warn(`[Research] TikTok scraper failed: ${err.message}`);
@@ -156,6 +167,11 @@ async function scanGoogleTrends() {
     }));
 
     console.log(`[Research] Google Trends signals: ${signals.length}`);
+    await logCost(supabase, {
+      pipeline_stage: 'scraping', service: 'apify', model: 'apify-google-trends',
+      description: `Google Trends scrape (${GOOGLE_TRENDS_QUERIES.length} queries)`,
+      metadata: { source: 'google_trends', items_found: signals.length },
+    });
     return signals;
   } catch (err) {
     console.warn(`[Research] Google Trends scraper failed (non-fatal): ${err.message}`);
@@ -190,6 +206,11 @@ async function scanRedditFallback() {
     }));
 
     console.log(`[Research] Reddit fallback signals: ${signals.length}`);
+    await logCost(supabase, {
+      pipeline_stage: 'scraping', service: 'apify', model: 'apify-reddit',
+      description: 'Reddit fallback scrape (r/Parenting only)',
+      metadata: { source: 'reddit_fallback', items_found: signals.length },
+    });
     return signals;
   } catch (err) {
     console.warn(`[Research] Reddit fallback also failed (non-fatal): ${err.message}`);
@@ -425,6 +446,13 @@ async function generateBriefing(sources) {
     messages: [{ role: 'user', content: userPrompt }],
   });
 
+  await logCost(supabase, {
+    pipeline_stage: 'research', service: 'anthropic', model: CLAUDE_MODEL,
+    input_tokens: msg.usage.input_tokens,
+    output_tokens: msg.usage.output_tokens,
+    description: 'Research synthesis — daily briefing',
+  });
+
   let text = msg.content[0].text.trim();
 
   // Strip markdown fences if Claude wraps them
@@ -541,6 +569,8 @@ async function main() {
     console.log(`   Hook: "${opp.suggested_hook}"`);
     console.log(`   Angle: ${opp.angle}`);
   }
+
+  await printCostSummary(supabase);
 }
 
 main().catch((err) => {

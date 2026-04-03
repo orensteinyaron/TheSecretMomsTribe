@@ -21,6 +21,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { logCost, printCostSummary } from '../scripts/utils/cost-logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -246,13 +247,23 @@ Return ONLY the JSON array. No explanation.`;
     messages: [{ role: 'user', content: userPrompt }],
   });
 
+  // Log generation cost
+  const genCost = await logCost(supabase, {
+    pipeline_stage: 'content_generation', service: 'anthropic', model: CLAUDE_MODEL,
+    input_tokens: msg.usage.input_tokens,
+    output_tokens: msg.usage.output_tokens,
+    briefing_id: briefing.id,
+    description: `Content batch generation (${numOpps} opportunities)`,
+  });
+
   let text = msg.content[0].text.trim();
   if (text.startsWith('```')) {
     text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
   }
 
   try {
-    return JSON.parse(text);
+    const posts = JSON.parse(text);
+    return { posts, usage: msg.usage };
   } catch (err) {
     console.error('[Content] JSON parse failed. Raw:');
     console.error(text.slice(0, 500));
@@ -384,13 +395,38 @@ async function main() {
   console.log(`[Content] Recent hooks to avoid: ${recentHooks.length}`);
 
   // Generate batch via Claude
-  const rawPosts = await generateBatch(briefing, dna, coverageGaps, recentHooks);
+  const { posts: rawPosts, usage } = await generateBatch(briefing, dna, coverageGaps, recentHooks);
 
   // Validate
   const posts = validateBatch(rawPosts);
 
   // Write to Supabase
   await writeContentQueue(posts, briefing.id);
+
+  // Log per-post cost share (split generation cost evenly)
+  if (usage && posts.length > 0) {
+    // Fetch the inserted post IDs
+    const { data: inserted } = await supabase
+      .from('content_queue')
+      .select('id')
+      .eq('briefing_id', briefing.id)
+      .eq('status', 'draft')
+      .order('created_at', { ascending: false })
+      .limit(posts.length);
+
+    if (inserted) {
+      for (const row of inserted) {
+        await logCost(supabase, {
+          pipeline_stage: 'content_generation', service: 'anthropic', model: CLAUDE_MODEL,
+          input_tokens: Math.round(usage.input_tokens / posts.length),
+          output_tokens: Math.round(usage.output_tokens / posts.length),
+          content_id: row.id,
+          briefing_id: briefing.id,
+          description: `Content generation share (1/${posts.length} of batch)`,
+        });
+      }
+    }
+  }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n[Content Agent] Done in ${elapsed}s.`);
@@ -408,6 +444,8 @@ async function main() {
       console.log(`  Magic: ${slides} sections, ${p.ai_magic_output.length} chars`);
     }
   }
+
+  await printCostSummary(supabase);
 }
 
 main().catch((err) => {
