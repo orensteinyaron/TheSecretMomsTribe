@@ -97,6 +97,7 @@ interface SlideData {
   emphasis: string;
   subtext: string;
   illustration?: "heart" | "child" | "brain" | "words" | "grow" | "community";
+  imageScene?: string;  // one-sentence visual description for DALL-E
   imageUrl?: string;
 }
 
@@ -215,29 +216,112 @@ async function generateVoiceover(
   return outputPath;
 }
 
+// ---- AI Scene Generator ----
+// Translates slide content into a relatable parenting scene description for DALL-E
+
+async function generateImageScenes(
+  hook: string,
+  slides: SlideData[],
+): Promise<string[]> {
+  // If slides already have imageScene from AI parser, use those
+  const existing = slides.map(s => s.imageScene).filter(Boolean);
+  if (existing.length === slides.length) return existing as string[];
+
+  // Generate via Haiku
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicKey) {
+    console.log("  No ANTHROPIC_API_KEY — using slide text as scene fallback");
+    return slides.map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ").slice(0, 150));
+  }
+
+  try {
+    console.log("  Generating image scenes via Haiku...");
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 800,
+        system: `You translate parenting content into visual scene descriptions for AI image generation.
+
+Rules:
+- Each scene should evoke a relatable parenting ENVIRONMENT or MOMENT
+- Focus on OBJECTS, SPACES, and ATMOSPHERE — not people directly
+- Good: "pair of small rain boots next to adult sneakers by a front door, warm light from kitchen"
+- Good: "kitchen counter with half-eaten crackers, a sippy cup, and scattered crayons, golden hour light"
+- Good: "living room floor with building blocks and a soft blanket, late afternoon shadows"
+- Good: "grocery cart with a small stuffed animal sitting in the seat, fluorescent aisle behind"
+- AVOID depicting people, faces, bodies, hands touching, or physical interactions
+- Include warm domestic details: worn wooden floors, soft blankets, refrigerator art, toy bins
+- One sentence per scene, max 25 words
+- Every scene should feel like a quiet moment in a real home
+
+Respond with JSON array of strings, one per slide. No markdown fences.`,
+        messages: [{
+          role: "user",
+          content: `POST TOPIC: ${hook}\n\nSLIDES:\n${slides.map((s, i) => `${i + 1}. ${[s.text, s.emphasis, s.subtext].filter(Boolean).join(" ")}`).join("\n")}`,
+        }],
+      }),
+    });
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text || "";
+    const scenes = JSON.parse(text.replace(/```json|```/g, "").trim());
+    if (Array.isArray(scenes) && scenes.length >= slides.length) {
+      console.log(`  Generated ${scenes.length} scene descriptions`);
+      return scenes.slice(0, slides.length);
+    }
+  } catch (err) {
+    console.warn(`  Scene generation failed, using fallback: ${err}`);
+  }
+
+  // Fallback: use slide text
+  return slides.map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ").slice(0, 150));
+}
+
 // ---- DALL-E Image Generation ----
 
+function buildImagePrompt(scene: string): string {
+  // Sanitize scene to reduce DALL-E content filter triggers
+  const sanitized = scene
+    .replace(/\bchild('?s)?\b/gi, (m) => m.endsWith("s") ? "cozy" : "cozy")
+    .replace(/\bkid('?s)?\b/gi, "small")
+    .replace(/\btoddler('?s)?\b/gi, "tiny")
+    .replace(/\bbaby('?s)?\b/gi, "small")
+    .replace(/\bson('?s)?\b/gi, "")
+    .replace(/\bdaughter('?s)?\b/gi, "")
+    .replace(/\b(grabbing|holding onto|clutching|hugging)\b/gi, "near")
+    .replace(/\b(meltdown|tantrum|crying|screaming|sobbing)\b/gi, "quiet moment")
+    .replace(/\b(parent|mother|father|mom|dad)\b/gi, "adult")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return [
+    "Warm lifestyle photograph of a cozy domestic scene.",
+    "NO TEXT, NO WORDS, NO LETTERS, NO WATERMARKS.",
+    "No identifiable faces — only hands, silhouettes, backs of heads, or objects in frame.",
+    "Warm natural indoor lighting, soft golden hour shadows.",
+    "35mm film aesthetic, slightly desaturated warm tones, deep purple and mauve pink color grading.",
+    `Scene: ${sanitized}`,
+    "Real lived-in home setting with warm textures, soft fabrics, natural materials.",
+    "Intimate candid framing, shallow depth of field, editorial photography.",
+  ].join(" ");
+}
+
 async function generateSlideImage(
-  slideText: string,
-  pillar: string,
+  scene: string,
   index: number,
   outputDir: string,
 ): Promise<string> {
   const openai = new OpenAI({ apiKey: OPENAI_KEY });
-
-  // Build prompt that produces warm, editorial, no-text images
-  const prompt = [
-    "Warm, soft-focus editorial photograph for a parenting content brand.",
-    "NO TEXT, NO WORDS, NO LETTERS, NO WATERMARKS anywhere in the image.",
-    "Color palette: deep purple (#63246a) and mauve pink (#b74780) tones.",
-    "Mood: intimate, warm, emotionally resonant.",
-    `Scene context: ${slideText.slice(0, 200)}`,
-    "Style: dreamy bokeh, soft natural lighting, shallow depth of field.",
-    "Abstract and atmospheric — no identifiable faces.",
-    "Think editorial magazine, not stock photo.",
-  ].join(" ");
+  const prompt = buildImagePrompt(scene);
 
   console.log(`  Generating image ${index + 1} (~$0.08)...`);
+  console.log(`    Scene: "${scene.slice(0, 80)}..."`);
 
   const response = await openai.images.generate({
     model: DALLE_MODEL,
@@ -250,7 +334,6 @@ async function generateSlideImage(
   const imageUrl = response.data[0]?.url;
   if (!imageUrl) throw new Error("DALL-E returned no image URL");
 
-  // Download image
   const imgResponse = await fetch(imageUrl);
   const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
   const outputPath = path.join(outputDir, `slide-${index}.png`);
@@ -386,17 +469,18 @@ async function main() {
 
   if (!skipImages) {
     console.log("\n4. Generating background images...");
+
+    // Step 1: Generate relatable scene descriptions via Haiku
+    const scenes = await generateImageScenes(content.hook, slides);
+
+    // Step 2: Generate DALL-E images from scene descriptions
     for (let i = 0; i < slides.length; i++) {
-      const slideText = [slides[i].text, slides[i].emphasis, slides[i].subtext]
-        .filter(Boolean).join(" ");
       try {
         const imgPath = await generateSlideImage(
-          slideText,
-          content.content_pillar,
+          scenes[i],
           i,
           outDir,
         );
-        // Copy to public/ for Remotion's static file serving
         const staticName = `slide-${contentId}-${i}.png`;
         fs.copyFileSync(imgPath, path.join(publicDir, staticName));
         slides[i].imageUrl = staticName;

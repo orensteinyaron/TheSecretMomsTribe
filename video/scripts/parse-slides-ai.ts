@@ -12,6 +12,7 @@ interface SlideData {
   emphasis: string;
   subtext: string;
   illustration?: "heart" | "child" | "brain" | "words" | "grow" | "community";
+  imageScene?: string;
 }
 
 interface ParseResult {
@@ -25,8 +26,9 @@ Your job: take a post's hook and caption, and break them into 3-5 VIDEO SLIDES f
 
 Each slide has:
 - text: the lead-in or context sentence (conversational, light)
-- emphasis: the emotional punch line (the line that hits — italic, colored)  
+- emphasis: the emotional punch line (the line that hits — italic, colored)
 - subtext: the supporting thought or follow-up
+- imageScene: a one-sentence visual description of a RELATABLE parenting moment for this slide's background image
 
 Rules:
 - 3-5 slides MAX. Fewer is better.
@@ -35,6 +37,14 @@ Rules:
 - Skip hashtags, skip "save this" CTAs (those go elsewhere)
 - The content should flow as a narrative arc: setup → insight → shift → resolution
 - Pick an illustration type for each slide from: heart, child, brain, words, grow, community
+
+imageScene rules:
+- Describe a candid moment a mom would recognize from real life
+- Real environments: kitchen floor, living room couch, grocery store aisle, car backseat
+- Show parent-child connection through body language, NOT faces (hands, backs of heads, over-shoulder)
+- Include specific tangible details (broken cracker, toy trucks, school backpack, messy countertop)
+- One sentence, max 30 words
+- Translate the EMOTION of the slide into a VISIBLE moment
 
 Also output a voiceoverScript: a natural spoken version of the full content, as if a warm friend is reading it aloud. No hashtags, no emojis, no "comment below" — just the story.
 
