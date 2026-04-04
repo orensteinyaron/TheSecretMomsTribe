@@ -57,9 +57,34 @@ function calcSlideDuration(slide: { text: string; emphasis: string; subtext: str
   const totalWords = blocks.reduce((sum, b) => sum + calcWordCount(b), 0);
   const readTimeSec = Math.max(2, totalWords / 3);
   const revealGapsSec = Math.max(0, blockCount - 1) * 1.5;
-  const durationSec = revealGapsSec + readTimeSec + 1.5 + 1.0;
-  const clampedSec = Math.min(14, Math.max(5, durationSec));
+
+  // FIX 3+4: Calculate minimum duration ensuring last block has 3s breathing + 1s fade
+  const textReadSec = slide.text ? Math.max(0.8, calcWordCount(slide.text) / 3) : 0;
+  const emphasisReadSec = slide.emphasis ? Math.max(0.8, calcWordCount(slide.emphasis) / 3) : 0;
+  const subtextReadSec = slide.subtext ? Math.max(0.8, calcWordCount(slide.subtext) / 3) : 0;
+
+  const subtextDelaySec = 0.4 + textReadSec + 1.5 + emphasisReadSec + (slide.subtext ? 1.5 : 0);
+  const lastBlockReadSec = slide.subtext ? subtextReadSec : (slide.emphasis ? emphasisReadSec : textReadSec);
+  const lastBlockDelaySec = slide.subtext ? subtextDelaySec : (slide.emphasis ? (0.4 + textReadSec + 1.5) : 0.4);
+
+  const fromTimingMin = lastBlockDelaySec + lastBlockReadSec + 3.0 + 1.0;
+  const fromReadingMin = revealGapsSec + readTimeSec + 3.0 + 1.0;
+  const rawSec = Math.max(fromTimingMin, fromReadingMin);
+
+  // Clamp 5-16 seconds (raised max for dense slides)
+  const clampedSec = Math.min(16, Math.max(5, rawSec));
   return Math.round(clampedSec * FPS);
+}
+
+// ---- Text Cleanup (FIX 5: strip em dashes) ----
+
+function stripEmDashes(text: string): string {
+  return text
+    .replace(/\s*—\s*/g, ", ")
+    .replace(/\s*--\s*/g, ", ")
+    .replace(/,\s*,/g, ",")  // clean double commas
+    .replace(/\.\s*,/g, ".")  // clean period-comma
+    .trim();
 }
 
 // ---- Supabase ----
@@ -183,37 +208,87 @@ function parseContentToSlides(content: ContentItem): {
     }
   });
 
+  // FIX 5: Strip em dashes from all slide text
+  for (const slide of slides) {
+    slide.text = stripEmDashes(slide.text);
+    slide.emphasis = stripEmDashes(slide.emphasis);
+    slide.subtext = stripEmDashes(slide.subtext);
+  }
+
   // Build voiceover script: hook + all slide text
-  const voiceoverScript = [
+  const voiceoverScript = stripEmDashes([
     content.hook,
     ...slides.map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ")),
-  ].join(". ");
+  ].join(". "));
 
   return { slides, voiceoverScript };
 }
 
-// ---- TTS Generation ----
+// ---- TTS Generation (FIX 6: per-slide TTS for sync) ----
 
-async function generateVoiceover(
-  script: string,
+async function generateTTSSegment(
+  text: string,
   outputPath: string,
+  label: string,
 ): Promise<string> {
-  console.log(`  Generating voiceover (${script.length} chars, ~$${(script.length * 0.000015).toFixed(4)})...`);
-
   const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
   const response = await openai.audio.speech.create({
     model: TTS_MODEL,
     voice: TTS_VOICE,
-    input: script,
+    input: text,
     response_format: "mp3",
   });
 
   const buffer = Buffer.from(await response.arrayBuffer());
   fs.writeFileSync(outputPath, buffer);
 
-  console.log(`  Voiceover saved: ${outputPath} (${(buffer.length / 1024).toFixed(0)} KB)`);
+  console.log(`    ${label}: ${(buffer.length / 1024).toFixed(0)} KB (${text.length} chars)`);
   return outputPath;
+}
+
+async function generatePerSlideTTS(
+  hook: string,
+  slides: SlideData[],
+  cta: string,
+  outDir: string,
+  publicDir: string,
+  contentId: string,
+): Promise<{ hookAudio: string; slideAudios: string[]; ctaAudio: string; totalCost: number }> {
+  const segments: { text: string; label: string; filename: string }[] = [];
+
+  // Hook
+  segments.push({ text: stripEmDashes(hook), label: "Hook", filename: `tts-${contentId}-hook.mp3` });
+
+  // Each slide
+  for (let i = 0; i < slides.length; i++) {
+    const slideText = [slides[i].text, slides[i].emphasis, slides[i].subtext]
+      .filter(Boolean).join(". ");
+    segments.push({ text: slideText, label: `Slide ${i + 1}`, filename: `tts-${contentId}-slide${i}.mp3` });
+  }
+
+  // CTA
+  segments.push({ text: stripEmDashes(cta), label: "CTA", filename: `tts-${contentId}-cta.mp3` });
+
+  let totalChars = 0;
+  const paths: string[] = [];
+
+  for (const seg of segments) {
+    const localPath = path.join(outDir, seg.filename);
+    await generateTTSSegment(seg.text, localPath, seg.label);
+    // Copy to public/ for Remotion
+    fs.copyFileSync(localPath, path.join(publicDir, seg.filename));
+    paths.push(seg.filename);
+    totalChars += seg.text.length;
+  }
+
+  const totalCost = totalChars * 0.000015;
+  return {
+    hookAudio: paths[0],
+    slideAudios: paths.slice(1, 1 + slides.length),
+    ctaAudio: paths[paths.length - 1],
+    totalCost,
+  };
 }
 
 // ---- AI Scene Generator ----
@@ -452,20 +527,34 @@ async function main() {
   const outDir = path.resolve("out", contentId!);
   fs.mkdirSync(outDir, { recursive: true });
 
-  // 4. Generate voiceover
-  let voiceoverPath: string | undefined;
+  // 4. Generate per-slide TTS voiceover (FIX 6)
+  const publicDir = path.resolve("public");
+  fs.mkdirSync(publicDir, { recursive: true });
+
+  let hookAudioUrl: string | undefined;
+  let ctaAudioUrl: string | undefined;
+
+  // Build CTA text early so we can TTS it
+  const captionLines = content.caption.split("\n").filter(l => l.trim());
+  const ctaText = stripEmDashes(
+    captionLines.filter(l => !l.startsWith("#")).pop() || "Follow for more"
+  );
+
   if (!skipTTS) {
-    console.log("\n3. Generating voiceover...");
-    voiceoverPath = path.join(outDir, "voiceover.mp3");
-    await generateVoiceover(voiceoverScript, voiceoverPath);
-    const cost = voiceoverScript.length * 0.000015;
-    await logCost(contentId!, "openai", TTS_MODEL, voiceoverScript.length, cost);
+    console.log("\n3. Generating per-slide TTS...");
+    const tts = await generatePerSlideTTS(
+      content.hook, slides, ctaText, outDir, publicDir, contentId!,
+    );
+    hookAudioUrl = tts.hookAudio;
+    ctaAudioUrl = tts.ctaAudio;
+    for (let i = 0; i < slides.length; i++) {
+      slides[i].audioUrl = tts.slideAudios[i];
+    }
+    console.log(`  Total TTS cost: ~$${tts.totalCost.toFixed(4)}`);
+    await logCost(contentId!, "openai", TTS_MODEL, 0, tts.totalCost);
   }
 
   // 5. Generate background images
-  // Images go into public/ so Remotion can serve them via staticFile()
-  const publicDir = path.resolve("public");
-  fs.mkdirSync(publicDir, { recursive: true });
 
   if (!skipImages) {
     console.log("\n4. Generating background images...");
@@ -491,13 +580,7 @@ async function main() {
     }
   }
 
-  // 6. Build CTA text
-  const captionLines = content.caption.split("\n").filter(l => l.trim());
-  const lastLine = captionLines
-    .filter(l => !l.startsWith("#"))
-    .pop() || "Follow for more 🤍";
-
-  // 7. Calculate dynamic slide durations
+  // 6. Calculate dynamic slide durations
   const slideDurations = slides.map(calcSlideDuration);
   console.log(`\n   Slide timing (dynamic):`);
   slides.forEach((s, i) => {
@@ -515,11 +598,13 @@ async function main() {
 
   await renderVideo(
     {
-      hook: content.hook,
+      hook: stripEmDashes(content.hook),
       slides,
       slideDurations,
-      cta: lastLine,
+      cta: ctaText,
       pillar: content.content_pillar || "default",
+      hookAudioUrl,
+      ctaAudioUrl,
     },
     videoPath,
   );

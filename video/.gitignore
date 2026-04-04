@@ -1,5 +1,6 @@
 node_modules/
 out/
 public/*.png
+public/*.mp3
 dist/
 *.DS_Store

@@ -37,6 +37,7 @@ Rules:
 - Skip hashtags, skip "save this" CTAs (those go elsewhere)
 - The content should flow as a narrative arc: setup → insight → shift → resolution
 - Pick an illustration type for each slide from: heart, child, brain, words, grow, community
+- NEVER use em dashes (—) or double hyphens (--) in any output. Use commas or periods instead.
 
 imageScene rules:
 - Describe a candid moment a mom would recognize from real life
