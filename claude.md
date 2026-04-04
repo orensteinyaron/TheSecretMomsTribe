@@ -69,3 +69,63 @@ Plan → `tasks/todo.md` → Build → Verify → Update `tasks/lessons.md`
 
 ## Current Phase: 1 — Research Agent + Approval UI
 Next: Content Generation Agent → Publishing Agent → Learning Agent + AI Product
+
+# ── VIDEO PIPELINE (add to CLAUDE.md) ──────────────────────
+
+## Video Pipeline
+
+Location: `/video/`
+
+### What It Does
+Generates branded 9:16 video content (TikTok/Reels) from approved posts in `content_queue`. 
+Uses Remotion (React → MP4) for rendering, OpenAI TTS for voiceover, DALL-E 3 for background images.
+
+### How To Run
+
+```bash
+cd video/
+
+# Single video
+npx tsx scripts/generate-video.ts <content-id>
+
+# Batch (all approved without video)
+npx tsx scripts/batch-generate.ts --limit 5
+
+# Fast iteration (skip costly API calls)
+npx tsx scripts/generate-video.ts <id> --no-tts --no-images
+
+# Preview in browser
+npm run studio
+```
+
+### Templates
+- **TextSlideshow** — hook → 3-5 text slides → CTA. 49s at 4 slides. SVG illustrations per slide.
+  - Timing: hook 7s, slides 9s, CTA 6s
+  - Within slides: text at 0.4s → emphasis at 2.5s → subtext at 4.5s
+
+### Cost
+- Without images: ~$0.01/video (just TTS)
+- With images: ~$0.33/video (TTS + 4 DALL-E images)
+
+### Pillar Color Mapping
+- parenting_insights: purple/pink
+- ai_magic: dark navy/pink
+- mom_health: purple/soft pink
+
+### Key Decisions
+- TTS voice: "nova" (warm female, matches SMT brand)
+- Images are OPTIONAL — template has bokeh gradient fallbacks
+- Slide parsing: Haiku AI parser → deterministic fallback
+- All costs logged to `cost_log` table
+- Videos uploaded to Supabase Storage `post-images/videos/`
+- `content_queue.metadata.video_url` stores public URL
+
+### TODO
+- [ ] Add `<Audio>` component for background music (royalty-free track)
+- [ ] Add `<Audio>` component for TTS voiceover sync
+- [ ] Load Blankspot custom font for "smt" watermark
+- [ ] Add logo SVG watermark
+- [ ] Build TikTok slideshow template (static slides, no animation)
+- [ ] Build carousel template (IG carousel → image sequence)
+- [ ] Wire into GitHub Actions (batch generate after content approval)
+- [ ] Add video to approval UI (preview before publishing)
