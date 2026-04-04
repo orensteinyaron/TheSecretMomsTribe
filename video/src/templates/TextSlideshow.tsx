@@ -302,7 +302,7 @@ const SlideIllustration: React.FC<{ type?: string; frame: number; color: string 
   }
 };
 
-// ---- Background (FIX 2: localized gradient, image visible at top) ----
+// ---- Background: DALL-E image full-bleed + frosted glass text panel ----
 
 const WarmBackground: React.FC<{
   colors: { bg: string; accent: string; warm: string };
@@ -317,38 +317,39 @@ const WarmBackground: React.FC<{
     return x - Math.floor(x);
   };
 
+  const hasImage = imageUrl && resolveImageUrl(imageUrl);
+
   return (
     <AbsoluteFill style={{ overflow: "hidden" }}>
-      {/* Base gradient */}
+      {/* Base gradient fallback (only visible when no DALL-E image) */}
       <div style={{
         position: "absolute", inset: 0,
         background: `linear-gradient(${155 + seed * 8}deg, ${colors.bg} 0%, ${colors.warm} 55%, ${colors.bg}ee 100%)`,
         transform: `scale(${scale}) translate(${tx}px, ${ty}px)`,
       }} />
 
-      {/* DALL-E image — FIX 2: more visible, localized gradient */}
-      {imageUrl && resolveImageUrl(imageUrl) && (
+      {/* DALL-E image: full visibility, minimal treatment */}
+      {hasImage && (
         <>
           <Img
             src={resolveImageUrl(imageUrl)!}
             style={{
               position: "absolute", inset: 0,
               width: "100%", height: "100%", objectFit: "cover",
-              opacity: 0.55,
+              opacity: 0.9,
               transform: `scale(${scale}) translate(${tx}px, ${ty}px)`,
-              filter: "blur(2px) saturate(0.8)",
             }}
           />
-          {/* Localized gradient: top 40% shows image, bottom 60% fades to bg for text */}
+          {/* Subtle edge vignette only */}
           <div style={{
             position: "absolute", inset: 0,
-            background: `linear-gradient(180deg, ${colors.bg}20 0%, ${colors.bg}40 35%, ${colors.bg}cc 55%, ${colors.bg}f0 75%, ${colors.bg} 100%)`,
+            background: `radial-gradient(ellipse at center, transparent 50%, ${colors.bg}66 100%)`,
           }} />
         </>
       )}
 
-      {/* Bokeh orbs */}
-      {Array.from({ length: 8 }, (_, i) => {
+      {/* Bokeh orbs (only when no DALL-E image) */}
+      {!hasImage && Array.from({ length: 8 }, (_, i) => {
         const cx = rand(i * 3) * 1080;
         const cy = rand(i * 3 + 1) * 1920;
         const r = 50 + rand(i * 3 + 2) * 140;
@@ -368,11 +369,45 @@ const WarmBackground: React.FC<{
         );
       })}
 
-      {/* Vignette */}
+      {/* Vignette (fallback only) */}
+      {!hasImage && (
+        <div style={{
+          position: "absolute", inset: 0,
+          background: `radial-gradient(ellipse at center, transparent 30%, ${colors.bg}aa 100%)`,
+        }} />
+      )}
+    </AbsoluteFill>
+  );
+};
+
+// ---- Frosted Glass Text Panel (sits behind text when DALL-E image present) ----
+
+const FrostedPanel: React.FC<{
+  colors: { bg: string; accent: string; warm: string };
+  hasImage: boolean;
+  children: React.ReactNode;
+}> = ({ colors, hasImage, children }) => {
+  if (!hasImage) {
+    // No image: just render text directly on gradient bg
+    return (
+      <AbsoluteFill style={{ justifyContent: "center", padding: "160px 70px" }}>
+        {children}
+      </AbsoluteFill>
+    );
+  }
+
+  // With DALL-E image: frosted glass panel in lower portion
+  return (
+    <AbsoluteFill style={{ justifyContent: "flex-end", padding: "0 30px 100px" }}>
       <div style={{
-        position: "absolute", inset: 0,
-        background: `radial-gradient(ellipse at center, transparent 30%, ${colors.bg}aa 100%)`,
-      }} />
+        background: "rgba(99, 36, 106, 0.75)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        borderRadius: 16,
+        padding: "40px",
+      }}>
+        {children}
+      </div>
     </AbsoluteFill>
   );
 };
@@ -502,42 +537,40 @@ const ContentSlide: React.FC<{
         <Audio src={resolveAudioUrl(slide.audioUrl)!} />
       )}
 
-      <AbsoluteFill style={{ justifyContent: "center", padding: "160px 70px" }}>
-        {/* Slide number watermark */}
-        <div style={{
-          position: "absolute", top: 140, right: 70,
-          fontFamily: "Georgia, serif",
-          fontSize: 120, fontWeight: 300,
-          color: colors.accent, opacity: 0.06, fontStyle: "italic",
-        }}>
-          {slideIndex + 1}
-        </div>
+      {/* Slide number watermark */}
+      <div style={{
+        position: "absolute", top: 140, right: 70,
+        fontFamily: "Georgia, serif",
+        fontSize: 120, fontWeight: 300,
+        color: colors.accent, opacity: 0.06, fontStyle: "italic",
+        zIndex: 1,
+      }}>
+        {slideIndex + 1}
+      </div>
 
+      <FrostedPanel colors={colors} hasImage={!!slide.imageUrl}>
         {/* Main text */}
         {slide.text && (
           <RevealText frame={frame} fps={fps} delay={t.textDelay}>
             <div style={{
-              fontFamily: "sans-serif", fontSize: 48,
-              fontWeight: 300, color: `${BRAND.lightGray}cc`,
-              lineHeight: 1.55, marginBottom: 40,
-              textShadow: "0 1px 12px rgba(0,0,0,0.5)",
+              fontFamily: "sans-serif", fontSize: 44,
+              fontWeight: 300, color: BRAND.offWhite,
+              lineHeight: 1.55, marginBottom: 30,
             }}>
               {slide.text}
             </div>
           </RevealText>
         )}
 
-        {/* FIX 1: Emphasis with dark pill background for contrast */}
+        {/* Emphasis */}
         {slide.emphasis && (
           <RevealText frame={frame} fps={fps} delay={t.emphasisDelay}>
             <div style={{
               fontFamily: "Georgia, 'Times New Roman', serif",
-              fontSize: 58, fontWeight: 700,
+              fontSize: 54, fontWeight: 700,
               color: colors.accent, lineHeight: 1.3,
-              fontStyle: "italic", marginBottom: 30,
-              textShadow: `0 0 30px ${colors.bg}, 0 0 60px ${colors.bg}, 0 2px 8px rgba(0,0,0,0.5)`,
-              background: `linear-gradient(180deg, ${colors.bg}00, ${colors.bg}90 20%, ${colors.bg}90 80%, ${colors.bg}00)`,
-              padding: "12px 0",
+              fontStyle: "italic", marginBottom: 24,
+              filter: `drop-shadow(0 0 20px ${colors.bg})`,
             }}>
               {slide.emphasis}
             </div>
@@ -548,17 +581,16 @@ const ContentSlide: React.FC<{
         {slide.subtext && (
           <RevealText frame={frame} fps={fps} delay={t.subtextDelay}>
             <div style={{
-              fontFamily: "sans-serif", fontSize: 44,
+              fontFamily: "sans-serif", fontSize: 40,
               fontWeight: 300, color: BRAND.offWhite,
               lineHeight: 1.5, opacity: 0.85,
-              textShadow: "0 1px 12px rgba(0,0,0,0.5)",
             }}>
               {slide.subtext}
             </div>
           </RevealText>
         )}
 
-        <div style={{ position: "absolute", bottom: 200, left: 70 }}>
+        <div style={{ marginTop: 20 }}>
           <RevealText frame={frame} fps={fps} delay={18}>
             <div style={{
               width: 55, height: 3,
@@ -567,7 +599,7 @@ const ContentSlide: React.FC<{
             }} />
           </RevealText>
         </div>
-      </AbsoluteFill>
+      </FrostedPanel>
     </AbsoluteFill>
   );
 };
