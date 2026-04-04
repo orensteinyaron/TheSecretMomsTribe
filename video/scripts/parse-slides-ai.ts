@@ -30,7 +30,7 @@ Each slide has:
 
 Rules:
 - 3-5 slides MAX. Fewer is better.
-- Each slide's total text must be readable in 6-8 seconds
+- Each slide's duration is calculated dynamically from word count (shorter slides for punchy lines, longer for dense text)
 - emphasis should be SHORT and punchy (under 15 words ideally)
 - Skip hashtags, skip "save this" CTAs (those go elsewhere)
 - The content should flow as a narrative arc: setup → insight → shift → resolution

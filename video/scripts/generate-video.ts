@@ -43,6 +43,25 @@ if (!contentId) {
   process.exit(1);
 }
 
+// ---- Slide Timing (matches TextSlideshow.tsx logic) ----
+
+const FPS = 30;
+
+function calcWordCount(s: string): number {
+  return s.trim() ? s.trim().split(/\s+/).length : 0;
+}
+
+function calcSlideDuration(slide: { text: string; emphasis: string; subtext: string }): number {
+  const blocks = [slide.text, slide.emphasis, slide.subtext].filter(Boolean);
+  const blockCount = blocks.length;
+  const totalWords = blocks.reduce((sum, b) => sum + calcWordCount(b), 0);
+  const readTimeSec = Math.max(2, totalWords / 3);
+  const revealGapsSec = Math.max(0, blockCount - 1) * 1.5;
+  const durationSec = revealGapsSec + readTimeSec + 1.5 + 1.0;
+  const clampedSec = Math.min(14, Math.max(5, durationSec));
+  return Math.round(clampedSec * FPS);
+}
+
 // ---- Supabase ----
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -275,9 +294,12 @@ async function renderVideo(
   });
 
   const HOOK_DURATION = 210;
-  const SLIDE_DURATION = 270;
   const CTA_DURATION = 180;
-  const totalFrames = HOOK_DURATION + props.slides.length * SLIDE_DURATION + CTA_DURATION;
+  const slideDurations: number[] = props.slideDurations || props.slides.map(calcSlideDuration);
+  const totalSlideFrames = slideDurations.reduce((a: number, b: number) => a + b, 0);
+  const totalFrames = HOOK_DURATION + totalSlideFrames + CTA_DURATION;
+  // Ensure slideDurations is passed to the composition
+  props.slideDurations = slideDurations;
 
   console.log(`  Selecting composition (${totalFrames} frames, ${(totalFrames / 30).toFixed(1)}s)...`);
 
@@ -391,7 +413,19 @@ async function main() {
     .filter(l => !l.startsWith("#"))
     .pop() || "Follow for more 🤍";
 
-  // 7. Render video
+  // 7. Calculate dynamic slide durations
+  const slideDurations = slides.map(calcSlideDuration);
+  console.log(`\n   Slide timing (dynamic):`);
+  slides.forEach((s, i) => {
+    const dur = slideDurations[i];
+    const blocks = [s.text, s.emphasis, s.subtext].filter(Boolean).length;
+    const words = [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ").split(/\s+/).length;
+    console.log(`     Slide ${i + 1}: ${(dur / 30).toFixed(1)}s (${words} words, ${blocks} blocks)`);
+  });
+  const totalSlideSec = slideDurations.reduce((a, b) => a + b, 0) / 30;
+  console.log(`     Total slides: ${totalSlideSec.toFixed(1)}s (was ${(slides.length * 9).toFixed(1)}s fixed)`);
+
+  // 8. Render video
   console.log("\n5. Rendering video...");
   const videoPath = path.join(outDir, `${contentId}.mp4`);
 
@@ -399,6 +433,7 @@ async function main() {
     {
       hook: content.hook,
       slides,
+      slideDurations,
       cta: lastLine,
       pillar: content.content_pillar || "default",
     },
@@ -436,7 +471,8 @@ async function main() {
   console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   console.log(`✅ Done!`);
   console.log(`   Video: ${videoPath}`);
-  console.log(`   Duration: ${((210 + slides.length * 270 + 180) / 30).toFixed(1)}s`);
+  const totalDuration = (210 + slideDurations.reduce((a, b) => a + b, 0) + 180) / 30;
+  console.log(`   Duration: ${totalDuration.toFixed(1)}s (was ${((210 + slides.length * 270 + 180) / 30).toFixed(1)}s fixed)`);
   console.log(`   Slides: ${slides.length}`);
   const totalCost = (skipTTS ? 0 : voiceoverScript.length * 0.000015) +
     (skipImages ? 0 : slides.length * 0.08);

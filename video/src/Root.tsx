@@ -1,10 +1,10 @@
 import React from "react";
 import { Composition, getInputProps } from "remotion";
-import { TextSlideshow } from "./templates/TextSlideshow";
+import { TextSlideshow, calculateAllDurations } from "./templates/TextSlideshow";
 
 const HOOK_DURATION = 210;   // 7s
-const SLIDE_DURATION = 270;  // 9s per slide
 const CTA_DURATION = 180;    // 6s
+const FPS = 30;
 
 // Default props for Remotion Studio preview
 const DEFAULT_PROPS = {
@@ -40,11 +40,14 @@ const DEFAULT_PROPS = {
 };
 
 export const RemotionRoot: React.FC = () => {
-  // Merge input props (from CLI/renderer) with defaults
   const inputProps = getInputProps();
   const props = { ...DEFAULT_PROPS, ...inputProps };
-  const slideCount = props.slides?.length || 4;
-  const totalFrames = HOOK_DURATION + slideCount * SLIDE_DURATION + CTA_DURATION;
+  const slides = props.slides || DEFAULT_PROPS.slides;
+
+  // Calculate dynamic durations if not provided
+  const slideDurations = props.slideDurations || calculateAllDurations(slides, FPS);
+  const totalSlideFrames = slideDurations.reduce((a: number, b: number) => a + b, 0);
+  const totalFrames = HOOK_DURATION + totalSlideFrames + CTA_DURATION;
 
   return (
     <>
@@ -52,10 +55,10 @@ export const RemotionRoot: React.FC = () => {
         id="TextSlideshow"
         component={TextSlideshow}
         durationInFrames={totalFrames}
-        fps={30}
+        fps={FPS}
         width={1080}
         height={1920}
-        defaultProps={props}
+        defaultProps={{ ...props, slideDurations }}
       />
     </>
   );

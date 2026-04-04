@@ -40,13 +40,61 @@ interface SlideData {
   illustration?: "heart" | "child" | "brain" | "words" | "grow" | "community";
 }
 
+interface SlideTiming {
+  durationFrames: number;
+  textDelay: number;       // frames
+  emphasisDelay: number;   // frames
+  subtextDelay: number;    // frames
+}
+
 interface TextSlideshowProps {
   hook: string;
   slides: SlideData[];
   cta: string;
   pillar: string;
+  slideDurations?: number[];  // per-slide frame counts (dynamic timing)
   hookImageUrl?: string;
   ctaImageUrl?: string;
+}
+
+// ---- Dynamic Timing Calculator ----
+
+function wordCount(s: string): number {
+  return s.trim() ? s.trim().split(/\s+/).length : 0;
+}
+
+export function calculateSlideTiming(slide: SlideData, fps: number = 30): SlideTiming {
+  const blocks = [slide.text, slide.emphasis, slide.subtext].filter(Boolean);
+  const blockCount = blocks.length;
+  const totalWords = blocks.reduce((sum, b) => sum + wordCount(b), 0);
+
+  // Reading time: ~3 words/sec, minimum 2s per slide
+  const readTimeSec = Math.max(2, totalWords / 3);
+  // Gaps between block reveals: 1.5s each
+  const revealGapsSec = Math.max(0, blockCount - 1) * 1.5;
+  // Total duration with breathing room and fade buffer
+  const durationSec = revealGapsSec + readTimeSec + 1.5 + 1.0;
+  // Clamp 5-14 seconds
+  const clampedSec = Math.min(14, Math.max(5, durationSec));
+  const durationFrames = Math.round(clampedSec * fps);
+
+  // Calculate reveal delays per block
+  const textReadSec = slide.text ? Math.max(0.8, wordCount(slide.text) / 3) : 0;
+  const emphasisReadSec = slide.emphasis ? Math.max(0.8, wordCount(slide.emphasis) / 3) : 0;
+
+  const textDelay = Math.round(0.4 * fps); // 0.4s in
+  const emphasisDelay = slide.emphasis
+    ? Math.round((0.4 + textReadSec + 1.5) * fps)
+    : textDelay;
+  const subtextDelay = slide.subtext
+    ? Math.round((0.4 + textReadSec + 1.5 + emphasisReadSec + 1.5) * fps)
+    : emphasisDelay;
+
+  return { durationFrames, textDelay, emphasisDelay, subtextDelay };
+}
+
+export function calculateAllDurations(slides: SlideData[], fps: number = 30): number[] {
+  return slides.map(s => calculateSlideTiming(s, fps).durationFrames);
 }
 
 // ---- SVG Illustrations ----
@@ -508,9 +556,13 @@ const ContentSlide: React.FC<{
   slide: SlideData;
   colors: { bg: string; accent: string; warm: string };
   slideIndex: number;
-}> = ({ slide, colors, slideIndex }) => {
+  timing?: SlideTiming;
+}> = ({ slide, colors, slideIndex, timing }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
+
+  // Use dynamic timing if provided, otherwise calculate from slide content
+  const t = timing || calculateSlideTiming(slide, fps);
 
   const fadeIn = interpolate(frame, [0, 20], [0, 1], {
     extrapolateLeft: "clamp", extrapolateRight: "clamp",
@@ -538,39 +590,45 @@ const ContentSlide: React.FC<{
           {slideIndex + 1}
         </div>
 
-        {/* Main text — delay 12 (0.4s) */}
-        <RevealText frame={frame} fps={fps} delay={12}>
-          <div style={{
-            fontFamily: "sans-serif", fontSize: 48,
-            fontWeight: 300, color: `${BRAND.lightGray}cc`,
-            lineHeight: 1.55, marginBottom: 40,
-          }}>
-            {slide.text}
-          </div>
-        </RevealText>
+        {/* Main text */}
+        {slide.text && (
+          <RevealText frame={frame} fps={fps} delay={t.textDelay}>
+            <div style={{
+              fontFamily: "sans-serif", fontSize: 48,
+              fontWeight: 300, color: `${BRAND.lightGray}cc`,
+              lineHeight: 1.55, marginBottom: 40,
+            }}>
+              {slide.text}
+            </div>
+          </RevealText>
+        )}
 
-        {/* Emphasis — delay 75 (2.5s) */}
-        <RevealText frame={frame} fps={fps} delay={75}>
-          <div style={{
-            fontFamily: "Georgia, 'Times New Roman', serif",
-            fontSize: 58, fontWeight: 700,
-            color: colors.accent, lineHeight: 1.3,
-            fontStyle: "italic", marginBottom: 30,
-          }}>
-            {slide.emphasis}
-          </div>
-        </RevealText>
+        {/* Emphasis */}
+        {slide.emphasis && (
+          <RevealText frame={frame} fps={fps} delay={t.emphasisDelay}>
+            <div style={{
+              fontFamily: "Georgia, 'Times New Roman', serif",
+              fontSize: 58, fontWeight: 700,
+              color: colors.accent, lineHeight: 1.3,
+              fontStyle: "italic", marginBottom: 30,
+            }}>
+              {slide.emphasis}
+            </div>
+          </RevealText>
+        )}
 
-        {/* Subtext — delay 135 (4.5s) */}
-        <RevealText frame={frame} fps={fps} delay={135}>
-          <div style={{
-            fontFamily: "sans-serif", fontSize: 44,
-            fontWeight: 300, color: BRAND.offWhite,
-            lineHeight: 1.5, opacity: 0.85,
-          }}>
-            {slide.subtext}
-          </div>
-        </RevealText>
+        {/* Subtext */}
+        {slide.subtext && (
+          <RevealText frame={frame} fps={fps} delay={t.subtextDelay}>
+            <div style={{
+              fontFamily: "sans-serif", fontSize: 44,
+              fontWeight: 300, color: BRAND.offWhite,
+              lineHeight: 1.5, opacity: 0.85,
+            }}>
+              {slide.subtext}
+            </div>
+          </RevealText>
+        )}
 
         <div style={{ position: "absolute", bottom: 200, left: 70 }}>
           <RevealText frame={frame} fps={fps} delay={18}>
@@ -648,13 +706,28 @@ const CTASlide: React.FC<{
 // ---- Main ----
 
 export const TextSlideshow: React.FC<TextSlideshowProps> = ({
-  hook, slides, cta, pillar, hookImageUrl, ctaImageUrl,
+  hook, slides, cta, pillar, slideDurations, hookImageUrl, ctaImageUrl,
 }) => {
   const colors = PILLAR_COLORS[pillar] || PILLAR_COLORS.default;
 
   const HOOK_DURATION = 210;   // 7 seconds
-  const SLIDE_DURATION = 270;  // 9 seconds per slide
   const CTA_DURATION = 180;    // 6 seconds
+
+  // Use provided durations or calculate dynamically
+  const durations = slideDurations && slideDurations.length === slides.length
+    ? slideDurations
+    : calculateAllDurations(slides);
+
+  // Pre-calculate timings for each slide
+  const timings = slides.map(s => calculateSlideTiming(s));
+
+  // Calculate cumulative start frames
+  const slideStarts = durations.reduce<number[]>((acc, dur, i) => {
+    acc.push(i === 0 ? HOOK_DURATION : acc[i - 1] + durations[i - 1]);
+    return acc;
+  }, []);
+
+  const slidesEnd = HOOK_DURATION + durations.reduce((a, b) => a + b, 0);
 
   return (
     <AbsoluteFill style={{ backgroundColor: colors.bg }}>
@@ -665,15 +738,15 @@ export const TextSlideshow: React.FC<TextSlideshowProps> = ({
       {slides.map((slide, i) => (
         <Sequence
           key={i}
-          from={HOOK_DURATION + i * SLIDE_DURATION}
-          durationInFrames={SLIDE_DURATION}
+          from={slideStarts[i]}
+          durationInFrames={durations[i]}
         >
-          <ContentSlide slide={slide} colors={colors} slideIndex={i} />
+          <ContentSlide slide={slide} colors={colors} slideIndex={i} timing={timings[i]} />
         </Sequence>
       ))}
 
       <Sequence
-        from={HOOK_DURATION + slides.length * SLIDE_DURATION}
+        from={slidesEnd}
         durationInFrames={CTA_DURATION}
       >
         <CTASlide text={cta} colors={colors} imageUrl={ctaImageUrl} />
