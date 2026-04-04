@@ -1,22 +1,23 @@
 /**
- * SMT Video Generation Pipeline
- * 
+ * SMT Video Generation Pipeline — V6
+ *
  * Usage: npx tsx scripts/generate-video.ts <content-id> [--no-tts] [--no-images]
- * 
- * Pulls approved content from Supabase, generates:
- *  1. Voiceover via OpenAI TTS ($0.01/video)
- *  2. Background images via DALL-E ($0.04-0.08/image, optional)
- *  3. Rendered MP4 via Remotion
- * 
- * Outputs: video/out/<content-id>.mp4
- * 
- * Required env vars:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
- *   OPENAI_API_KEY
+ *
+ * Flow:
+ *   1. Fetch content from Supabase
+ *   2. Parse caption into slides, strip em dashes
+ *   3. Generate image scenes via Haiku (hook + slides)
+ *   4. Generate DALL-E images, rotate to portrait if needed
+ *   5. Generate ONE continuous TTS voiceover (no hook, slides + CTA)
+ *   6. Get audio duration, calculate audio-driven slide timing
+ *   7. Render MP4 via Remotion with crossfade transitions
+ *   8. Upload to Supabase Storage
  */
 
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
+import sharp from "sharp";
+import { parseFile } from "music-metadata";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import path from "path";
@@ -29,9 +30,13 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const OPENAI_KEY = process.env.OPENAI_API_KEY!;
 
 const TTS_MODEL = "tts-1";
-const TTS_VOICE = "nova"; // warm, female — fits SMT brand
+const TTS_VOICE = "nova";
 const DALLE_MODEL = "dall-e-3";
-const DALLE_SIZE = "1024x1792"; // portrait for 1080x1920
+const DALLE_SIZE = "1024x1792" as const;
+const FPS = 30;
+const HOOK_DURATION = 150; // 5 seconds (Fix 6)
+const CTA_DURATION = 120;  // 4 seconds
+const CROSSFADE = 9;       // 0.3s overlap (Fix 9)
 
 const args = process.argv.slice(2);
 const contentId = args.find(a => !a.startsWith("--"));
@@ -43,48 +48,25 @@ if (!contentId) {
   process.exit(1);
 }
 
-// ---- Slide Timing (matches TextSlideshow.tsx logic) ----
+// ---- Utilities ----
 
-const FPS = 30;
-
-function calcWordCount(s: string): number {
+function wordCount(s: string): number {
   return s.trim() ? s.trim().split(/\s+/).length : 0;
 }
-
-function calcSlideDuration(slide: { text: string; emphasis: string; subtext: string }): number {
-  const blocks = [slide.text, slide.emphasis, slide.subtext].filter(Boolean);
-  const blockCount = blocks.length;
-  const totalWords = blocks.reduce((sum, b) => sum + calcWordCount(b), 0);
-  const readTimeSec = Math.max(2, totalWords / 3);
-  const revealGapsSec = Math.max(0, blockCount - 1) * 1.5;
-
-  // FIX 3+4: Calculate minimum duration ensuring last block has 3s breathing + 1s fade
-  const textReadSec = slide.text ? Math.max(0.8, calcWordCount(slide.text) / 3) : 0;
-  const emphasisReadSec = slide.emphasis ? Math.max(0.8, calcWordCount(slide.emphasis) / 3) : 0;
-  const subtextReadSec = slide.subtext ? Math.max(0.8, calcWordCount(slide.subtext) / 3) : 0;
-
-  const subtextDelaySec = 0.4 + textReadSec + 1.5 + emphasisReadSec + (slide.subtext ? 1.5 : 0);
-  const lastBlockReadSec = slide.subtext ? subtextReadSec : (slide.emphasis ? emphasisReadSec : textReadSec);
-  const lastBlockDelaySec = slide.subtext ? subtextDelaySec : (slide.emphasis ? (0.4 + textReadSec + 1.5) : 0.4);
-
-  const fromTimingMin = lastBlockDelaySec + lastBlockReadSec + 3.0 + 1.0;
-  const fromReadingMin = revealGapsSec + readTimeSec + 3.0 + 1.0;
-  const rawSec = Math.max(fromTimingMin, fromReadingMin);
-
-  // Clamp 5-16 seconds (raised max for dense slides)
-  const clampedSec = Math.min(16, Math.max(5, rawSec));
-  return Math.round(clampedSec * FPS);
-}
-
-// ---- Text Cleanup (FIX 5: strip em dashes) ----
 
 function stripEmDashes(text: string): string {
   return text
     .replace(/\s*—\s*/g, ", ")
     .replace(/\s*--\s*/g, ", ")
-    .replace(/,\s*,/g, ",")  // clean double commas
-    .replace(/\.\s*,/g, ".")  // clean period-comma
+    .replace(/,\s*,/g, ",")
+    .replace(/\.\s*,/g, ".")
     .trim();
+}
+
+function slideWordCount(slide: SlideData): number {
+  return [slide.text, slide.emphasis, slide.subtext]
+    .filter(Boolean)
+    .reduce((sum, b) => sum + wordCount(b), 0);
 }
 
 // ---- Supabase ----
@@ -107,22 +89,17 @@ async function fetchContent(id: string): Promise<ContentItem> {
     .select("id, hook, caption, content_pillar, age_range, post_format, metadata")
     .eq("id", id)
     .single();
-
-  if (error || !data) {
-    throw new Error(`Content not found: ${id} — ${error?.message}`);
-  }
+  if (error || !data) throw new Error(`Content not found: ${id} — ${error?.message}`);
   return data as ContentItem;
 }
 
 // ---- Slide Parser ----
-// Breaks a long caption into structured slides for the video template
 
 interface SlideData {
   text: string;
   emphasis: string;
   subtext: string;
   illustration?: "heart" | "child" | "brain" | "words" | "grow" | "community";
-  imageScene?: string;  // one-sentence visual description for DALL-E
   imageUrl?: string;
 }
 
@@ -130,35 +107,25 @@ function parseContentToSlides(content: ContentItem): {
   slides: SlideData[];
   voiceoverScript: string;
 } {
-  // Use Claude to parse — but for now, deterministic paragraph splitting
   const caption = content.caption || "";
-  
-  // Split on double newlines, then group into slides
   const paragraphs = caption
     .split(/\n\n+/)
     .map(p => p.trim())
-    .filter(p => p.length > 0 && !p.startsWith("#")); // skip hashtag blocks
+    .filter(p => p.length > 0 && !p.startsWith("#"));
 
-  // If caption is already structured (3-5 paragraphs), map directly
-  // Otherwise, chunk into ~3-4 slides
   const slideTexts: string[] = [];
-  
+
   if (paragraphs.length >= 3 && paragraphs.length <= 6) {
-    // Good structure — use paragraphs as-is
     for (const p of paragraphs) {
       if (p.startsWith("#") || p.length < 20) continue;
       slideTexts.push(p);
     }
   } else if (paragraphs.length > 6) {
-    // Too many — combine pairs
     for (let i = 0; i < paragraphs.length - 1; i += 2) {
       const combined = paragraphs[i] + " " + (paragraphs[i + 1] || "");
-      if (!combined.startsWith("#") && combined.length > 20) {
-        slideTexts.push(combined);
-      }
+      if (!combined.startsWith("#") && combined.length > 20) slideTexts.push(combined);
     }
   } else {
-    // Too few — split long ones by sentences
     for (const p of paragraphs) {
       const sentences = p.match(/[^.!?]+[.!?]+/g) || [p];
       if (sentences.length > 3) {
@@ -171,146 +138,126 @@ function parseContentToSlides(content: ContentItem): {
     }
   }
 
-  // Cap at 5 slides
   const finalTexts = slideTexts.slice(0, 5);
-
-  // Convert to slide format — first sentence as text, key phrase as emphasis, rest as subtext
-  const illustrations: Array<SlideData["illustration"]> = [
-    "child", "brain", "words", "grow", "heart",
-  ];
+  const illustrations: Array<SlideData["illustration"]> = ["child", "brain", "words", "grow", "heart"];
 
   const slides: SlideData[] = finalTexts.map((text, i) => {
-    // Try to split into text/emphasis/subtext
     const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-    
     if (sentences.length >= 3) {
-      return {
-        text: sentences[0].trim(),
-        emphasis: sentences[1].trim(),
-        subtext: sentences.slice(2).join(" ").trim(),
-        illustration: illustrations[i % illustrations.length],
-      };
+      return { text: sentences[0].trim(), emphasis: sentences[1].trim(), subtext: sentences.slice(2).join(" ").trim(), illustration: illustrations[i % illustrations.length] };
     } else if (sentences.length === 2) {
-      return {
-        text: sentences[0].trim(),
-        emphasis: sentences[1].trim(),
-        subtext: "",
-        illustration: illustrations[i % illustrations.length],
-      };
+      return { text: sentences[0].trim(), emphasis: sentences[1].trim(), subtext: "", illustration: illustrations[i % illustrations.length] };
     } else {
-      // Single sentence — put it all in emphasis
-      return {
-        text: "",
-        emphasis: text.trim(),
-        subtext: "",
-        illustration: illustrations[i % illustrations.length],
-      };
+      return { text: "", emphasis: text.trim(), subtext: "", illustration: illustrations[i % illustrations.length] };
     }
   });
 
-  // FIX 5: Strip em dashes from all slide text
+  // Strip em dashes from all text (Fix 10)
   for (const slide of slides) {
     slide.text = stripEmDashes(slide.text);
     slide.emphasis = stripEmDashes(slide.emphasis);
     slide.subtext = stripEmDashes(slide.subtext);
   }
 
-  // Build voiceover script: hook + all slide text
-  const voiceoverScript = stripEmDashes([
-    content.hook,
-    ...slides.map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ")),
-  ].join(". "));
+  // Voiceover script: slides + CTA only, NO hook (Fix 7)
+  const voiceoverScript = stripEmDashes(
+    slides.map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ")).join(". ")
+  );
 
   return { slides, voiceoverScript };
 }
 
-// ---- TTS Generation (FIX 6: per-slide TTS for sync) ----
+// ---- TTS: One Continuous Voiceover (Fix 7) ----
 
-async function generateTTSSegment(
-  text: string,
-  outputPath: string,
-  label: string,
-): Promise<string> {
-  const openai = new OpenAI({ apiKey: OPENAI_KEY });
-
-  const response = await openai.audio.speech.create({
-    model: TTS_MODEL,
-    voice: TTS_VOICE,
-    input: text,
-    response_format: "mp3",
-  });
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(outputPath, buffer);
-
-  console.log(`    ${label}: ${(buffer.length / 1024).toFixed(0)} KB (${text.length} chars)`);
-  return outputPath;
-}
-
-async function generatePerSlideTTS(
-  hook: string,
+async function generateContinuousVoiceover(
   slides: SlideData[],
   cta: string,
   outDir: string,
   publicDir: string,
   contentId: string,
-): Promise<{ hookAudio: string; slideAudios: string[]; ctaAudio: string; totalCost: number }> {
-  const segments: { text: string; label: string; filename: string }[] = [];
+): Promise<{ audioFile: string; durationSec: number; cost: number }> {
+  const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
-  // Hook
-  segments.push({ text: stripEmDashes(hook), label: "Hook", filename: `tts-${contentId}-hook.mp3` });
+  // Build one continuous script: all slide text + CTA
+  const slideScript = slides
+    .map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(". "))
+    .join(". ");
+  const fullScript = stripEmDashes(slideScript + ". " + cta);
 
-  // Each slide
-  for (let i = 0; i < slides.length; i++) {
-    const slideText = [slides[i].text, slides[i].emphasis, slides[i].subtext]
-      .filter(Boolean).join(". ");
-    segments.push({ text: slideText, label: `Slide ${i + 1}`, filename: `tts-${contentId}-slide${i}.mp3` });
-  }
+  console.log(`  Generating continuous voiceover (${fullScript.length} chars)...`);
 
-  // CTA
-  segments.push({ text: stripEmDashes(cta), label: "CTA", filename: `tts-${contentId}-cta.mp3` });
+  const response = await openai.audio.speech.create({
+    model: TTS_MODEL,
+    voice: TTS_VOICE,
+    input: fullScript,
+    response_format: "mp3",
+  });
 
-  let totalChars = 0;
-  const paths: string[] = [];
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const localPath = path.join(outDir, `voiceover-${contentId}.mp3`);
+  fs.writeFileSync(localPath, buffer);
+  console.log(`  Voiceover saved: ${(buffer.length / 1024).toFixed(0)} KB`);
 
-  for (const seg of segments) {
-    const localPath = path.join(outDir, seg.filename);
-    await generateTTSSegment(seg.text, localPath, seg.label);
-    // Copy to public/ for Remotion
-    fs.copyFileSync(localPath, path.join(publicDir, seg.filename));
-    paths.push(seg.filename);
-    totalChars += seg.text.length;
-  }
+  // Copy to public/ for Remotion
+  const staticName = `voiceover-${contentId}.mp3`;
+  fs.copyFileSync(localPath, path.join(publicDir, staticName));
 
-  const totalCost = totalChars * 0.000015;
-  return {
-    hookAudio: paths[0],
-    slideAudios: paths.slice(1, 1 + slides.length),
-    ctaAudio: paths[paths.length - 1],
-    totalCost,
-  };
+  // Get audio duration via music-metadata (Fix 8)
+  const metadata = await parseFile(localPath);
+  const durationSec = metadata.format.duration || 0;
+  console.log(`  Audio duration: ${durationSec.toFixed(1)}s`);
+
+  const cost = fullScript.length * 0.000015;
+  return { audioFile: staticName, durationSec, cost };
 }
 
-// ---- AI Scene Generator ----
-// Translates slide content into a relatable parenting scene description for DALL-E
+// ---- Audio-Driven Slide Timing (Fix 8) ----
+
+function calculateAudioDrivenDurations(
+  slides: SlideData[],
+  audioDurationSec: number,
+): number[] {
+  const totalWords = slides.reduce((sum, s) => sum + slideWordCount(s), 0);
+  if (totalWords === 0) return slides.map(() => Math.round(8 * FPS));
+
+  return slides.map(slide => {
+    const words = slideWordCount(slide);
+    const share = words / totalWords;
+    const durationSec = share * audioDurationSec + 2.0; // 2s breathing
+    const clamped = Math.min(16, Math.max(5, durationSec));
+    return Math.round(clamped * FPS);
+  });
+}
+
+// Fallback timing when no TTS (word-count based)
+function calculateFallbackDurations(slides: SlideData[]): number[] {
+  return slides.map(slide => {
+    const words = slideWordCount(slide);
+    const readSec = Math.max(2, words / 3);
+    const blocks = [slide.text, slide.emphasis, slide.subtext].filter(Boolean).length;
+    const gaps = Math.max(0, blocks - 1) * 1.5;
+    const rawSec = gaps + readSec + 3.0 + 1.0;
+    return Math.round(Math.min(16, Math.max(5, rawSec)) * FPS);
+  });
+}
+
+// ---- AI Scene Generator (Fix 3: Hook + Slides) ----
 
 async function generateImageScenes(
   hook: string,
   slides: SlideData[],
-): Promise<string[]> {
-  // If slides already have imageScene from AI parser, use those
-  const existing = slides.map(s => s.imageScene).filter(Boolean);
-  if (existing.length === slides.length) return existing as string[];
-
-  // Generate via Haiku
+): Promise<{ hookScene: string; slideScenes: string[] }> {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const fallbackHook = "close-up of small hands on a kitchen highchair tray, crumbs scattered, warm morning light, shot from above";
+  const fallbackSlides = slides.map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ").slice(0, 150));
+
   if (!anthropicKey) {
-    console.log("  No ANTHROPIC_API_KEY — using slide text as scene fallback");
-    return slides.map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ").slice(0, 150));
+    console.log("  No ANTHROPIC_API_KEY, using fallback scenes");
+    return { hookScene: fallbackHook, slideScenes: fallbackSlides };
   }
 
   try {
-    console.log("  Generating image scenes via Haiku...");
+    console.log("  Generating image scenes via Haiku (hook + slides)...");
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -320,33 +267,35 @@ async function generateImageScenes(
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 800,
-        system: `You translate parenting content into visual scene descriptions for AI image generation. Images are PORTRAIT format (tall, 9:16).
+        max_tokens: 1000,
+        system: `You create visual scene descriptions for AI image generation. Images are PORTRAIT (9:16).
+
+You will receive a hook and slide texts. Return ${slides.length + 1} scenes: the FIRST is for the hook/thumbnail, the rest are for content slides.
 
 CRITICAL RULES:
-- ABSOLUTELY NO FACES. Never describe faces, expressions, tears, mouths, eyes, or emotions on a face.
-- NEVER use words: face, tears, crying, upset, fist, clenching, grabbing, holding tight, clinging
-- Only describe: HANDS (open, resting, touching objects), BACKS OF HEADS, FEET, LAPS, ARMS IN SLEEVES, SHOULDERS FROM BEHIND
-- Every scene must have a human body part BUT only from behind, above, or extreme close-up on hands/feet
+- The FIRST scene (hook) must be the most intimate, emotionally compelling close-up. This is the thumbnail people see first.
+- ABSOLUTELY NO FACES. Never describe faces, expressions, tears, mouths, eyes.
+- NEVER use: face, tears, crying, upset, fist, clenching, grabbing, holding tight, clinging
+- ALWAYS include a HUMAN ELEMENT: hands, arms in sleeves, backs of heads, small feet, a lap, shoulders from behind
+- Focus on the INTERACTION or MOMENT, not just objects in a room
+- Every scene should make a mom think "that's my life right now"
 
-GOOD EXAMPLES (follow these exactly):
-- "small hands holding two pieces of a broken cracker on a highchair tray, crumbs scattered, warm morning light from kitchen window, shot from above"
-- "woman's hand resting gently on a small back, both seated on living room carpet, toy blocks nearby, viewed from behind"
-- "over-shoulder view of adult looking down at small feet in mismatched socks on a bathroom step stool"
-- "close-up of adult lap with picture book open, small fingers pointing at a page, soft blanket draped over legs"
-- "two pairs of hands, one adult one small, sorting colorful crayons on a kitchen table, shot from directly above"
+GOOD:
+- "small hands holding two broken cracker pieces on highchair tray, crumbs scattered, warm morning light, shot from above"
+- "woman's hand resting on a small back, both on living room carpet, toy blocks nearby, viewed from behind"
+- "close-up of adult lap with picture book open, small fingers pointing at a page, soft blanket"
+- "two pairs of hands sorting colorful crayons on kitchen table, shot from directly above"
 
-BAD (will be rejected by image AI):
-- Anything mentioning face, tears, crying, upset expression, mouth
-- "toddler sitting on parent's lap" (too direct, triggers filters)
-- "child's face" / "adult's face" (NO FACES EVER)
+BAD:
+- "kitchen table with alphabet blocks" (no human element)
+- "bedroom with stuffed animals" (no moment, empty room)
+- Anything mentioning face, tears, crying, expression
 
-One sentence max 30 words. Always specify "shot from above" or "viewed from behind" or "close-up of hands".
-
-Respond with JSON array of strings, one per slide. No markdown fences.`,
+One sentence max 30 words each. Always specify camera angle.
+Respond with JSON array of ${slides.length + 1} strings. No markdown fences.`,
         messages: [{
           role: "user",
-          content: `POST TOPIC: ${hook}\n\nSLIDES:\n${slides.map((s, i) => `${i + 1}. ${[s.text, s.emphasis, s.subtext].filter(Boolean).join(" ")}`).join("\n")}`,
+          content: `HOOK: ${hook}\n\nSLIDES:\n${slides.map((s, i) => `${i + 1}. ${[s.text, s.emphasis, s.subtext].filter(Boolean).join(" ")}`).join("\n")}`,
         }],
       }),
     });
@@ -354,23 +303,21 @@ Respond with JSON array of strings, one per slide. No markdown fences.`,
     const data = await response.json();
     const text = data.content?.[0]?.text || "";
     const scenes = JSON.parse(text.replace(/```json|```/g, "").trim());
-    if (Array.isArray(scenes) && scenes.length >= slides.length) {
-      console.log(`  Generated ${scenes.length} scene descriptions`);
-      return scenes.slice(0, slides.length);
+    if (Array.isArray(scenes) && scenes.length >= slides.length + 1) {
+      console.log(`  Generated ${scenes.length} scenes (1 hook + ${scenes.length - 1} slides)`);
+      return { hookScene: scenes[0], slideScenes: scenes.slice(1, slides.length + 1) };
     }
   } catch (err) {
-    console.warn(`  Scene generation failed, using fallback: ${err}`);
+    console.warn(`  Scene generation failed: ${err}`);
   }
 
-  // Fallback: use slide text
-  return slides.map(s => [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ").slice(0, 150));
+  return { hookScene: fallbackHook, slideScenes: fallbackSlides };
 }
 
-// ---- DALL-E Image Generation ----
+// ---- DALL-E Image Generation (Fix 1: orientation check) ----
 
-function buildImagePrompt(scene: string): string {
-  // Sanitize scene to reduce DALL-E content filter triggers
-  const sanitized = scene
+function sanitizeScene(scene: string): string {
+  return scene
     .replace(/\bchild('?s)?\b/gi, "small person's")
     .replace(/\bkid('?s)?\b/gi, "small person's")
     .replace(/\btoddler('?s)?\b/gi, "tiny person's")
@@ -388,7 +335,9 @@ function buildImagePrompt(scene: string): string {
     .replace(/\bat eye-level with\b/gi, "near")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
 
+function buildImagePrompt(scene: string): string {
   return [
     "PORTRAIT ORIENTATION vertical photograph (taller than wide, 9:16 aspect ratio).",
     "Intimate close-up lifestyle photograph of a real domestic moment.",
@@ -397,20 +346,20 @@ function buildImagePrompt(scene: string): string {
     "NO TEXT, NO WORDS, NO LETTERS, NO WATERMARKS.",
     "Warm natural indoor lighting, soft golden hour shadows.",
     "35mm film aesthetic, slightly desaturated warm tones, deep purple and mauve pink color grading.",
-    `Scene: ${sanitized}`,
+    `Scene: ${sanitizeScene(scene)}`,
     "Real lived-in home, warm textures, soft fabrics. Shallow depth of field, editorial photography.",
   ].join(" ");
 }
 
-async function generateSlideImage(
+async function generateImage(
   scene: string,
-  index: number,
-  outputDir: string,
-): Promise<string> {
+  label: string,
+  outputPath: string,
+): Promise<void> {
   const openai = new OpenAI({ apiKey: OPENAI_KEY });
   const prompt = buildImagePrompt(scene);
 
-  console.log(`  Generating image ${index + 1} (~$0.08)...`);
+  console.log(`  Generating ${label} (~$0.08)...`);
   console.log(`    Scene: "${scene.slice(0, 80)}..."`);
 
   const response = await openai.images.generate({
@@ -426,19 +375,22 @@ async function generateSlideImage(
 
   const imgResponse = await fetch(imageUrl);
   const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
-  const outputPath = path.join(outputDir, `slide-${index}.png`);
   fs.writeFileSync(outputPath, imgBuffer);
 
-  console.log(`  Image saved: ${outputPath}`);
-  return outputPath;
+  // Fix 1: Check orientation, rotate if landscape
+  const meta = await sharp(outputPath).metadata();
+  if (meta.width && meta.height && meta.width > meta.height) {
+    const rotated = await sharp(outputPath).rotate(90).toBuffer();
+    fs.writeFileSync(outputPath, rotated);
+    console.log(`    Rotated to portrait: ${meta.width}x${meta.height} → ${meta.height}x${meta.width}`);
+  } else {
+    console.log(`    Portrait OK: ${meta.width}x${meta.height}`);
+  }
 }
 
 // ---- Upload to Supabase Storage ----
 
-async function uploadToStorage(
-  localPath: string,
-  storagePath: string,
-): Promise<string> {
+async function uploadToStorage(localPath: string, storagePath: string): Promise<string> {
   const fileBuffer = fs.readFileSync(localPath);
   const { error } = await supabase.storage
     .from("post-images")
@@ -446,47 +398,41 @@ async function uploadToStorage(
       contentType: localPath.endsWith(".mp4") ? "video/mp4" : "image/png",
       upsert: true,
     });
-
   if (error) throw new Error(`Upload failed: ${error.message}`);
-
   const { data } = supabase.storage.from("post-images").getPublicUrl(storagePath);
   return data.publicUrl;
 }
 
 // ---- Remotion Render ----
 
-async function renderVideo(
-  props: Record<string, any>,
-  outputPath: string,
-): Promise<void> {
+async function renderVideo(props: Record<string, any>, outputPath: string): Promise<void> {
   console.log("  Bundling Remotion project...");
-
   const bundled = await bundle({
     entryPoint: path.resolve("src/index.ts"),
     webpackOverride: (config) => config,
   });
 
-  const HOOK_DURATION = 210;
-  const CTA_DURATION = 180;
-  const slideDurations: number[] = props.slideDurations || props.slides.map(calcSlideDuration);
+  const slideDurations: number[] = props.slideDurations;
   const totalSlideFrames = slideDurations.reduce((a: number, b: number) => a + b, 0);
-  const totalFrames = HOOK_DURATION + totalSlideFrames + CTA_DURATION;
-  // Ensure slideDurations is passed to the composition
-  props.slideDurations = slideDurations;
+  const numTransitions = slideDurations.length + 1; // hook→s1, between slides, lastSlide→CTA
+  const crossfadeOverlap = numTransitions * CROSSFADE;
+  const ctaDuration = props.ctaDuration || CTA_DURATION;
+  const totalFrames = HOOK_DURATION + totalSlideFrames + ctaDuration - crossfadeOverlap;
 
-  console.log(`  Selecting composition (${totalFrames} frames, ${(totalFrames / 30).toFixed(1)}s)...`);
+  props.hookDuration = HOOK_DURATION;
+  props.ctaDuration = ctaDuration;
+  props.crossfade = CROSSFADE;
+
+  console.log(`  Composition: ${totalFrames} frames (${(totalFrames / FPS).toFixed(1)}s), crossfade=${CROSSFADE}fr`);
 
   const composition = await selectComposition({
     serveUrl: bundled,
     id: "TextSlideshow",
     inputProps: props,
   });
-
-  // Override duration based on actual slide count
   composition.durationInFrames = totalFrames;
 
   console.log("  Rendering video...");
-
   await renderMedia({
     composition,
     serveUrl: bundled,
@@ -501,19 +447,12 @@ async function renderVideo(
 
 // ---- Cost Logging ----
 
-async function logCost(
-  contentId: string,
-  service: string,
-  model: string,
-  inputTokens: number,
-  costUsd: number,
-) {
+async function logCost(contentId: string, service: string, model: string, tokens: number, costUsd: number) {
   await supabase.from("cost_log").insert({
     pipeline_stage: "video_generation",
     content_id: contentId,
-    service,
-    model,
-    input_tokens: inputTokens,
+    service, model,
+    input_tokens: tokens,
     cost_usd: costUsd,
   });
 }
@@ -521,10 +460,11 @@ async function logCost(
 // ---- Main Pipeline ----
 
 async function main() {
-  console.log(`\n🎬 SMT Video Generator`);
+  console.log(`\n🎬 SMT Video Generator V6`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  console.log(`Content ID: ${contentId}`);
+  console.log(`Content: ${contentId}`);
   console.log(`TTS: ${skipTTS ? "SKIP" : "ON"}  |  Images: ${skipImages ? "SKIP" : "ON"}`);
+  console.log(`Hook: ${HOOK_DURATION / FPS}s  |  CTA: ${CTA_DURATION / FPS}s  |  Crossfade: ${CROSSFADE}fr`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 
   // 1. Fetch content
@@ -534,83 +474,84 @@ async function main() {
   console.log(`   Pillar: ${content.content_pillar}  |  Age: ${content.age_range}`);
 
   // 2. Parse into slides
-  console.log("\n2. Parsing content into slides...");
+  console.log("\n2. Parsing slides...");
   const { slides, voiceoverScript } = parseContentToSlides(content);
-  console.log(`   ${slides.length} slides  |  ${voiceoverScript.length} chars voiceover`);
+  console.log(`   ${slides.length} slides  |  ${voiceoverScript.length} chars`);
 
-  // 3. Create output directory
+  // 3. Setup directories
   const outDir = path.resolve("out", contentId!);
-  fs.mkdirSync(outDir, { recursive: true });
-
-  // 4. Generate per-slide TTS voiceover (FIX 6)
   const publicDir = path.resolve("public");
+  fs.mkdirSync(outDir, { recursive: true });
   fs.mkdirSync(publicDir, { recursive: true });
 
-  let hookAudioUrl: string | undefined;
-  let ctaAudioUrl: string | undefined;
+  // 4. Generate images (hook + slides) (Fix 3)
+  let hookImageUrl: string | undefined;
+  if (!skipImages) {
+    console.log("\n3. Generating images...");
+    const { hookScene, slideScenes } = await generateImageScenes(content.hook, slides);
 
-  // Build CTA text early so we can TTS it
+    // Hook image (Fix 3)
+    try {
+      const hookPath = path.join(outDir, "hook.png");
+      await generateImage(hookScene, "hook image", hookPath);
+      const hookStatic = `hook-${contentId}.png`;
+      fs.copyFileSync(hookPath, path.join(publicDir, hookStatic));
+      hookImageUrl = hookStatic;
+      await logCost(contentId!, "openai", DALLE_MODEL, 0, 0.08);
+    } catch (err) {
+      console.warn(`   ⚠ Hook image failed: ${err}`);
+    }
+
+    // Slide images
+    for (let i = 0; i < slides.length; i++) {
+      try {
+        const imgPath = path.join(outDir, `slide-${i}.png`);
+        await generateImage(slideScenes[i], `slide ${i + 1}`, imgPath);
+        const staticName = `slide-${contentId}-${i}.png`;
+        fs.copyFileSync(imgPath, path.join(publicDir, staticName));
+        slides[i].imageUrl = staticName;
+        await logCost(contentId!, "openai", DALLE_MODEL, 0, 0.08);
+      } catch (err) {
+        console.warn(`   ⚠ Slide ${i + 1} image failed: ${err}`);
+      }
+    }
+  }
+
+  // 5. Generate continuous voiceover (Fix 7)
+  let audioUrl: string | undefined;
+  let audioDurationSec = 0;
   const captionLines = content.caption.split("\n").filter(l => l.trim());
   const ctaText = stripEmDashes(
     captionLines.filter(l => !l.startsWith("#")).pop() || "Follow for more"
   );
 
   if (!skipTTS) {
-    console.log("\n3. Generating per-slide TTS...");
-    const tts = await generatePerSlideTTS(
-      content.hook, slides, ctaText, outDir, publicDir, contentId!,
-    );
-    hookAudioUrl = tts.hookAudio;
-    ctaAudioUrl = tts.ctaAudio;
-    for (let i = 0; i < slides.length; i++) {
-      slides[i].audioUrl = tts.slideAudios[i];
-    }
-    console.log(`  Total TTS cost: ~$${tts.totalCost.toFixed(4)}`);
-    await logCost(contentId!, "openai", TTS_MODEL, 0, tts.totalCost);
+    console.log("\n4. Generating continuous voiceover...");
+    const tts = await generateContinuousVoiceover(slides, ctaText, outDir, publicDir, contentId!);
+    audioUrl = tts.audioFile;
+    audioDurationSec = tts.durationSec;
+    console.log(`  Cost: ~$${tts.cost.toFixed(4)}`);
+    await logCost(contentId!, "openai", TTS_MODEL, 0, tts.cost);
   }
 
-  // 5. Generate background images
+  // 6. Calculate slide durations (Fix 8: audio-driven)
+  const slideDurations = audioDurationSec > 0
+    ? calculateAudioDrivenDurations(slides, audioDurationSec)
+    : calculateFallbackDurations(slides);
 
-  if (!skipImages) {
-    console.log("\n4. Generating background images...");
-
-    // Step 1: Generate relatable scene descriptions via Haiku
-    const scenes = await generateImageScenes(content.hook, slides);
-
-    // Step 2: Generate DALL-E images from scene descriptions
-    for (let i = 0; i < slides.length; i++) {
-      try {
-        const imgPath = await generateSlideImage(
-          scenes[i],
-          i,
-          outDir,
-        );
-        const staticName = `slide-${contentId}-${i}.png`;
-        fs.copyFileSync(imgPath, path.join(publicDir, staticName));
-        slides[i].imageUrl = staticName;
-        await logCost(contentId!, "openai", DALLE_MODEL, 0, 0.08);
-      } catch (err) {
-        console.warn(`   ⚠ Image ${i + 1} failed, using gradient fallback: ${err}`);
-      }
-    }
-  }
-
-  // 6. Calculate dynamic slide durations
-  const slideDurations = slides.map(calcSlideDuration);
-  console.log(`\n   Slide timing (dynamic):`);
+  console.log(`\n5. Slide timing${audioDurationSec > 0 ? " (audio-driven)" : " (word-count fallback)"}:`);
+  const totalWords = slides.reduce((sum, s) => sum + slideWordCount(s), 0);
   slides.forEach((s, i) => {
     const dur = slideDurations[i];
-    const blocks = [s.text, s.emphasis, s.subtext].filter(Boolean).length;
-    const words = [s.text, s.emphasis, s.subtext].filter(Boolean).join(" ").split(/\s+/).length;
-    console.log(`     Slide ${i + 1}: ${(dur / 30).toFixed(1)}s (${words} words, ${blocks} blocks)`);
+    const words = slideWordCount(s);
+    console.log(`     Slide ${i + 1}: ${(dur / FPS).toFixed(1)}s (${words} words, ${((words / totalWords) * 100).toFixed(0)}% of audio)`);
   });
-  const totalSlideSec = slideDurations.reduce((a, b) => a + b, 0) / 30;
-  console.log(`     Total slides: ${totalSlideSec.toFixed(1)}s (was ${(slides.length * 9).toFixed(1)}s fixed)`);
+  const totalSlideSec = slideDurations.reduce((a, b) => a + b, 0) / FPS;
+  console.log(`     Total content: ${totalSlideSec.toFixed(1)}s | Audio: ${audioDurationSec.toFixed(1)}s`);
 
-  // 8. Render video
-  console.log("\n5. Rendering video...");
+  // 7. Render video
+  console.log("\n6. Rendering video...");
   const videoPath = path.join(outDir, `${contentId}.mp4`);
-
   await renderVideo(
     {
       hook: stripEmDashes(content.hook),
@@ -618,49 +559,44 @@ async function main() {
       slideDurations,
       cta: ctaText,
       pillar: content.content_pillar || "default",
-      hookAudioUrl,
-      ctaAudioUrl,
+      hookImageUrl,
+      audioUrl,
+      ctaDuration: CTA_DURATION,
     },
     videoPath,
   );
 
-  // 8. Upload to Supabase Storage
-  console.log("\n6. Uploading to Supabase Storage...");
+  // 8. Upload
+  console.log("\n7. Uploading to Supabase Storage...");
   try {
-    const publicUrl = await uploadToStorage(
-      videoPath,
-      `videos/${contentId}.mp4`,
-    );
+    const publicUrl = await uploadToStorage(videoPath, `videos/${contentId}.mp4`);
     console.log(`   Public URL: ${publicUrl}`);
-
-    // Update content_queue with video URL
-    await supabase
-      .from("content_queue")
-      .update({
-        metadata: {
-          ...content.metadata,
-          video_url: publicUrl,
-          video_generated: true,
-          video_generated_at: new Date().toISOString(),
-        },
-      })
-      .eq("id", contentId);
-
-    console.log("   content_queue updated with video URL");
+    await supabase.from("content_queue").update({
+      metadata: {
+        ...content.metadata,
+        video_url: publicUrl,
+        video_generated: true,
+        video_generated_at: new Date().toISOString(),
+      },
+    }).eq("id", contentId);
+    console.log("   content_queue updated");
   } catch (err) {
-    console.warn(`   ⚠ Upload failed, video available locally: ${videoPath}`);
+    console.warn(`   ⚠ Upload failed: ${videoPath}`);
   }
 
   // Summary
+  const numTransitions = slides.length + 1;
+  const totalFrames = HOOK_DURATION + slideDurations.reduce((a, b) => a + b, 0) + CTA_DURATION - numTransitions * CROSSFADE;
+  const totalDuration = totalFrames / FPS;
+  const imageCount = (hookImageUrl ? 1 : 0) + slides.filter(s => s.imageUrl).length;
+  const ttsCost = skipTTS ? 0 : voiceoverScript.length * 0.000015;
+
   console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   console.log(`✅ Done!`);
   console.log(`   Video: ${videoPath}`);
-  const totalDuration = (210 + slideDurations.reduce((a, b) => a + b, 0) + 180) / 30;
-  console.log(`   Duration: ${totalDuration.toFixed(1)}s (was ${((210 + slides.length * 270 + 180) / 30).toFixed(1)}s fixed)`);
-  console.log(`   Slides: ${slides.length}`);
-  const totalCost = (skipTTS ? 0 : voiceoverScript.length * 0.000015) +
-    (skipImages ? 0 : slides.length * 0.08);
-  console.log(`   Est. cost: $${totalCost.toFixed(3)}`);
+  console.log(`   Duration: ${totalDuration.toFixed(1)}s`);
+  console.log(`   Slides: ${slides.length} | Images: ${imageCount} | Audio: ${audioDurationSec.toFixed(1)}s`);
+  console.log(`   Est. cost: $${(ttsCost + imageCount * 0.08).toFixed(3)}`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 }
 
