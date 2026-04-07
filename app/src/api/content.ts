@@ -10,4 +10,6 @@ export const contentApi = {
   bulkApprove: (ids: string[]) => apiPost<any>('content-queue', { action: 'bulk_approve', ids }),
   bulkReject: (ids: string[], reason: string) => apiPost<any>('content-queue', { action: 'bulk_reject', ids, reason }),
   triggerRender: (id: string) => apiPost<any>('content-queue', { action: 'trigger_render', id }),
+  ready: () => apiFetch<ContentItem[]>('content-queue', { tab: 'ready' }),
+  scheduled: () => apiFetch<ContentItem[]>('content-queue', { tab: 'scheduled' }),
 };
