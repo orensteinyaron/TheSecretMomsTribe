@@ -3,6 +3,7 @@ import { ArrowLeft, Check, X, RefreshCw, ExternalLink } from 'lucide-react';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { PillarBadge } from '../components/shared/PillarBadge';
 import { PlatformIcon } from '../components/shared/PlatformIcon';
+import { EditableField } from '../components/shared/EditableField';
 import { useContentDetail, useContentUpdate } from '../hooks/useContent';
 
 export default function ContentDetailPage() {
@@ -70,7 +71,11 @@ export default function ContentDetailPage() {
           {/* Hook */}
           <div className="bg-bg-surface border border-border-default rounded-lg p-6">
             <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-2">Hook</h3>
-            <p className="text-lg font-semibold text-text-primary">{item.hook}</p>
+            <EditableField
+              value={item.hook}
+              onSave={(v) => updateMutation.mutate({ id: item.id, hook: v })}
+              className="text-lg font-semibold text-text-primary"
+            />
           </div>
 
           {/* Slides */}
@@ -94,7 +99,12 @@ export default function ContentDetailPage() {
           {/* Caption */}
           <div className="bg-bg-surface border border-border-default rounded-lg p-6">
             <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-2">Caption</h3>
-            <p className="text-sm text-text-primary whitespace-pre-line">{item.caption}</p>
+            <EditableField
+              value={item.caption}
+              onSave={(v) => updateMutation.mutate({ id: item.id, caption: v })}
+              multiline
+              className="text-sm text-text-primary whitespace-pre-line"
+            />
           </div>
 
           {/* Hashtags */}
