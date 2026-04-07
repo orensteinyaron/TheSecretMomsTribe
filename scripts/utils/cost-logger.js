@@ -17,6 +17,7 @@ export const PRICING = {
 
   // Apify (per run, approximate — refine from actual billing)
   'apify-reddit': { per_run: 0.05 },
+  'apify-instagram': { per_run: 0.10 },
   'apify-tiktok': { per_run: 0.10 },
   'apify-google-trends': { per_run: 0.05 },
   'apify/default': { per_run: 0.05 },

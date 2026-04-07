@@ -1,10 +1,12 @@
-name: Daily Research Agent
+name: System Orchestrator
 
 on:
-  workflow_dispatch: # Manual trigger
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 
 jobs:
-  research:
+  orchestrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,15 +18,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Research Agent
+      - name: Run Orchestrator
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: node agents/research.js
-
-  trigger-content:
-    needs: research
-    uses: ./.github/workflows/content-gen.yml
-    secrets: inherit
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node agents/orchestrator.js

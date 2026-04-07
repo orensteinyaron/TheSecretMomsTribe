@@ -80,6 +80,62 @@ async function getLatestBriefing() {
   return data;
 }
 
+// --- Strategy awareness ---
+
+async function fetchActiveDirectives() {
+  try {
+    const { data } = await supabase
+      .from('system_directives')
+      .select('directive, directive_type, parameters')
+      .eq('status', 'active')
+      .or('target_agent.is.null,target_agent.eq.content-text-gen');
+    return data || [];
+  } catch (err) {
+    console.warn(`[Content] Failed to fetch directives (non-fatal): ${err.message}`);
+    return [];
+  }
+}
+
+async function fetchConfirmedInsights() {
+  try {
+    const { data } = await supabase
+      .from('strategy_insights')
+      .select('insight_type, insight, confidence')
+      .in('status', ['confirmed', 'applied'])
+      .order('confidence', { ascending: false })
+      .limit(15);
+    return data || [];
+  } catch (err) {
+    console.warn(`[Content] Failed to fetch insights (non-fatal): ${err.message}`);
+    return [];
+  }
+}
+
+async function fetchRenderProfileMap() {
+  try {
+    const { data } = await supabase
+      .from('render_profiles')
+      .select('id, slug, name, profile_type, status');
+    if (!data) return {};
+    const map = {};
+    for (const rp of data) map[rp.slug] = rp;
+    return map;
+  } catch (err) {
+    console.warn(`[Content] Failed to fetch render profiles (non-fatal): ${err.message}`);
+    return {};
+  }
+}
+
+// Fallback: map post_format to render profile slug
+const FORMAT_TO_PROFILE = {
+  tiktok_slideshow: 'moving-images',
+  tiktok_text: 'static-image',
+  ig_carousel: 'carousel',
+  ig_static: 'static-image',
+  ig_meme: 'static-image',
+  video_script: 'moving-images',
+};
+
 // --- Coverage gap analysis ---
 
 async function getCoverageGaps() {
@@ -162,12 +218,26 @@ CRITICAL RULES:
 
 // --- Generate batch ---
 
-async function generateBatch(briefing, dna, coverageGaps, recentHooks) {
+async function generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights) {
   const systemPrompt = buildSystemPrompt(dna);
 
   const numOpps = briefing.opportunities.length;
 
+  // Build strategy context block
+  let strategyBlock = '';
+  if (directives.length > 0) {
+    strategyBlock += '\n## Active Directives (follow these)\n';
+    for (const d of directives) strategyBlock += `- [${d.directive_type}] ${d.directive}\n`;
+  }
+  if (insights.length > 0) {
+    strategyBlock += '\n## Confirmed Strategy Insights (apply these learnings)\n';
+    for (const ins of insights.slice(0, 10)) {
+      strategyBlock += `- [${ins.insight_type}, confidence: ${ins.confidence}] ${ins.insight}\n`;
+    }
+  }
+
   const userPrompt = `Generate a post for EVERY good opportunity below. Be GREEDY — stockpile everything good. AI Magic and Tech posts are rare, always generate them.
+${strategyBlock}
 
 ## Today's Briefing Opportunities (${numOpps} total)
 ${JSON.stringify(briefing.opportunities, null, 2)}
@@ -242,7 +312,7 @@ Return ONLY the JSON array. No explanation.`;
   console.log(`[Content] Calling Claude (${CLAUDE_MODEL})...`);
   const msg = await anthropic.messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 8000,
+    max_tokens: 16000,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
   });
@@ -339,26 +409,40 @@ function validateBatch(posts) {
 
 // --- Write to Supabase ---
 
-async function writeContentQueue(posts, briefingId) {
-  const rows = posts.map((p) => ({
-    briefing_id: briefingId,
-    platform: p.platform,
-    content_type: p.content_type,
-    status: 'draft',
-    hook: p.hook,
-    caption: p.caption,
-    hashtags: p.hashtags,
-    ai_magic_output: p.ai_magic_output || null,
-    image_prompt: p.image_prompt || null,
-    audio_suggestion: p.audio_suggestion || null,
-    age_range: p.age_range,
-    content_pillar: p.content_pillar,
-    post_format: p.post_format,
-    slides: p.slides || [],
-    image_status: 'pending',
-    launch_bank: false,
-    quality_rating: null,
-  }));
+async function writeContentQueue(posts, briefingId, renderProfileMap, briefingOpps) {
+  const rows = posts.map((p, i) => {
+    // Resolve render_profile_id: briefing recommendation → format fallback → null
+    const opp = briefingOpps?.[i];
+    const recommendedSlug = opp?.recommended_format || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
+    const profile = renderProfileMap[recommendedSlug];
+    const renderProfileId = profile?.id || null;
+
+    if (renderProfileId) {
+      console.log(`[Content] Post ${i + 1} → render profile: ${recommendedSlug}`);
+    }
+
+    return {
+      briefing_id: briefingId,
+      platform: p.platform,
+      content_type: p.content_type,
+      status: 'draft',
+      hook: p.hook,
+      caption: p.caption,
+      hashtags: p.hashtags,
+      ai_magic_output: p.ai_magic_output || null,
+      image_prompt: p.image_prompt || null,
+      audio_suggestion: p.audio_suggestion || null,
+      age_range: p.age_range,
+      content_pillar: p.content_pillar,
+      post_format: p.post_format,
+      slides: p.slides || [],
+      image_status: 'pending',
+      launch_bank: false,
+      quality_rating: null,
+      render_profile_id: renderProfileId,
+      render_status: renderProfileId ? 'pending' : null,
+    };
+  });
 
   const { error } = await supabase.from('content_queue').insert(rows);
 
@@ -387,21 +471,24 @@ async function main() {
     process.exit(1);
   }
 
-  // Coverage analysis
-  const coverageGaps = await getCoverageGaps();
-
-  // Dedup
-  const recentHooks = await getRecentHooks();
-  console.log(`[Content] Recent hooks to avoid: ${recentHooks.length}`);
+  // Fetch strategy context + coverage in parallel
+  const [coverageGaps, recentHooks, directives, insights, renderProfileMap] = await Promise.all([
+    getCoverageGaps(),
+    getRecentHooks(),
+    fetchActiveDirectives(),
+    fetchConfirmedInsights(),
+    fetchRenderProfileMap(),
+  ]);
+  console.log(`[Content] Recent hooks: ${recentHooks.length}, Directives: ${directives.length}, Insights: ${insights.length}, Render profiles: ${Object.keys(renderProfileMap).length}`);
 
   // Generate batch via Claude
-  const { posts: rawPosts, usage } = await generateBatch(briefing, dna, coverageGaps, recentHooks);
+  const { posts: rawPosts, usage } = await generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights);
 
   // Validate
   const posts = validateBatch(rawPosts);
 
   // Write to Supabase
-  await writeContentQueue(posts, briefing.id);
+  await writeContentQueue(posts, briefing.id, renderProfileMap, briefing.opportunities);
 
   // Log per-post cost share (split generation cost evenly)
   if (usage && posts.length > 0) {

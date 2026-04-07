@@ -218,6 +218,50 @@ async function scanRedditFallback() {
   }
 }
 
+// --- Strategy awareness ---
+
+async function fetchActiveDirectives() {
+  try {
+    const { data } = await supabase
+      .from('system_directives')
+      .select('directive, directive_type, parameters')
+      .eq('status', 'active')
+      .or('target_agent.is.null,target_agent.eq.research-agent');
+    return data || [];
+  } catch (err) {
+    console.warn(`[Research] Failed to fetch directives (non-fatal): ${err.message}`);
+    return [];
+  }
+}
+
+async function fetchConfirmedInsights() {
+  try {
+    const { data } = await supabase
+      .from('strategy_insights')
+      .select('insight_type, insight, confidence')
+      .in('status', ['confirmed', 'applied'])
+      .order('confidence', { ascending: false })
+      .limit(20);
+    return data || [];
+  } catch (err) {
+    console.warn(`[Research] Failed to fetch insights (non-fatal): ${err.message}`);
+    return [];
+  }
+}
+
+async function fetchActiveRenderProfiles() {
+  try {
+    const { data } = await supabase
+      .from('render_profiles')
+      .select('slug, name, profile_type, status')
+      .eq('status', 'active');
+    return data || [];
+  } catch (err) {
+    console.warn(`[Research] Failed to fetch render profiles (non-fatal): ${err.message}`);
+    return [];
+  }
+}
+
 // --- Dedup ---
 
 async function fetchRecentTopics() {
@@ -316,12 +360,14 @@ Return a JSON array of exactly 5 objects. Each object:
   "content_type": "wow | trust | cta",
   "platform_fit": "tiktok | instagram | both",
   "priority": 1-5 (integer, 1 = highest),
-  "suggested_hook": "The opening line or first 3 seconds (be specific and punchy)"
+  "suggested_hook": "The opening line or first 3 seconds (be specific and punchy)",
+  "recommended_format": "Render profile slug (e.g. 'moving-images', 'static-image'). Pick the best format for this content.",
+  "signal_strength": 1-10 (integer, how strong the underlying signal is)
 }
 
 Return ONLY the JSON array. No markdown fences, no explanation.`;
 
-function buildUserPrompt(sources, recentTopics) {
+function buildUserPrompt(sources, recentTopics, directives, insights, renderProfiles) {
   const sections = [];
 
   sections.push('# Signals Collected Today\n');
@@ -353,6 +399,33 @@ function buildUserPrompt(sources, recentTopics) {
   if (recentTopics.length > 0) {
     sections.push(`## Topics to AVOID (used in last 7 days)`);
     sections.push(recentTopics.join(', '));
+    sections.push('');
+  }
+
+  // Inject strategy context
+  if (directives.length > 0) {
+    sections.push('## Active Directives (follow these)');
+    for (const d of directives) {
+      sections.push(`- [${d.directive_type}] ${d.directive}`);
+    }
+    sections.push('');
+  }
+
+  if (insights.length > 0) {
+    sections.push('## Confirmed Strategy Insights (weight your selections accordingly)');
+    for (const ins of insights.slice(0, 10)) {
+      sections.push(`- [${ins.insight_type}, confidence: ${ins.confidence}] ${ins.insight}`);
+    }
+    sections.push('');
+  }
+
+  if (renderProfiles.length > 0) {
+    sections.push('## Available Render Formats');
+    sections.push('For each opportunity, recommend the best format from:');
+    for (const rp of renderProfiles) {
+      sections.push(`- "${rp.slug}" — ${rp.name} (${rp.profile_type})`);
+    }
+    sections.push('Set "recommended_format" to one of these slugs, or "static-image" as fallback.');
     sections.push('');
   }
 
@@ -394,6 +467,8 @@ function validateOpportunities(opportunities) {
     opp.source = opp.source || 'cross_signal';
     opp.reasoning = opp.reasoning || '';
     opp.priority = Number(opp.priority) || (i + 1);
+    opp.recommended_format = opp.recommended_format || 'static-image';
+    opp.signal_strength = Number(opp.signal_strength) || 5;
   }
 
   // Soft checks (warn but don't fail)
@@ -432,11 +507,16 @@ function validateOpportunities(opportunities) {
 // --- Synthesis ---
 
 async function generateBriefing(sources) {
-  console.log('[Research] Fetching recent topics for dedup...');
-  const recentTopics = await fetchRecentTopics();
-  console.log(`[Research] Topics to avoid: ${recentTopics.length}`);
+  // Fetch strategy context in parallel
+  const [recentTopics, directives, insights, renderProfiles] = await Promise.all([
+    fetchRecentTopics(),
+    fetchActiveDirectives(),
+    fetchConfirmedInsights(),
+    fetchActiveRenderProfiles(),
+  ]);
+  console.log(`[Research] Topics to avoid: ${recentTopics.length}, Directives: ${directives.length}, Insights: ${insights.length}, Render profiles: ${renderProfiles.length}`);
 
-  const userPrompt = buildUserPrompt(sources, recentTopics);
+  const userPrompt = buildUserPrompt(sources, recentTopics, directives, insights, renderProfiles);
 
   console.log(`[Research] Calling Claude (${CLAUDE_MODEL})...`);
   const msg = await anthropic.messages.create({

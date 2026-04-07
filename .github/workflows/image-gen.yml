@@ -2,10 +2,6 @@ name: Generate Images
 
 on:
   workflow_dispatch: # Manual trigger (after Yaron's review)
-  schedule:
-    # 3pm Israel time (IST = UTC+3) → noon UTC
-    # Runs after Yaron's morning review window
-    - cron: '0 12 * * *'
 
 jobs:
   generate-images:
