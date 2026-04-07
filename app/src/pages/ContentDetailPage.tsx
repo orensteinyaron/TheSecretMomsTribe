@@ -6,7 +6,7 @@ import { PlatformIcon } from '../components/shared/PlatformIcon';
 import { EditableField } from '../components/shared/EditableField';
 import { useContentDetail, useContentUpdate } from '../hooks/useContent';
 import { contentApi } from '../api/content';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useMutation } from '@tanstack/react-query';
 
 export default function ContentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +14,10 @@ export default function ContentDetailPage() {
   const qc = useQueryClient();
   const { data: item, isLoading } = useContentDetail(id!);
   const updateMutation = useContentUpdate();
+  const renderMutation = useMutation({
+    mutationFn: (contentId: string) => contentApi.triggerRender(contentId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['content'] }),
+  });
 
   if (isLoading) {
     return (
@@ -30,10 +34,7 @@ export default function ContentDetailPage() {
 
   const approve = () => updateMutation.mutate({ id: item.id, status: 'approved' });
   const reject = () => updateMutation.mutate({ id: item.id, status: 'rejected' });
-  const triggerRender = async () => {
-    await contentApi.triggerRender(item.id);
-    qc.invalidateQueries({ queryKey: ['content'] });
-  };
+  const triggerRender = () => renderMutation.mutate(item.id);
 
   return (
     <div>
