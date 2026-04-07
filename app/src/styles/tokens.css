@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  /* Backgrounds */
+  --color-bg-app: #121214;
+  --color-bg-surface: #1a1a1e;
+  --color-bg-elevated: #242428;
+  --color-bg-sidebar: #161618;
+  --color-bg-input: #1e1e22;
+  --color-bg-hover: #2a2a2e;
+  --color-bg-active: #32323a;
+
+  /* Brand */
+  --color-accent: #b74780;
+  --color-accent-hover: #cf5494;
+  --color-accent-2: #63246a;
+
+  /* Text */
+  --color-text-primary: #f0f0f0;
+  --color-text-secondary: #9a9a9f;
+  --color-text-tertiary: #6b6b70;
+  --color-text-inverse: #121214;
+
+  /* Borders */
+  --color-border-default: #2c2c30;
+  --color-border-subtle: #222226;
+  --color-border-focus: #b74780;
+
+  /* Semantic */
+  --color-success: #2dd4a0;
+  --color-warning: #f5a623;
+  --color-error: #ef4444;
+  --color-info: #60a5fa;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* Fonts */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Accent muted backgrounds */
+:root {
+  --accent-muted: rgba(183, 71, 128, 0.15);
+  --success-muted: rgba(45, 212, 160, 0.12);
+  --warning-muted: rgba(245, 166, 35, 0.12);
+  --error-muted: rgba(239, 68, 68, 0.12);
+  --info-muted: rgba(96, 165, 250, 0.12);
+}
+
+/* Base styles */
+body {
+  background-color: #121214;
+  color: #f0f0f0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2c2c30; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3c3c40; }
