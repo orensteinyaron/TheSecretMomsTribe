@@ -3,6 +3,13 @@ import { Shell } from './components/layout/Shell';
 import Dashboard from './pages/Dashboard';
 import Pipeline from './pages/Pipeline';
 import ContentDetailPage from './pages/ContentDetailPage';
+import Strategy from './pages/Strategy';
+import Research from './pages/Research';
+import RenderQueue from './pages/RenderQueue';
+import Directives from './pages/Directives';
+import Agents from './pages/Agents';
+import Services from './pages/Services';
+import Activity from './pages/Activity';
 import Placeholder from './pages/Placeholder';
 
 export default function App() {
@@ -12,16 +19,16 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="pipeline" element={<Pipeline />} />
         <Route path="pipeline/:id" element={<ContentDetailPage />} />
-        <Route path="strategy" element={<Placeholder />} />
-        <Route path="research" element={<Placeholder />} />
+        <Route path="strategy" element={<Strategy />} />
+        <Route path="research" element={<Research />} />
         <Route path="planner" element={<Placeholder />} />
-        <Route path="renders" element={<Placeholder />} />
+        <Route path="renders" element={<RenderQueue />} />
         <Route path="analytics" element={<Placeholder />} />
-        <Route path="activity" element={<Placeholder />} />
-        <Route path="system/agents" element={<Placeholder />} />
-        <Route path="system/services" element={<Placeholder />} />
+        <Route path="activity" element={<Activity />} />
+        <Route path="system/agents" element={<Agents />} />
+        <Route path="system/services" element={<Services />} />
         <Route path="system/profiles" element={<Placeholder />} />
-        <Route path="system/directives" element={<Placeholder />} />
+        <Route path="system/directives" element={<Directives />} />
         <Route path="system/costs" element={<Placeholder />} />
         <Route path="notifications" element={<Placeholder />} />
         <Route path="settings" element={<Placeholder />} />
