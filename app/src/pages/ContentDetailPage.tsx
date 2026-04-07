@@ -64,21 +64,20 @@ export default function ContentDetailPage() {
               </button>
             </>
           )}
+          {item.status === 'approved' && item.render_status === 'rendering' && (
+            <span className="flex items-center gap-1.5 text-accent text-sm font-medium px-4 py-2">
+              <RefreshCw size={16} className="animate-spin" /> Rendering...
+            </span>
+          )}
           {item.status === 'approved' && item.render_status !== 'rendering' && (
-            renderMutation.isSuccess ? (
-              <span className="flex items-center gap-1.5 text-success text-sm font-medium px-4 py-2">
-                <Check size={16} /> Render queued
-              </span>
-            ) : (
-              <button
-                onClick={triggerRender}
-                disabled={renderMutation.isPending}
-                className="flex items-center gap-1.5 bg-bg-elevated text-text-primary text-sm font-medium px-4 py-2 rounded-md border border-border-default hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RefreshCw size={16} className={renderMutation.isPending ? 'animate-spin' : ''} />
-                {renderMutation.isPending ? 'Queuing...' : 'Re-render'}
-              </button>
-            )
+            <button
+              onClick={triggerRender}
+              disabled={renderMutation.isPending}
+              className="flex items-center gap-1.5 bg-bg-elevated text-text-primary text-sm font-medium px-4 py-2 rounded-md border border-border-default hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={16} className={renderMutation.isPending ? 'animate-spin' : ''} />
+              {renderMutation.isPending ? 'Starting render...' : item.render_status === 'complete' ? 'Re-render' : 'Render'}
+            </button>
           )}
         </div>
       </div>
