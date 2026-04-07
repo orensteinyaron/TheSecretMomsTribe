@@ -48,7 +48,7 @@ function PreviewModal({ item, onClose, onReschedule, onUnschedule }: {
   onUnschedule: () => void;
 }) {
   const navigate = useNavigate();
-  const [newDate, setNewDate] = useState(item.scheduled_for?.split('T')[0] || '');
+  const [newDate, setNewDate] = useState(item.scheduled_for?.split('T')[0] || new Date().toISOString().split('T')[0]);
   const isVideo = item.final_asset_url?.endsWith('.mp4');
 
   return (
@@ -113,7 +113,7 @@ function PreviewModal({ item, onClose, onReschedule, onUnschedule }: {
                 disabled={!newDate}
                 className="text-xs font-medium text-accent bg-[var(--accent-muted)] px-3 py-1 rounded-md hover:bg-accent/20 disabled:opacity-40"
               >
-                Reschedule
+                {item.scheduled_for ? 'Reschedule' : 'Schedule'}
               </button>
             </div>
           </div>
