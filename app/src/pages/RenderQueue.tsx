@@ -74,7 +74,7 @@ export default function RenderQueue() {
       ) : (
         <div className="grid grid-cols-3 gap-6">
           {/* Pending */}
-          <div>
+          <div data-testid="column-pending">
             <h2 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-3">
               Pending <span className="text-text-tertiary">({groups.pending.length})</span>
             </h2>
@@ -85,7 +85,7 @@ export default function RenderQueue() {
           </div>
 
           {/* Rendering */}
-          <div>
+          <div data-testid="column-rendering">
             <h2 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-3">
               Rendering <span className="text-text-tertiary">({groups.rendering.length})</span>
             </h2>
@@ -96,7 +96,7 @@ export default function RenderQueue() {
           </div>
 
           {/* Failed */}
-          <div>
+          <div data-testid="column-failed">
             <h2 className="text-[11px] font-semibold tracking-wide uppercase text-error mb-3">
               Failed / Blocked <span className="text-text-tertiary">({groups.failed.length})</span>
             </h2>

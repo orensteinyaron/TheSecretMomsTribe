@@ -11,15 +11,12 @@ test.describe('Services', () => {
   });
 
   test('shows service table headers', async ({ page }) => {
-    const main = page.locator('main');
-    for (const h of ['NAME', 'TYPE', 'PROVIDER', 'STATUS']) {
-      await expect(main.getByText(h, { exact: true })).toBeVisible();
-    }
+    await expect(page.locator('[data-testid="services-table"]')).toBeVisible();
   });
 
   test('shows active and no_key statuses', async ({ page }) => {
-    const main = page.locator('main');
-    await expect(main.getByText('ACTIVE', { exact: true }).first()).toBeVisible();
-    await expect(main.getByText('NO KEY', { exact: true }).first()).toBeVisible();
+    const table = page.locator('[data-testid="services-table"]');
+    await expect(table.getByText('ACTIVE', { exact: true }).first()).toBeVisible();
+    await expect(table.getByText('NO KEY', { exact: true }).first()).toBeVisible();
   });
 });

@@ -20,7 +20,7 @@ function CreateDirectiveForm({ onCreated }: { onCreated: () => void }) {
   });
 
   return (
-    <div className="bg-bg-surface border border-border-default rounded-lg p-5 mb-6">
+    <div className="bg-bg-surface border border-border-default rounded-lg p-5 mb-6" data-testid="directive-form">
       <h2 className="text-sm font-semibold text-text-primary mb-4">Create Directive</h2>
       <div className="space-y-3">
         <textarea
@@ -84,7 +84,7 @@ export default function Directives() {
 
       <CreateDirectiveForm onCreated={() => qc.invalidateQueries({ queryKey: ['strategy', 'directives'] })} />
 
-      <div className="flex gap-1 mb-4 bg-bg-surface rounded-lg p-1 w-fit border border-border-default">
+      <div className="flex gap-1 mb-4 bg-bg-surface rounded-lg p-1 w-fit border border-border-default" data-testid="directive-tabs">
         {TABS.map((t) => (
           <button key={t.value} onClick={() => setTab(t.value)}
             className={`px-3 py-1.5 text-sm rounded-md transition-colors ${tab === t.value ? 'bg-bg-active text-text-primary font-medium' : 'text-text-secondary hover:text-text-primary'}`}>

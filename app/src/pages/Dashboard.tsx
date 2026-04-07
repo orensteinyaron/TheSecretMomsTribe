@@ -51,10 +51,10 @@ function SnapshotCards() {
 
   return (
     <div className="grid grid-cols-4 gap-4 mb-8">
-      <MetricCard label="Pipeline" value={health ? `${health.pending_content + (health.agents?.total ?? 0)} total` : '—'} icon={<Layers size={20} />} onClick={() => navigate('/pipeline')} />
-      <MetricCard label="Renders" value={health?.failed_renders !== undefined ? `${health.failed_renders} failed` : '—'} icon={<Film size={20} />} onClick={() => navigate('/renders')} />
-      <MetricCard label="System" value={health ? `${health.agents?.healthy ?? 0}/${health.agents?.total ?? 0} healthy` : '—'} icon={<Bot size={20} />} onClick={() => navigate('/system/agents')} />
-      <MetricCard label="Today's Cost" value={health?.today_cost !== undefined ? `$${health.today_cost.toFixed(2)}` : '—'} icon={<CalendarDays size={20} />} onClick={() => navigate('/system/costs')} />
+      <MetricCard label="Pipeline" value={health ? `${health.pending_content + (health.agents?.total ?? 0)} total` : '—'} icon={<Layers size={20} />} onClick={() => navigate('/pipeline')} data-testid="metric-pipeline" />
+      <MetricCard label="Renders" value={health?.failed_renders !== undefined ? `${health.failed_renders} failed` : '—'} icon={<Film size={20} />} onClick={() => navigate('/renders')} data-testid="metric-renders" />
+      <MetricCard label="System" value={health ? `${health.agents?.healthy ?? 0}/${health.agents?.total ?? 0} healthy` : '—'} icon={<Bot size={20} />} onClick={() => navigate('/system/agents')} data-testid="metric-system" />
+      <MetricCard label="Today's Cost" value={health?.today_cost !== undefined ? `$${health.today_cost.toFixed(2)}` : '—'} icon={<CalendarDays size={20} />} onClick={() => navigate('/system/costs')} data-testid="metric-cost" />
     </div>
   );
 }

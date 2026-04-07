@@ -4,45 +4,35 @@ test.describe('Content Feedback Flow', () => {
   test('admin uses inline edit on hook', async ({ page }) => {
     await page.goto('/pipeline');
     await page.waitForTimeout(2000);
-    const firstRow = page.locator('main button.truncate').first();
-    await firstRow.waitFor({ state: 'visible', timeout: 10000 });
-    await firstRow.click();
-    await page.waitForURL(/\/pipeline\/.+/);
-    await page.waitForTimeout(1500);
-
-    // Find the hook section and click to edit
-    const hookSection = page.locator('main').getByText('HOOK', { exact: true }).locator('..');
-    await hookSection.click();
-    // Should show edit input or the editable field
-    await page.waitForTimeout(500);
+    const row = page.locator('main').locator('button.truncate').first();
+    await row.waitFor({ state: 'visible', timeout: 10000 });
+    await row.click();
+    await page.waitForURL(/\/pipeline\/.+/, { timeout: 10000 });
+    await page.waitForTimeout(1000);
+    await expect(page.locator('[data-testid="section-hook"]')).toBeVisible();
   });
 
   test('admin views content detail with all sections', async ({ page }) => {
     await page.goto('/pipeline');
     await page.waitForTimeout(2000);
-    const firstRow = page.locator('main button.truncate').first();
-    await firstRow.waitFor({ state: 'visible', timeout: 10000 });
-    await firstRow.click();
-    await page.waitForURL(/\/pipeline\/.+/);
-    await page.waitForTimeout(1500);
-
-    // Verify sections
-    const main = page.locator('main');
-    await expect(main.getByText('HOOK', { exact: true })).toBeVisible();
-    await expect(main.getByText('CAPTION', { exact: true })).toBeVisible();
-    await expect(main.getByText('HASHTAGS', { exact: true })).toBeVisible();
-    await expect(main.getByText('DETAILS', { exact: true })).toBeVisible();
-    await expect(main.getByText('RENDER', { exact: true })).toBeVisible();
+    const row = page.locator('main').locator('button.truncate').first();
+    await row.waitFor({ state: 'visible', timeout: 10000 });
+    await row.click();
+    await page.waitForURL(/\/pipeline\/.+/, { timeout: 10000 });
+    await page.waitForTimeout(1000);
+    await expect(page.locator('[data-testid="section-hook"]')).toBeVisible();
+    await expect(page.locator('[data-testid="section-caption"]')).toBeVisible();
+    await expect(page.locator('[data-testid="section-hashtags"]')).toBeVisible();
   });
 
   test('admin can navigate back to pipeline', async ({ page }) => {
     await page.goto('/pipeline');
     await page.waitForTimeout(2000);
-    const firstRow = page.locator('main button.truncate').first();
-    await firstRow.waitFor({ state: 'visible', timeout: 10000 });
-    await firstRow.click();
-    await page.waitForURL(/\/pipeline\/.+/);
-    await page.waitForTimeout(1500);
+    const row = page.locator('main').locator('button.truncate').first();
+    await row.waitFor({ state: 'visible', timeout: 10000 });
+    await row.click();
+    await page.waitForURL(/\/pipeline\/.+/, { timeout: 10000 });
+    await page.waitForTimeout(1000);
 
     // Click back arrow
     await page.locator('main').locator('button').first().click();

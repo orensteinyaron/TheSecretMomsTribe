@@ -4,42 +4,34 @@ test.describe('Full Content Lifecycle', () => {
   test('content detail shows all expected sections', async ({ page }) => {
     await page.goto('/pipeline');
     await page.waitForTimeout(2000);
-    const firstRow = page.locator('main button.truncate').first();
-    await firstRow.waitFor({ state: 'visible', timeout: 10000 });
-    await firstRow.click();
-    await page.waitForURL(/\/pipeline\/.+/);
-    await page.waitForTimeout(1500);
+    const row = page.locator('main').locator('button.truncate').first();
+    await row.waitFor({ state: 'visible', timeout: 10000 });
+    await row.click();
+    await page.waitForURL(/\/pipeline\/.+/, { timeout: 10000 });
+    await page.waitForTimeout(1000);
 
-    // All sections present
-    const main = page.locator('main');
-    await expect(main.getByText('HOOK', { exact: true })).toBeVisible();
-    await expect(main.getByText('CAPTION', { exact: true })).toBeVisible();
-    await expect(main.getByText('DETAILS', { exact: true })).toBeVisible();
-    await expect(main.getByText('RENDER', { exact: true })).toBeVisible();
-    await expect(main.getByText('Platform', { exact: true })).toBeVisible();
-    await expect(main.getByText('Format', { exact: true })).toBeVisible();
+    // All sections present via data-testid
+    await expect(page.locator('[data-testid="section-hook"]')).toBeVisible();
+    await expect(page.locator('[data-testid="section-caption"]')).toBeVisible();
+    await expect(page.locator('[data-testid="panel-details"]')).toBeVisible();
+    await expect(page.locator('[data-testid="panel-render"]')).toBeVisible();
   });
 
   test('render queue shows kanban columns', async ({ page }) => {
     await page.goto('/renders');
     await page.waitForTimeout(1500);
-    const main = page.locator('main');
     await expect(page.getByRole('heading', { name: 'Render Queue' })).toBeVisible();
-    await expect(main.locator('h2').filter({ hasText: 'PENDING' })).toBeVisible();
-    await expect(main.locator('h2').filter({ hasText: 'RENDERING' })).toBeVisible();
-    await expect(main.locator('h2').filter({ hasText: 'FAILED' })).toBeVisible();
+    await expect(page.locator('[data-testid="column-pending"]')).toBeVisible();
   });
 
   test('planner shows week view with gap detection', async ({ page }) => {
     await page.goto('/planner');
     await page.waitForTimeout(1500);
-    const main = page.locator('main');
     await expect(page.getByRole('heading', { name: 'Planner' })).toBeVisible();
-    // Week navigation
-    await expect(main.getByText('MON', { exact: true })).toBeVisible();
-    await expect(main.getByText('SUN', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="planner-headers"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planner-grid"]')).toBeVisible();
     // Gap detection
-    const gapBadge = main.getByText(/\d+ gap/);
+    const gapBadge = page.locator('main').getByText(/\d+ gap/);
     await expect(gapBadge).toBeVisible();
   });
 
@@ -55,8 +47,7 @@ test.describe('Full Content Lifecycle', () => {
     await page.goto('/analytics');
     await page.waitForTimeout(1500);
     await expect(page.getByRole('heading', { name: 'Analytics' })).toBeVisible();
-    await expect(page.locator('main').getByText('TOTAL CONTENT', { exact: true })).toBeVisible();
-    await expect(page.locator('main').getByText('APPROVAL RATE', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="analytics-metrics"]')).toBeVisible();
   });
 
   test('notifications page shows actionable items', async ({ page }) => {

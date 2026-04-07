@@ -18,7 +18,6 @@ test.describe('Render Queue', () => {
   });
 
   test('pending column shows count', async ({ page }) => {
-    const pending = page.locator('main h2').filter({ hasText: /PENDING/ });
-    await expect(pending).toBeVisible();
+    await expect(page.locator('[data-testid="column-pending"]')).toBeVisible();
   });
 });

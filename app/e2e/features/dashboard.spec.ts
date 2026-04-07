@@ -20,7 +20,7 @@ test.describe('Dashboard', () => {
   });
 
   test('snapshot cards are clickable', async ({ page }) => {
-    await page.locator('main').getByText('PIPELINE', { exact: true }).click();
+    await page.locator('[data-testid="metric-pipeline"]').click();
     await expect(page).toHaveURL('/pipeline');
   });
 

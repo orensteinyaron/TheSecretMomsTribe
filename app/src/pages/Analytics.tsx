@@ -130,7 +130,7 @@ export default function Analytics() {
       </div>
 
       {/* Overview cards */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-4 gap-4 mb-8" data-testid="analytics-metrics">
         <MetricCard label="Total Content" value={stats?.total ?? '—'} icon={<TrendingUp size={20} />} />
         <MetricCard label="Approval Rate" value={`${approvalRate}%`} />
         <MetricCard label={`Cost (${period})`} value={costs ? `$${costs.total.toFixed(2)}` : '—'} />

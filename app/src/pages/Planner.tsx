@@ -319,7 +319,7 @@ export default function Planner() {
       {/* Unified calendar grid */}
       <div className="bg-bg-surface border border-border-default rounded-lg overflow-hidden">
         {/* Day headers */}
-        <div className="grid grid-cols-7 border-b border-border-subtle">
+        <div className="grid grid-cols-7 border-b border-border-subtle" data-testid="planner-headers">
           {weekDates.map((date, i) => {
             const isToday = fmtDate(date) === fmtDate(new Date());
             const dayItems = grouped[fmtDate(date)] || [];
@@ -334,7 +334,7 @@ export default function Planner() {
         </div>
 
         {/* Day cells */}
-        <div className="grid grid-cols-7">
+        <div className="grid grid-cols-7" data-testid="planner-grid">
           {weekDates.map((date, i) => (
             <div key={i} className="border-l border-border-subtle first:border-l-0">
               <DayCell

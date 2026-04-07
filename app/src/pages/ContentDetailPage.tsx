@@ -91,7 +91,7 @@ export default function ContentDetailPage() {
         {/* Left: Content */}
         <div className="col-span-2 space-y-6">
           {/* Hook */}
-          <div className="bg-bg-surface border border-border-default rounded-lg p-6">
+          <div className="bg-bg-surface border border-border-default rounded-lg p-6" data-testid="section-hook">
             <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-2">Hook</h3>
             <EditableField
               value={item.hook}
@@ -119,7 +119,7 @@ export default function ContentDetailPage() {
           )}
 
           {/* Caption */}
-          <div className="bg-bg-surface border border-border-default rounded-lg p-6">
+          <div className="bg-bg-surface border border-border-default rounded-lg p-6" data-testid="section-caption">
             <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-2">Caption</h3>
             <EditableField
               value={item.caption}
@@ -130,7 +130,7 @@ export default function ContentDetailPage() {
           </div>
 
           {/* Hashtags */}
-          <div className="bg-bg-surface border border-border-default rounded-lg p-6">
+          <div className="bg-bg-surface border border-border-default rounded-lg p-6" data-testid="section-hashtags">
             <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-2">Hashtags</h3>
             <div className="flex flex-wrap gap-1.5">
               {item.hashtags?.map((tag, i) => (
@@ -141,7 +141,7 @@ export default function ContentDetailPage() {
 
           {/* AI Magic Output */}
           {item.ai_magic_output && (
-            <div className="bg-bg-surface border border-border-default rounded-lg p-6">
+            <div className="bg-bg-surface border border-border-default rounded-lg p-6" data-testid="section-ai-magic">
               <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-2">AI Magic Output</h3>
               <p className="text-sm text-text-primary whitespace-pre-line">{item.ai_magic_output}</p>
             </div>
@@ -151,7 +151,7 @@ export default function ContentDetailPage() {
         {/* Right: Metadata + Render */}
         <div className="space-y-6">
           {/* Metadata */}
-          <div className="bg-bg-surface border border-border-default rounded-lg p-6">
+          <div className="bg-bg-surface border border-border-default rounded-lg p-6" data-testid="panel-details">
             <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-3">Details</h3>
             <dl className="space-y-3">
               {[
@@ -170,7 +170,7 @@ export default function ContentDetailPage() {
           </div>
 
           {/* Render Info */}
-          <div className="bg-bg-surface border border-border-default rounded-lg p-6">
+          <div className="bg-bg-surface border border-border-default rounded-lg p-6" data-testid="panel-render">
             <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-3">Render</h3>
             <dl className="space-y-3">
               <div>
@@ -200,7 +200,7 @@ export default function ContentDetailPage() {
 
           {/* Rendered Asset */}
           {item.final_asset_url && (
-            <div className="bg-bg-surface border border-border-default rounded-lg p-6">
+            <div className="bg-bg-surface border border-border-default rounded-lg p-6" data-testid="panel-asset">
               <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-3">Rendered Asset</h3>
               {item.final_asset_url.endsWith('.mp4') ? (
                 <video src={item.final_asset_url} controls className="w-full rounded-md" />

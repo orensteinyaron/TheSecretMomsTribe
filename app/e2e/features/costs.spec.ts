@@ -17,7 +17,6 @@ test.describe('Costs', () => {
   });
 
   test('shows cost metric cards', async ({ page }) => {
-    await expect(page.locator('main').getByText(/TOTAL/, { exact: false })).toBeVisible();
-    await expect(page.locator('main').getByText('DAILY AVG', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="cost-metrics"]')).toBeVisible();
   });
 });

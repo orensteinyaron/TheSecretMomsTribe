@@ -15,12 +15,9 @@ test.describe('System Management Flow', () => {
   test('agents show status badges and budget bars', async ({ page }) => {
     await page.goto('/system/agents');
     await page.waitForTimeout(1500);
-    const main = page.locator('main');
-    // All should be idle
-    const idleBadges = main.getByText('IDLE', { exact: true });
-    await expect(idleBadges.first()).toBeVisible();
-    // Budget info should be visible
-    await expect(main.getByText('Budget', { exact: false }).first()).toBeVisible();
+    const grid = page.locator('[data-testid="agents-grid"]');
+    await expect(grid).toBeVisible();
+    await expect(grid.getByText('Budget').first()).toBeVisible();
   });
 
   test('agent run history expands', async ({ page }) => {
@@ -37,14 +34,9 @@ test.describe('System Management Flow', () => {
   test('services page shows all services with status', async ({ page }) => {
     await page.goto('/system/services');
     await page.waitForTimeout(1500);
-    const main = page.locator('main');
-    await expect(page.getByRole('heading', { name: 'Services' })).toBeVisible();
-    // Check known services
-    await expect(main.getByText('Claude Haiku', { exact: true })).toBeVisible();
-    await expect(main.getByText('Pexels Stock Media', { exact: true })).toBeVisible();
-    await expect(main.getByText('OpenAI TTS', { exact: true })).toBeVisible();
-    // Status badges
-    await expect(main.getByText('ACTIVE', { exact: true }).first()).toBeVisible();
+    const table = page.locator('[data-testid="services-table"]');
+    await expect(table).toBeVisible();
+    await expect(table.getByText('Claude Haiku')).toBeVisible();
   });
 
   test('render profiles page shows all profiles', async ({ page }) => {

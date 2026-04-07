@@ -124,7 +124,7 @@ export default function Agents() {
       ) : !agents || agents.length === 0 ? (
         <EmptyState icon={<Bot size={24} />} title="No agents" description="No agents found in the database." />
       ) : (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4" data-testid="agents-grid">
           {agents.map((agent: Agent) => <AgentCard key={agent.id} agent={agent} />)}
         </div>
       )}

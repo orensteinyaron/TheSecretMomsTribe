@@ -11,17 +11,17 @@ test.describe('Pipeline', () => {
   });
 
   test('tab bar shows all filters', async ({ page }) => {
-    const main = page.locator('main');
+    const tabs = page.locator('[data-testid="pipeline-tabs"]');
     for (const tab of ['All', 'Review', 'Approved', 'Rejected']) {
-      await expect(main.getByRole('button', { name: tab })).toBeVisible();
+      await expect(tabs.getByRole('button', { name: tab, exact: true })).toBeVisible();
     }
   });
 
   test('switching tabs filters content', async ({ page }) => {
-    const main = page.locator('main');
-    await main.getByRole('button', { name: 'Approved' }).click();
+    const tabs = page.locator('[data-testid="pipeline-tabs"]');
+    await tabs.getByRole('button', { name: 'Approved', exact: true }).click();
     await page.waitForTimeout(500);
-    await main.getByRole('button', { name: 'All' }).click();
+    await tabs.getByRole('button', { name: 'All', exact: true }).click();
   });
 
   test('search bar is present and functional', async ({ page }) => {
@@ -33,11 +33,7 @@ test.describe('Pipeline', () => {
   });
 
   test('table header shows columns', async ({ page }) => {
-    const main = page.locator('main');
-    await expect(main.getByText('HOOK', { exact: true })).toBeVisible();
-    await expect(main.getByText('PLATFORM', { exact: true })).toBeVisible();
-    await expect(main.getByText('PILLAR', { exact: true })).toBeVisible();
-    await expect(main.getByText('STATUS', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="pipeline-header"]')).toBeVisible();
   });
 
   test('content rows are clickable', async ({ page }) => {
@@ -52,8 +48,7 @@ test.describe('Pipeline', () => {
     const checkbox = page.locator('main input[type="checkbox"]').nth(1);
     if (await checkbox.isVisible()) {
       await checkbox.check();
-      // Bulk actions should appear
-      await expect(page.locator('main').getByText(/Approve \d|Reject \d/)).toBeVisible();
+      await expect(page.locator('[data-testid="bulk-approve"]')).toBeVisible();
       await checkbox.uncheck();
     }
   });

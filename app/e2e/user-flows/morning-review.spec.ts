@@ -5,7 +5,7 @@ test.describe('Morning Review Flow', () => {
     await page.goto('/');
     await page.waitForTimeout(1000);
     await expect(page.getByText('NEEDS YOUR ATTENTION')).toBeVisible();
-    await expect(page.getByText('PIPELINE', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="metric-pipeline"]')).toBeVisible();
     await expect(page.getByText("TODAY'S COST")).toBeVisible();
   });
 

@@ -24,7 +24,7 @@ export default function Services() {
       ) : !services || services.length === 0 ? (
         <EmptyState icon={<Plug size={24} />} title="No services" description="No services registered." />
       ) : (
-        <div className="bg-bg-surface border border-border-default rounded-lg overflow-hidden">
+        <div className="bg-bg-surface border border-border-default rounded-lg overflow-hidden" data-testid="services-table">
           <div className="grid grid-cols-[1fr_100px_100px_80px_100px_100px_80px] gap-2 px-4 py-2 border-b border-border-subtle">
             {['Name', 'Type', 'Provider', 'Status', 'Cost', 'Fallback', 'Actions'].map((h) => (
               <span key={h} className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary">{h}</span>

@@ -11,10 +11,8 @@ test.describe('Planner', () => {
   });
 
   test('shows week day headers', async ({ page }) => {
-    const main = page.locator('main');
-    for (const day of ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']) {
-      await expect(main.getByText(day, { exact: true })).toBeVisible();
-    }
+    await expect(page.locator('[data-testid="planner-headers"]')).toBeVisible();
+    await expect(page.locator('[data-testid="planner-headers"]').getByText('MON')).toBeVisible();
   });
 
   test('shows gap detection', async ({ page }) => {

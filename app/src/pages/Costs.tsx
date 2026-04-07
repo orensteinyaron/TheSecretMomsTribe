@@ -103,7 +103,7 @@ export default function Costs() {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-4 gap-4 mb-8" data-testid="cost-metrics">
         <MetricCard label={`Total (${period})`} value={summary ? `$${summary.total.toFixed(2)}` : '—'} icon={<Wallet size={20} />} />
         <MetricCard label="By Stages" value={summary ? Object.keys(summary.by_stage).length.toString() : '—'} />
         <MetricCard label="By Services" value={summary ? Object.keys(summary.by_service).length.toString() : '—'} />

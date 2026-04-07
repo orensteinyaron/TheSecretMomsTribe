@@ -69,12 +69,14 @@ export default function Pipeline() {
           <div className="flex gap-2">
             <button
               onClick={() => { bulkApproveMutation.mutate([...selected]); setSelected(new Set()); }}
+              data-testid="bulk-approve"
               className="flex items-center gap-1.5 bg-success/20 text-success text-sm font-medium px-3 py-1.5 rounded-md hover:bg-success/30"
             >
               <Check size={14} /> Approve {selected.size}
             </button>
             <button
               onClick={() => { bulkRejectMutation.mutate({ ids: [...selected], reason: 'Bulk rejected' }); setSelected(new Set()); }}
+              data-testid="bulk-reject"
               className="flex items-center gap-1.5 bg-error/20 text-error text-sm font-medium px-3 py-1.5 rounded-md hover:bg-error/30"
             >
               <X size={14} /> Reject {selected.size}
@@ -100,11 +102,12 @@ export default function Pipeline() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-4 bg-bg-surface rounded-lg p-1 w-fit border border-border-default">
+      <div className="flex gap-1 mb-4 bg-bg-surface rounded-lg p-1 w-fit border border-border-default" data-testid="pipeline-tabs">
         {TABS.map((t) => (
           <button
             key={t.value}
             onClick={() => { setTab(t.value); setSelected(new Set()); }}
+            data-testid={`tab-${t.value}`}
             className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
               tab === t.value ? 'bg-bg-active text-text-primary font-medium' : 'text-text-secondary hover:text-text-primary'
             }`}
@@ -126,7 +129,7 @@ export default function Pipeline() {
       ) : (
         <div className="bg-bg-surface border border-border-default rounded-lg overflow-hidden">
           {/* Header */}
-          <div className="grid grid-cols-[36px_1fr_80px_90px_90px_80px_80px] gap-2 px-4 py-2 border-b border-border-subtle">
+          <div className="grid grid-cols-[36px_1fr_80px_90px_90px_80px_80px] gap-2 px-4 py-2 border-b border-border-subtle" data-testid="pipeline-header">
             <label className="flex items-center">
               <input type="checkbox" checked={selected.size === (displayItems || []).length && (displayItems || []).length > 0} onChange={toggleAll} className="accent-accent" />
             </label>
