@@ -69,14 +69,19 @@ export default function ContentDetailPage() {
               <RefreshCw size={16} className="animate-spin" /> Rendering...
             </span>
           )}
-          {item.status === 'approved' && item.render_status !== 'rendering' && (
+          {item.status === 'approved' && item.render_status === 'pending' && (
+            <span className="flex items-center gap-1.5 text-warning text-sm font-medium px-4 py-2">
+              <RefreshCw size={16} /> Queued for render
+            </span>
+          )}
+          {item.status === 'approved' && !['rendering', 'pending'].includes(item.render_status || '') && (
             <button
               onClick={triggerRender}
               disabled={renderMutation.isPending}
               className="flex items-center gap-1.5 bg-bg-elevated text-text-primary text-sm font-medium px-4 py-2 rounded-md border border-border-default hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw size={16} className={renderMutation.isPending ? 'animate-spin' : ''} />
-              {renderMutation.isPending ? 'Starting render...' : item.render_status === 'complete' ? 'Re-render' : 'Render'}
+              {renderMutation.isPending ? 'Queuing...' : item.render_status === 'complete' ? 'Re-render' : 'Render'}
             </button>
           )}
         </div>
