@@ -65,9 +65,20 @@ export default function ContentDetailPage() {
             </>
           )}
           {item.status === 'approved' && item.render_status !== 'rendering' && (
-            <button onClick={triggerRender} className="flex items-center gap-1.5 bg-bg-elevated text-text-primary text-sm font-medium px-4 py-2 rounded-md border border-border-default hover:bg-bg-hover">
-              <RefreshCw size={16} /> Re-render
-            </button>
+            renderMutation.isSuccess ? (
+              <span className="flex items-center gap-1.5 text-success text-sm font-medium px-4 py-2">
+                <Check size={16} /> Render queued
+              </span>
+            ) : (
+              <button
+                onClick={triggerRender}
+                disabled={renderMutation.isPending}
+                className="flex items-center gap-1.5 bg-bg-elevated text-text-primary text-sm font-medium px-4 py-2 rounded-md border border-border-default hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw size={16} className={renderMutation.isPending ? 'animate-spin' : ''} />
+                {renderMutation.isPending ? 'Queuing...' : 'Re-render'}
+              </button>
+            )
           )}
         </div>
       </div>
