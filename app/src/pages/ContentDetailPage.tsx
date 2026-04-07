@@ -5,10 +5,13 @@ import { PillarBadge } from '../components/shared/PillarBadge';
 import { PlatformIcon } from '../components/shared/PlatformIcon';
 import { EditableField } from '../components/shared/EditableField';
 import { useContentDetail, useContentUpdate } from '../hooks/useContent';
+import { contentApi } from '../api/content';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function ContentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: item, isLoading } = useContentDetail(id!);
   const updateMutation = useContentUpdate();
 
@@ -27,7 +30,10 @@ export default function ContentDetailPage() {
 
   const approve = () => updateMutation.mutate({ id: item.id, status: 'approved' });
   const reject = () => updateMutation.mutate({ id: item.id, status: 'rejected' });
-  const triggerRender = () => updateMutation.mutate({ id: item.id, render_status: 'pending' });
+  const triggerRender = async () => {
+    await contentApi.triggerRender(item.id);
+    qc.invalidateQueries({ queryKey: ['content'] });
+  };
 
   return (
     <div>
