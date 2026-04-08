@@ -66,6 +66,30 @@ Single image with text overlay.
 - Caption: 100-180 words, mini-essay format
 - Dimensions: 1080x1350 (4:5)
 
+### Avatar Formats (NEW)
+
+**`tiktok_avatar`** — Full avatar video. Marry talks directly to camera, no B-roll.
+- Duration: 15-60 seconds
+- Use for: hot takes, personal stories, trust content, emotional topics
+- Clips: 3-5, all type "avatar"
+- Generates: `avatar_config` JSON in content_queue
+
+**`tiktok_avatar_visual`** — Avatar + visual inserts. Marry talks with B-roll breaks.
+- Duration: 15-60 seconds
+- Use for: product reveals, explainers, comparisons, proof-based content
+- Clips: 3-6, mixing avatar/split/broll
+- Generates: `avatar_config` JSON in content_queue
+
+**When to Use Avatar vs Moving Images:**
+- Avatar: When the content needs a HUMAN FACE for trust. Personal opinions, emotional topics, "I tested this" reveals.
+- Moving Images: When the content is VISUAL. Before/after comparisons, step-by-step tutorials, aesthetic content.
+- Default to Moving Images unless the topic specifically benefits from a face.
+
+**Daily Mix Target (updated):**
+- 2 Moving Images (TikTok slideshow)
+- 1 Avatar video (tiktok_avatar OR tiktok_avatar_visual)
+- 1 Instagram (carousel or static)
+
 ---
 
 ## Batch Diversity Rules (HARD)
