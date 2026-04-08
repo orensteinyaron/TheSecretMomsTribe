@@ -226,13 +226,20 @@ async function main() {
     resolvedClips.push(resolved);
   }
 
+  // 5b. Recalculate timeline from ACTUAL HeyGen durations
+  // Stack clips sequentially — each starts where the previous ends.
+  // This eliminates gaps (freezes) and ensures sync with master audio.
+  let cursor = 0;
+  for (const clip of resolvedClips) {
+    clip.startSec = cursor;
+    cursor += clip.durationSec;
+  }
+  console.log(`   Timeline recalculated: ${resolvedClips.length} clips, ${cursor.toFixed(1)}s total`);
+
   // 6. Remotion render
   console.log(`[6/7] Rendering with Remotion...`);
 
-  const totalDurationSec = resolvedClips.reduce(
-    (sum, c) => Math.max(sum, c.startSec + c.durationSec),
-    0,
-  );
+  const totalDurationSec = cursor;
 
   // Copy audio to public/ for Remotion
   const publicAudioName = `avatar-tts-${contentId}.mp3`;
@@ -266,6 +273,7 @@ async function main() {
     codec: "h264",
     outputLocation: outputFile,
     inputProps: compositionProps,
+    crf: 18, // High quality (lower = better, 18 is visually lossless)
   });
 
   console.log(`[6/7] Rendered: ${outputFile}`);

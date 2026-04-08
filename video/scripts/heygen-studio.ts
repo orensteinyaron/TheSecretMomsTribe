@@ -9,7 +9,7 @@ const HEYGEN_BASE = "https://api.heygen.com";
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_ATTEMPTS = 60;
 
-const DEFAULT_AVATAR_GROUP_ID = "d0c5042f7fa7400e8d2453fdc3daf853";
+const DEFAULT_AVATAR_ID = "e160d35b8ea743a9b244ad67d968c7af";
 
 export interface HeyGenClipRequest {
   avatarId?: string;
@@ -40,7 +40,7 @@ async function submitJob(req: HeyGenClipRequest): Promise<string> {
       {
         character: {
           type: "avatar",
-          avatar_id: req.avatarId ?? DEFAULT_AVATAR_GROUP_ID,
+          avatar_id: req.avatarId ?? DEFAULT_AVATAR_ID,
           avatar_style: "normal",
         },
         voice: {
@@ -53,6 +53,8 @@ async function submitJob(req: HeyGenClipRequest): Promise<string> {
       width: req.width ?? 1080,
       height: req.height ?? 1920,
     },
+    // Disable HeyGen's built-in captions — Remotion adds its own
+    caption: false,
   };
 
   if (req.backgroundUrl) {
