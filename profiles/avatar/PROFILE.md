@@ -1,6 +1,6 @@
 # Avatar Video — Render Profile v1
 
-**Slug:** `avatar-v1` | **Type:** video | **Status:** draft (pipeline built)
+**Slug:** `avatar-v1` | **Type:** video | **Status:** active
 
 ## Required Services
 - `heygen` (avatar-studio) — Creator plan, $24-29/mo
