@@ -134,7 +134,21 @@ const FORMAT_TO_PROFILE = {
   ig_static: 'static-image',
   ig_meme: 'static-image',
   video_script: 'moving-images',
+  tiktok_avatar: 'avatar-v1',
+  tiktok_avatar_visual: 'avatar-v1',
 };
+
+const AVATAR_LOOKS = [
+  'cozy_cream_sweater', 'casual_white_tee', 'soft_grey_hoodie',
+  'denim_jacket', 'olive_cardigan', 'black_turtleneck',
+  'navy_blouse', 'rust_linen_top', 'striped_breton',
+  'dusty_rose_knit', 'chambray_shirt', 'sage_pullover', 'cream_blazer',
+];
+
+const AVATAR_BACKGROUNDS = [
+  'warm_kitchen_01', 'living_room_plants_01', 'home_office_01',
+  'bedroom_neutral_01', 'patio_garden_01',
+];
 
 // --- Coverage gap analysis ---
 
@@ -208,6 +222,56 @@ ${dna.contentDNA}
 
 === VISUAL DESIGN GUIDE ===
 ${dna.visualDesign}
+
+## AVATAR VIDEO FORMAT (tiktok_avatar / tiktok_avatar_visual)
+
+When post_format is "tiktok_avatar" or "tiktok_avatar_visual", you MUST generate an "avatar_config" field in the post JSON.
+
+CHARACTER: Marry, 36, mom of three (14, 9, 4). She's the friend in your group chat who always finds things out first. She's NOT a teacher. She gets frustrated, emotional, excited. She is NOT happy all the time.
+
+SCRIPT RULES:
+- Write as NATURAL SPEECH, not a script. Include "okay wait", "I mean", pauses with dashes
+- First sentence is the hook — stop the scroll
+- Emotional range: vary tone. Mark tone shifts with dashes and ellipses
+- Max 80 words for 30s target, 150 words for 60s target
+- Contractions ALWAYS. "It's" not "It is"
+- End with CLIFFHANGER that drives follows, not generic CTA
+- NEVER: "you guys", "so basically", "like and subscribe", anything YouTuber-coded
+
+FORMAT RULES:
+- tiktok_avatar: Full avatar only. 3-5 clips, all type "avatar". Best for: hot takes, personal stories, emotional topics.
+- tiktok_avatar_visual: Avatar + visuals. 3-6 clips mixing "avatar", "split", "broll". Best for: product reveals, comparisons, explainers.
+
+AVATAR_CONFIG SCHEMA:
+{
+  "format": "full_avatar" | "avatar_visual",
+  "avatar_look": "(pick one)",
+  "avatar_background": "(pick one)",
+  "voice_id": "9JqF6OmJtGjHTDODKG2c",
+  "duration_target": 30,
+  "clips": [
+    {"type": "avatar", "script": "spoken text", "purpose": "hook", "duration_estimate": 5},
+    {"type": "avatar", "script": "spoken text", "purpose": "body", "duration_estimate": 12},
+    {"type": "split", "script": "spoken text", "visual_query": "pexels query", "visual_type": "pexels_image", "purpose": "visual_proof", "duration_estimate": 5},
+    {"type": "broll", "visual_query": "pexels query", "visual_type": "pexels_video", "purpose": "emotional_beat", "duration_estimate": 3},
+    {"type": "avatar", "script": "spoken text", "purpose": "cta", "duration_estimate": 8}
+  ]
+}
+
+CLIP RULES:
+- First clip MUST be type "avatar" with purpose "hook"
+- Last clip MUST be type "avatar" with purpose "cta"
+- For tiktok_avatar: ALL clips are type "avatar"
+- For tiktok_avatar_visual: Mix avatar, split, broll. Max 4 visual inserts.
+- Broll clips have NO script (visual-only, 2-4 seconds)
+- NEVER use visual_query for AI-generated fake products
+
+VISUAL QUERY SAFETY:
+- NEVER: crying, meltdown, tantrum, distress, screaming
+- NEVER: medical terms, studio photos, direct-to-camera faces
+- NEVER: seasonal/holiday content
+- ALWAYS: warm natural light, candid, specific objects/gestures
+- PREFER MOMS: 70%+ parent images should be mothers
 
 CRITICAL RULES:
 - Before outputting any post, apply The SMT Test: "Would the friend in the group chat say this?"
@@ -345,7 +409,7 @@ Return ONLY the JSON array. No explanation.`;
 
 const VALID_AGE_RANGES = ['toddler', 'little_kid', 'school_age', 'teen', 'universal'];
 const VALID_PILLARS = ['ai_magic', 'parenting_insights', 'tech_for_moms', 'mom_health', 'trending'];
-const VALID_POST_FORMATS = ['tiktok_slideshow', 'tiktok_text', 'ig_carousel', 'ig_static', 'ig_meme', 'video_script'];
+const VALID_POST_FORMATS = ['tiktok_slideshow', 'tiktok_text', 'ig_carousel', 'ig_static', 'ig_meme', 'video_script', 'tiktok_avatar', 'tiktok_avatar_visual'];
 const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 
 function validateBatch(posts) {
@@ -387,6 +451,44 @@ function validateBatch(posts) {
     // Ensure slides is array or null
     if (p.slides && !Array.isArray(p.slides)) {
       p.slides = null;
+    }
+
+    // Avatar-specific validation
+    if (p.post_format === 'tiktok_avatar' || p.post_format === 'tiktok_avatar_visual') {
+      if (!p.avatar_config) {
+        console.warn(`  [SKIP] Avatar post missing avatar_config`);
+        continue;
+      }
+      const ac = p.avatar_config;
+
+      if (p.post_format === 'tiktok_avatar' && ac.format !== 'full_avatar') {
+        ac.format = 'full_avatar';
+      }
+      if (p.post_format === 'tiktok_avatar_visual' && ac.format !== 'avatar_visual') {
+        ac.format = 'avatar_visual';
+      }
+
+      if (!Array.isArray(ac.clips) || ac.clips.length < 2) {
+        console.warn(`  [SKIP] Avatar post has < 2 clips`);
+        continue;
+      }
+
+      if (ac.clips[0].purpose !== 'hook') ac.clips[0].purpose = 'hook';
+      if (ac.clips[ac.clips.length - 1].purpose !== 'cta') ac.clips[ac.clips.length - 1].purpose = 'cta';
+
+      if (!ac.avatar_look) {
+        ac.avatar_look = AVATAR_LOOKS[Math.floor(Math.random() * AVATAR_LOOKS.length)];
+      }
+      if (!ac.avatar_background) {
+        ac.avatar_background = AVATAR_BACKGROUNDS[Math.floor(Math.random() * AVATAR_BACKGROUNDS.length)];
+      }
+      ac.voice_id = ac.voice_id || '9JqF6OmJtGjHTDODKG2c';
+
+      if (ac.format === 'full_avatar') {
+        for (const clip of ac.clips) {
+          if (clip.type !== 'avatar') clip.type = 'avatar';
+        }
+      }
     }
 
     valid.push(p);
@@ -436,6 +538,7 @@ async function writeContentQueue(posts, briefingId, renderProfileMap, briefingOp
       content_pillar: p.content_pillar,
       post_format: p.post_format,
       slides: p.slides || [],
+      avatar_config: p.avatar_config || null,
       image_status: 'pending',
       launch_bank: false,
       quality_rating: null,
