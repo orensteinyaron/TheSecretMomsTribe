@@ -41,10 +41,16 @@ const SPAWN_TIMEOUT_MS = 600_000; // 10 minutes
 
 // ── Cron matching ───────────────────────────────────────────
 
+// The orchestrator runs every 15 minutes via GitHub Actions, but GH Actions
+// adds 1-5 min of delay to cron triggers. Exact-minute matching will NEVER
+// work reliably. Instead, we use window-based matching: an agent's scheduled
+// time is considered "matched" if it falls within the current 15-minute window.
+
+const ORCHESTRATOR_INTERVAL_MIN = 15;
+
 /**
- * Checks whether a cron schedule matches the given time.
- * Supports: *, specific numbers, and * /N step values.
- * Fields: minute hour day-of-month month day-of-week (0=Sun).
+ * Checks whether a cron field matches a value.
+ * Supports: *, specific numbers, */N step values, and comma-separated lists.
  */
 function matchesField(field, value) {
   if (field === '*') return true;
@@ -55,25 +61,62 @@ function matchesField(field, value) {
     return step > 0 && value % step === 0;
   }
 
+  // Comma-separated list: 1,3,5
+  if (field.includes(',')) {
+    return field.split(',').some(v => parseInt(v.trim(), 10) === value);
+  }
+
+  // Range: 1-5
+  if (field.includes('-')) {
+    const [lo, hi] = field.split('-').map(v => parseInt(v.trim(), 10));
+    return value >= lo && value <= hi;
+  }
+
   // Exact number
   return parseInt(field, 10) === value;
 }
 
+/**
+ * Window-based cron matching. Returns true if the agent's scheduled time
+ * falls within [now - ORCHESTRATOR_INTERVAL_MIN, now].
+ *
+ * For the minute field, we check if the scheduled minute is within
+ * the window. For hour/dom/month/dow we still do exact matching.
+ */
 function shouldRunNow(schedule, now = new Date()) {
   if (!schedule || schedule === 'event_triggered') return false;
 
   const parts = schedule.trim().split(/\s+/);
   if (parts.length !== 5) return false;
 
-  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  const [minuteField, hour, dayOfMonth, month, dayOfWeek] = parts;
 
-  return (
-    matchesField(minute, now.getMinutes()) &&
-    matchesField(hour, now.getHours()) &&
-    matchesField(dayOfMonth, now.getDate()) &&
-    matchesField(month, now.getMonth() + 1) &&
-    matchesField(dayOfWeek, now.getDay())
-  );
+  // Hour, day, month, dow must match exactly
+  if (!matchesField(hour, now.getHours())) return false;
+  if (!matchesField(dayOfMonth, now.getDate())) return false;
+  if (!matchesField(month, now.getMonth() + 1)) return false;
+  if (!matchesField(dayOfWeek, now.getDay())) return false;
+
+  // Minute: use window matching
+  if (minuteField === '*' || minuteField.startsWith('*/')) {
+    return matchesField(minuteField, now.getMinutes());
+  }
+
+  // For specific minutes (e.g., "30", "0", "15"), check if it falls
+  // within the window [now - interval, now]
+  const scheduledMinute = parseInt(minuteField, 10);
+  const currentMinute = now.getMinutes();
+
+  // Window: [currentMinute - interval, currentMinute]
+  // Handle wrap-around at 60
+  const windowStart = currentMinute - ORCHESTRATOR_INTERVAL_MIN;
+
+  if (windowStart >= 0) {
+    return scheduledMinute > windowStart && scheduledMinute <= currentMinute;
+  } else {
+    // Wrapped: e.g., current=5, window=[-10,5] → [50,5]
+    return scheduledMinute > (60 + windowStart) || scheduledMinute <= currentMinute;
+  }
 }
 
 // ── Directive application ───────────────────────────────────
@@ -362,6 +405,8 @@ async function orchestrate() {
   // 4. Evaluate each agent
   let spawned = 0;
 
+  console.log(`[Orchestrator] Evaluating ${agents.length} agent(s) at ${now.toISOString()} (H:${now.getHours()} M:${now.getMinutes()})`);
+
   for (const agent of agents) {
     // Skip orchestrator itself
     if (agent.agent_type === 'orchestrator') continue;
@@ -371,26 +416,31 @@ async function orchestrate() {
 
     // Skip if no script mapping
     if (!AGENT_SCRIPTS[agent.slug]) {
+      console.log(`[Orchestrator]   ${agent.slug}: no script mapping — skip`);
       continue;
     }
 
     // Skip disabled or currently running agents
     if (agent.status === 'disabled') {
+      console.log(`[Orchestrator]   ${agent.slug}: disabled — skip`);
       continue;
     }
     if (agent.status === 'running') {
-      console.log(`[Orchestrator] Skipping ${agent.slug} — still running`);
+      console.log(`[Orchestrator]   ${agent.slug}: still running — skip`);
       continue;
     }
 
-    // Skip if schedule doesn't match current time
-    if (!shouldRunNow(agent.schedule, now)) {
+    // Skip if schedule doesn't match current time window
+    const scheduleMatch = shouldRunNow(agent.schedule, now);
+    if (!scheduleMatch) {
+      console.log(`[Orchestrator]   ${agent.slug}: schedule "${agent.schedule}" not in window — skip`);
       continue;
     }
 
     // Skip if dependencies haven't completed today
-    if (!(await dependenciesCompleted(agent))) {
-      console.log(`[Orchestrator] Skipping ${agent.slug} — dependencies not met`);
+    const depsOk = await dependenciesCompleted(agent);
+    if (!depsOk) {
+      console.log(`[Orchestrator]   ${agent.slug}: deps ${JSON.stringify(agent.depends_on)} not met — skip`);
       continue;
     }
 
@@ -398,17 +448,18 @@ async function orchestrate() {
     const budget = agent.cost_budget_daily_usd || Infinity;
     const spent = agent.cost_spent_today_usd || 0;
     if (spent >= budget) {
-      console.log(`[Orchestrator] Skipping ${agent.slug} — budget exhausted ($${spent.toFixed(2)}/$${budget.toFixed(2)})`);
+      console.log(`[Orchestrator]   ${agent.slug}: budget exhausted ($${spent.toFixed(2)}/$${budget.toFixed(2)}) — skip`);
       continue;
     }
 
     // Skip if already ran successfully today (avoid double runs)
     if (await alreadyRanToday(agent.id)) {
-      console.log(`[Orchestrator] Skipping ${agent.slug} — already completed today`);
+      console.log(`[Orchestrator]   ${agent.slug}: already completed today — skip`);
       continue;
     }
 
     // All checks passed — spawn
+    console.log(`[Orchestrator]   ${agent.slug}: ALL CHECKS PASSED — spawning`);
     await runAgent(agent, 'scheduled');
     spawned++;
   }

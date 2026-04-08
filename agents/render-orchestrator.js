@@ -419,13 +419,16 @@ async function processItem(item) {
 
 // --- Main ---
 
-async function main() {
-  console.log('[Render Orchestrator] Checking for approved content to render...');
+const WATCH_MODE = process.argv.includes('--watch');
+const WATCH_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+
+async function runOnce() {
+  console.log(`[Render Orchestrator] Checking for approved content to render... (${new Date().toLocaleTimeString()})`);
 
   const items = await getPendingItems();
 
   if (items.length === 0) {
-    console.log('[Render] No pending items. Done.');
+    console.log('[Render] No pending items.');
     return;
   }
 
@@ -437,6 +440,21 @@ async function main() {
   }
 
   await printCostSummary(supabase, 'render orchestrator');
+}
+
+async function main() {
+  await runOnce();
+
+  if (WATCH_MODE) {
+    console.log(`[Render] Watch mode — polling every ${WATCH_INTERVAL_MS / 1000}s. Ctrl+C to stop.`);
+    setInterval(async () => {
+      try {
+        await runOnce();
+      } catch (err) {
+        console.error('[Render] Error during poll:', err.message);
+      }
+    }, WATCH_INTERVAL_MS);
+  }
 }
 
 main().catch((err) => {

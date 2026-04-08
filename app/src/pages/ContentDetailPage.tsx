@@ -54,16 +54,25 @@ export default function ContentDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {(item.status === 'draft' || item.status === 'pending_approval') && (
-            <>
-              <button onClick={approve} className="flex items-center gap-1.5 bg-accent text-text-inverse text-sm font-medium px-4 py-2 rounded-md hover:bg-accent-hover">
-                <Check size={16} /> Approve
-              </button>
-              <button onClick={reject} className="flex items-center gap-1.5 bg-bg-elevated text-error text-sm font-medium px-4 py-2 rounded-md border border-error/30 hover:bg-error/10">
-                <X size={16} /> Reject
-              </button>
-            </>
+          {/* Back to Draft — from approved or rejected */}
+          {(item.status === 'approved' || item.status === 'rejected') && (
+            <button onClick={() => updateMutation.mutate({ id: item.id, status: 'draft', rejection_reason: null })} className="flex items-center gap-1.5 bg-bg-elevated text-text-secondary text-sm font-medium px-4 py-2 rounded-md border border-border-default hover:bg-bg-hover">
+              <RefreshCw size={16} /> Back to Draft
+            </button>
           )}
+          {/* Approve — from draft, pending_approval, or rejected */}
+          {item.status !== 'approved' && (
+            <button onClick={approve} className="flex items-center gap-1.5 bg-accent text-text-inverse text-sm font-medium px-4 py-2 rounded-md hover:bg-accent-hover">
+              <Check size={16} /> Approve
+            </button>
+          )}
+          {/* Reject — from draft, pending_approval, or approved */}
+          {item.status !== 'rejected' && (
+            <button onClick={reject} className="flex items-center gap-1.5 bg-bg-elevated text-error text-sm font-medium px-4 py-2 rounded-md border border-error/30 hover:bg-error/10">
+              <X size={16} /> Reject
+            </button>
+          )}
+          {/* Render controls — only when approved */}
           {item.status === 'approved' && item.render_status === 'rendering' && (
             <span className="flex items-center gap-1.5 text-accent text-sm font-medium px-4 py-2">
               <RefreshCw size={16} className="animate-spin" /> Rendering...
