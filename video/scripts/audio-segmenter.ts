@@ -79,7 +79,7 @@ export function splitAudio(
 
     execSync(
       `ffmpeg -y -i "${audioPath}" -ss ${startSec.toFixed(3)} -t ${duration.toFixed(3)} -acodec copy "${segFile}"`,
-      { stdio: "pipe" },
+      { stdio: "pipe", env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}` } },
     );
 
     segments.push({
