@@ -143,7 +143,7 @@ async function main() {
     audioDurationSec,
   );
 
-  const segments = flags.noTts
+  const segments = (whisperWords.length === 0 || !fs.existsSync(audioFile))
     ? []
     : splitAudio(
         audioFile,
