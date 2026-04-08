@@ -293,6 +293,47 @@ async function qaVideo(item) {
   }
 }
 
+// --- Renderer: avatar-v1 (Avatar Video) ---
+
+async function renderAvatarVideo(item) {
+  console.log(`[Render] Spawning avatar renderer for ${item.id}...`);
+
+  await spawnWithTimeout('npx', ['tsx', 'scripts/generate-avatar-video.ts', item.id], {
+    cwd: resolve(PROJECT_ROOT, 'video'),
+    env: process.env,
+  });
+
+  // Retrieve final asset URL from metadata
+  const { data: updated } = await supabase
+    .from('content_queue')
+    .select('metadata')
+    .eq('id', item.id)
+    .single();
+
+  return updated?.metadata?.avatar_video_url || null;
+}
+
+async function qaAvatarVideo(item) {
+  const localVideoPath = resolve(PROJECT_ROOT, 'video', 'out', item.id, `${item.id}-avatar.mp4`);
+
+  if (!existsSync(localVideoPath)) {
+    return { pass: false, reason: `Avatar video file not found at ${localVideoPath}` };
+  }
+
+  console.log(`[Render] Running avatar video QA for ${item.id}...`);
+
+  try {
+    await spawnWithTimeout(
+      'npx',
+      ['tsx', 'scripts/qa-agent.ts', localVideoPath, '--content-id', item.id, '--avatar'],
+      { cwd: resolve(PROJECT_ROOT, 'video'), env: process.env }
+    );
+    return { pass: true, reason: 'QA passed' };
+  } catch (err) {
+    return { pass: false, reason: `QA failed: ${err.message}` };
+  }
+}
+
 // --- Renderer: static-image ---
 
 async function renderStaticImage(item) {
@@ -325,6 +366,10 @@ const RENDERERS = {
   'moving-images': {
     render: renderVideo,
     qa: qaVideo,
+  },
+  'avatar-v1': {
+    render: renderAvatarVideo,
+    qa: qaAvatarVideo,
   },
   'static-image': {
     render: renderStaticImage,
