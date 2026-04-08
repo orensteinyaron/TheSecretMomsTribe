@@ -79,8 +79,9 @@ async function scanReddit() {
     const { items } = await apify.dataset(run.defaultDatasetId).listItems();
     console.log(`[Research] Reddit raw results: ${items.length}`);
 
+    const MIN_UPVOTES = 15;
     const filtered = items
-      .filter((p) => (p.score || p.upVotes || p.ups || 0) >= 30)
+      .filter((p) => (p.score || p.upVotes || p.ups || 0) >= MIN_UPVOTES)
       .slice(0, 15)
       .map((p) => ({
         source: 'reddit',
@@ -92,7 +93,7 @@ async function scanReddit() {
         comments: p.numberOfComments || p.numComments || p.commentCount || 0,
       }));
 
-    console.log(`[Research] Reddit after filter: ${filtered.length} posts`);
+    console.log(`[Research] Reddit filter: ${filtered.length}/${items.length} passed (min upvotes: ${MIN_UPVOTES})`);
     await logCost(supabase, {
       pipeline_stage: 'scraping', service: 'apify', model: 'apify-reddit',
       description: `Reddit scrape (${REDDIT_SUBREDDITS.length} subs)`,
@@ -147,13 +148,16 @@ async function scanTikTokTrends() {
 async function scanGoogleTrends() {
   console.log('[Research] Scanning Google Trends (3 queries)...');
   try {
-    const run = await apify.actor('apify/google-trends-scraper').call({
-      searchTerms: GOOGLE_TRENDS_QUERIES,
-      isMultiple: false,
-      timeRange: 'now 7-d',
-      geo: 'US',
-      maxItems: 10,
-    });
+    const run = await apify.actor('apify/google-trends-scraper').call(
+      {
+        searchTerms: GOOGLE_TRENDS_QUERIES,
+        isMultiple: false,
+        timeRange: 'now 7-d',
+        geo: 'US',
+        maxItems: 10,
+      },
+      { timeout: 60 } // Hard 60s timeout — this actor is flaky
+    );
 
     const { items } = await apify.dataset(run.defaultDatasetId).listItems();
     console.log(`[Research] Google Trends raw results: ${items.length}`);
@@ -174,7 +178,7 @@ async function scanGoogleTrends() {
     });
     return signals;
   } catch (err) {
-    console.warn(`[Research] Google Trends scraper failed (non-fatal): ${err.message}`);
+    console.warn(`[Research] Google Trends timed out after 60s, skipping: ${err.message}`);
     return [];
   }
 }
@@ -645,7 +649,7 @@ async function main() {
   console.log('\n=== TODAY\'S OPPORTUNITIES ===');
   for (const opp of opportunities) {
     console.log(`\n${opp.priority}. [${opp.content_type.toUpperCase()}] ${opp.topic}`);
-    console.log(`   Pillar: ${opp.pillar} | Platform: ${opp.platform_fit}`);
+    console.log(`   Category: ${opp.category} | Platform: ${opp.platform_fit}`);
     console.log(`   Hook: "${opp.suggested_hook}"`);
     console.log(`   Angle: ${opp.angle}`);
   }
