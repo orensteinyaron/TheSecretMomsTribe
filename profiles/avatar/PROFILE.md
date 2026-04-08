@@ -1,16 +1,24 @@
 # Avatar Video — Render Profile v1
 
-**Slug:** `avatar` | **Type:** video | **Status:** planned
+**Slug:** `avatar-v1` | **Type:** video | **Status:** draft (pipeline built)
 
 ## Required Services
-`heygen`, `elevenlabs`, `seedance` — all currently `no_key`
+- `heygen` (avatar-studio) — Creator plan, $24-29/mo
+- `elevenlabs` (voice-tts-elevenlabs) — Starter plan, $5/mo
+- `pexels` — B-roll (existing)
+- `whisper` — Timestamps (existing)
 
-## Pipeline (planned)
-1. Voice clone (ElevenLabs)
-2. Avatar generation (HeyGen)
-3. Scene generation (Seedance)
-4. Video compose
-5. QA check
+## Pipeline
+1. ElevenLabs TTS → full audio
+2. Whisper → word timestamps
+3. Audio segmenter → per-clip MP3s
+4. HeyGen Studio → avatar video clips
+5. Pexels → B-roll visuals (Format 2 only)
+6. Remotion → final composite with captions, transitions, overlays
+7. QA check
 
-## Status
-Blocked on API keys. Not yet implemented.
+## Env Vars Required
+- `ELEVENLABS_API_KEY`
+- `HEYGEN_API_KEY`
+- `OPENAI_API_KEY` (existing)
+- `PEXELS_API_KEY` (existing)
