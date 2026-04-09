@@ -4,16 +4,18 @@ config({ path: new URL("../.env", import.meta.url).pathname, override: true });
 import fs from "fs";
 import path from "path";
 import { parseFile } from "music-metadata";
-import { generateSpeech } from "../lib/elevenlabs";
+import { generateSpeech, stripEmotionTags } from "../lib/elevenlabs";
 import { logCost } from "../lib/cost-tracker";
 
 const VOICE_ID = "tRhabdS7JjlQ0lVEImuM";
-const COST_PER_CHAR = 0.000018;
+const COST_PER_CHAR = 0.000030; // v3 is slightly more expensive than turbo
 
 export interface TTSResult {
   audioFile: string;
   durationSec: number;
   cost: number;
+  /** Script with emotion tags stripped — use for Whisper and captions */
+  cleanScript: string;
 }
 
 export async function generateAvatarTTS(
@@ -29,21 +31,27 @@ export async function generateAvatarTTS(
 
   console.log(`[elevenlabs-tts] Generating speech (${script.length} chars)...`);
 
+  // Send script WITH emotion tags to ElevenLabs v3 (it uses them for expression)
   await generateSpeech(script, audioFile, {
     apiKey,
     voiceId: VOICE_ID,
-    speed: 0.9, // Slightly slower for natural delivery
+    // model defaults to eleven_v3
+    // stability defaults to 0.5 (Natural mode)
+    // NO speed override — let v3 handle pacing naturally
   });
 
   const meta = await parseFile(audioFile);
   const durationSec = meta.format.duration ?? 0;
 
   const cost = script.length * COST_PER_CHAR;
-  await logCost(contentId, "elevenlabs", "eleven_multilingual_v2", script.length, 0, cost);
+  await logCost(contentId, "elevenlabs", "eleven_v3", script.length, 0, cost);
 
   console.log(`[elevenlabs-tts] Done: ${durationSec.toFixed(1)}s, $${cost.toFixed(4)}`);
 
-  return { audioFile, durationSec, cost };
+  // Strip emotion tags for downstream use (Whisper, captions)
+  const cleanScript = stripEmotionTags(script);
+
+  return { audioFile, durationSec, cost, cleanScript };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

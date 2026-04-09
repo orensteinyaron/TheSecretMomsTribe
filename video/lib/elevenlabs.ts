@@ -7,12 +7,20 @@ export interface ElevenLabsConfig {
   voiceId: string;
   model?: string;
   outputFormat?: string;
-  speed?: number; // 0.25-4.0, default 1.0
+  stability?: number; // 0-1. Creative=low, Natural=0.5, Robust=high
   applyTextNormalization?: "auto" | "on" | "off";
 }
 
-const DEFAULT_MODEL = "eleven_turbo_v2_5";
+const DEFAULT_MODEL = "eleven_v3";
 const DEFAULT_FORMAT = "mp3_44100_128";
+
+/**
+ * Strip emotion/expression tags like [thoughtful], [sighs], [softly] from text.
+ * These tags are for ElevenLabs v3 only — must be removed before Whisper/captions.
+ */
+export function stripEmotionTags(text: string): string {
+  return text.replace(/\[[\w\s]+\]\s*/g, "").trim();
+}
 
 export async function generateSpeech(
   text: string,
@@ -26,16 +34,16 @@ export async function generateSpeech(
     text,
     model_id: model,
     voice_settings: {
-      stability: 0.5,
+      stability: config.stability ?? 0.5, // Natural mode
       similarity_boost: 0.75,
       style: 0.0,
       use_speaker_boost: true,
-      speed: config.speed ?? 1.0,
     },
     apply_text_normalization: config.applyTextNormalization ?? "on",
   };
 
-  console.log(`[elevenlabs] Request: model=${model} voice=${config.voiceId} speed=${requestBody.voice_settings.speed} normalization=${requestBody.apply_text_normalization}`);
+  console.log(`[elevenlabs] Request payload:`);
+  console.log(JSON.stringify(requestBody, null, 2));
 
   const resp = await fetch(
     `${ELEVENLABS_BASE}/text-to-speech/${config.voiceId}?output_format=${outputFormat}`,

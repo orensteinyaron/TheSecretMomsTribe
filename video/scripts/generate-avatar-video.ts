@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { generateAvatarTTS } from "./elevenlabs-tts";
+import { stripEmotionTags } from "../lib/elevenlabs";
 import { runWhisper } from "./audio-pipeline";
 import { computeSegmentBoundaries, splitAudio } from "./audio-segmenter";
 import { renderAvatarClip } from "./heygen-studio";
@@ -225,8 +226,11 @@ async function main() {
     for (const clip of resolvedClips) {
       if (clip.type === "broll" || !clip.script) continue;
 
+      // Strip emotion tags before counting words (Whisper doesn't hear [thoughtful] etc)
+      const cleanClipScript = stripEmotionTags(clip.script);
+
       // Count actual spoken words (strip punctuation to match Whisper)
-      const scriptWords = clip.script.split(/\s+/)
+      const scriptWords = cleanClipScript.split(/\s+/)
         .map((w: string) => w.replace(/[^a-zA-Z0-9']/g, ""))
         .filter((w: string) => w.length > 0);
       const clipWhisperWords = whisperWords.slice(wordIdx, wordIdx + scriptWords.length);
@@ -239,9 +243,9 @@ async function main() {
       const audioOffset = clipWhisperWords[0].start;
       const videoOffset = clip.startSec;
 
-      // Split script into sentences FIRST, then chunk within each sentence.
+      // Split CLEAN script (no emotion tags) into sentences FIRST, then chunk within each.
       // A phrase must NEVER span two sentences.
-      const sentences = clip.script.split(/(?<=[.!?—])\s+/).filter((s: string) => s.trim().length > 0);
+      const sentences = cleanClipScript.split(/(?<=[.!?—])\s+/).filter((s: string) => s.trim().length > 0);
 
       let sentWhisperIdx = 0;
       for (const sentence of sentences) {
