@@ -9,7 +9,7 @@ const HEYGEN_BASE = "https://api.heygen.com";
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_ATTEMPTS = 60;
 
-const DEFAULT_AVATAR_ID = "1a2b5884192e438d9a300f3fb906aaea";
+const DEFAULT_AVATAR_ID = "7b3ea6bd46b948ecbedd31e1bae886a1";
 
 export interface HeyGenClipRequest {
   avatarId?: string;
@@ -63,6 +63,8 @@ async function submitJob(req: HeyGenClipRequest): Promise<string> {
       url: req.backgroundUrl,
     };
   }
+
+  console.log(`[heygen] Request: avatar=${body.video_inputs[0].character.avatar_id} style=${body.video_inputs[0].character.avatar_style} dim=${body.dimension.width}x${body.dimension.height}`);
 
   const resp = await fetch(`${HEYGEN_BASE}/v2/video/generate`, {
     method: "POST",

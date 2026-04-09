@@ -4,7 +4,7 @@ import { TextSlideshow, calculateAllDurations } from "./templates/TextSlideshow"
 import { KaraokeSlideshow } from "./templates/v2/KaraokeSlideshow";
 import { SyncTest } from "./templates/SyncTest";
 import { AvatarComposition } from "./templates/avatar/AvatarComposition";
-import { type AvatarCompositionProps } from "./templates/avatar/types";
+import { type AvatarCompositionProps, AVATAR_FPS } from "./templates/avatar/types";
 
 const FPS = 30;
 
@@ -90,8 +90,8 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="AvatarComposition"
         component={AvatarComposition as any}
-        durationInFrames={Math.round((inputProps.totalDurationSec || AVATAR_DEFAULTS.totalDurationSec) * FPS)}
-        fps={FPS}
+        durationInFrames={Math.round((inputProps.totalDurationSec || AVATAR_DEFAULTS.totalDurationSec) * AVATAR_FPS)}
+        fps={AVATAR_FPS}
         width={1080}
         height={1920}
         defaultProps={inputProps.clips ? { ...AVATAR_DEFAULTS, ...inputProps } : AVATAR_DEFAULTS}

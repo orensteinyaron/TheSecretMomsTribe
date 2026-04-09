@@ -8,9 +8,10 @@ export interface ElevenLabsConfig {
   model?: string;
   outputFormat?: string;
   speed?: number; // 0.25-4.0, default 1.0
+  applyTextNormalization?: "auto" | "on" | "off";
 }
 
-const DEFAULT_MODEL = "eleven_multilingual_v2";
+const DEFAULT_MODEL = "eleven_turbo_v2_5";
 const DEFAULT_FORMAT = "mp3_44100_128";
 
 export async function generateSpeech(
@@ -21,6 +22,21 @@ export async function generateSpeech(
   const model = config.model ?? DEFAULT_MODEL;
   const outputFormat = config.outputFormat ?? DEFAULT_FORMAT;
 
+  const requestBody = {
+    text,
+    model_id: model,
+    voice_settings: {
+      stability: 0.5,
+      similarity_boost: 0.75,
+      style: 0.0,
+      use_speaker_boost: true,
+      speed: config.speed ?? 1.0,
+    },
+    apply_text_normalization: config.applyTextNormalization ?? "on",
+  };
+
+  console.log(`[elevenlabs] Request: model=${model} voice=${config.voiceId} speed=${requestBody.voice_settings.speed} normalization=${requestBody.apply_text_normalization}`);
+
   const resp = await fetch(
     `${ELEVENLABS_BASE}/text-to-speech/${config.voiceId}?output_format=${outputFormat}`,
     {
@@ -29,17 +45,7 @@ export async function generateSpeech(
         "xi-api-key": config.apiKey,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        text,
-        model_id: model,
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.0,
-          use_speaker_boost: true,
-          speed: config.speed ?? 1.0,
-        },
-      }),
+      body: JSON.stringify(requestBody),
     },
   );
 

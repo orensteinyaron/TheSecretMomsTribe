@@ -1,8 +1,8 @@
 // video/src/templates/avatar/types.ts
 import { type PhraseGroup } from "../v2/types";
 
-export const AVATAR_FPS = 30;
-export const CROSSFADE_FRAMES = 6; // 0.2s crossfade between clips (shorter = less double-vision)
+export const AVATAR_FPS = 25; // Must match HeyGen output fps (25fps)
+export const CROSSFADE_FRAMES = 0; // Hard cut — no crossfade until pipeline is stable
 export const HOOK_OVERLAY_FRAMES = 90; // 3s hook text
 export const CTA_OVERLAY_FRAMES = 90; // 3s CTA text
 

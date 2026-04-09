@@ -209,64 +209,61 @@ async function main() {
     resolvedClips.push(resolved);
   }
 
-  // 5b. Recalculate timeline with OVERLAPPING crossfade
-  // Each clip overlaps the next by CROSSFADE_FRAMES/30 seconds.
-  // Clip N+1 starts before clip N ends = true crossfade (no black flash).
-  const CROSSFADE_SEC = 6 / 30; // CROSSFADE_FRAMES / FPS = 0.2s
+  // 5b. Stack clips back-to-back with HARD CUTS (no crossfade overlap)
   let cursor = 0;
-  for (let ci = 0; ci < resolvedClips.length; ci++) {
-    resolvedClips[ci].startSec = cursor;
-    // Next clip starts CROSSFADE_SEC before this clip ends (except last clip)
-    if (ci < resolvedClips.length - 1) {
-      cursor += resolvedClips[ci].durationSec - CROSSFADE_SEC;
-    } else {
-      cursor += resolvedClips[ci].durationSec;
-    }
+  for (const clip of resolvedClips) {
+    clip.startSec = cursor;
+    cursor += clip.durationSec;
   }
-  console.log(`   Timeline recalculated: ${resolvedClips.length} clips, ${cursor.toFixed(1)}s total (with ${(CROSSFADE_SEC * (resolvedClips.length - 1)).toFixed(1)}s crossfade overlap)`);
+  console.log(`   Timeline: ${resolvedClips.length} clips, ${cursor.toFixed(3)}s total (hard cuts)`);
 
   // 5c. Build phrase timings remapped to clip timeline
-  // Whisper timestamps are from the full audio. We remap them to match
-  // each clip's actual startSec in the overlapping timeline.
+  // Each HeyGen clip plays its own audio starting at time 0.
+  // Whisper timestamps are from the FULL audio. We remap per clip.
   if (whisperWords.length > 0) {
     let wordIdx = 0;
     for (const clip of resolvedClips) {
       if (clip.type === "broll" || !clip.script) continue;
 
-      const scriptWordCount = clip.script.split(/\s+/).filter((w: string) => w.length > 0).length;
-      const clipWhisperWords = whisperWords.slice(wordIdx, wordIdx + scriptWordCount);
-      wordIdx += scriptWordCount;
+      // Count actual spoken words (strip punctuation to match Whisper)
+      const scriptWords = clip.script.split(/\s+/)
+        .map((w: string) => w.replace(/[^a-zA-Z0-9']/g, ""))
+        .filter((w: string) => w.length > 0);
+      const clipWhisperWords = whisperWords.slice(wordIdx, wordIdx + scriptWords.length);
+      wordIdx += scriptWords.length;
 
       if (clipWhisperWords.length === 0) continue;
 
-      // The clip's audio starts at time 0 in HeyGen's output.
-      // The first Whisper word for this clip starts at clipWhisperWords[0].start (in full audio time).
-      // In the final video, this clip starts at clip.startSec.
-      // Offset = clip.startSec - clipWhisperWords[0].start
+      // Audio offset: Whisper timestamps are absolute from full audio.
+      // Clip plays from its own start, so we subtract the first word's time.
       const audioOffset = clipWhisperWords[0].start;
       const videoOffset = clip.startSec;
 
-      // Split into sentences first, then chunk within sentences
-      const scriptText = clip.script;
-      const sentences = scriptText.split(/(?<=[.!?])\s+/).filter((s: string) => s.trim().length > 0);
+      // Split script into sentences FIRST, then chunk within each sentence.
+      // A phrase must NEVER span two sentences.
+      const sentences = clip.script.split(/(?<=[.!?—])\s+/).filter((s: string) => s.trim().length > 0);
 
-      let sentWordIdx = 0;
+      let sentWhisperIdx = 0;
       for (const sentence of sentences) {
-        const sentWords = sentence.split(/\s+/).filter((w: string) => w.length > 0);
-        const sentWhisperWords = clipWhisperWords.slice(sentWordIdx, sentWordIdx + sentWords.length);
-        sentWordIdx += sentWords.length;
+        // Count words in this sentence (normalized — Whisper strips punctuation)
+        const sentWordCount = sentence.split(/\s+/)
+          .map((w: string) => w.replace(/[^a-zA-Z0-9']/g, ""))
+          .filter((w: string) => w.length > 0).length;
 
-        // Chunk this sentence into 3-4 word phrases
+        const sentWhisperWords = clipWhisperWords.slice(sentWhisperIdx, sentWhisperIdx + sentWordCount);
+        sentWhisperIdx += sentWordCount;
+
+        // Chunk into 3-4 word phrases WITHIN this sentence
         const MAX_WORDS = 4;
         let si = 0;
         while (si < sentWhisperWords.length) {
           const end = Math.min(si + MAX_WORDS, sentWhisperWords.length);
           const chunk = sentWhisperWords.slice(si, end);
           if (chunk.length > 0) {
+            const phraseText = chunk.map((w: { word: string }) => w.word).join(" ");
             phraseTimings.push({
-              words: chunk.map((w: { word: string }) => w.word).join(" "),
+              words: phraseText,
               emphasis: false,
-              // Remap: subtract full-audio offset, add video timeline offset
               startTime: chunk[0].start - audioOffset + videoOffset,
               endTime: chunk[chunk.length - 1].end - audioOffset + videoOffset,
             });
@@ -275,7 +272,21 @@ async function main() {
         }
       }
     }
-    console.log(`   Phrase timings: ${phraseTimings.length} phrases (sentence-bounded, remapped to clip timeline)`);
+
+    // Validation: no phrase should contain sentence-ending punctuation mid-phrase
+    for (const p of phraseTimings) {
+      const words = p.words.split(/\s+/);
+      if (words.length > 1) {
+        // Check if any non-last word ends a sentence
+        for (let wi = 0; wi < words.length - 1; wi++) {
+          if (/[.!?]$/.test(words[wi])) {
+            console.warn(`   [WARN] Phrase crosses sentence boundary: "${p.words}"`);
+          }
+        }
+      }
+    }
+
+    console.log(`   Phrase timings: ${phraseTimings.length} phrases (sentence-bounded, remapped)`);
   }
 
   // 6. Remotion render
