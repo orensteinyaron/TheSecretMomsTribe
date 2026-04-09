@@ -330,7 +330,7 @@ async function main() {
     codec: "h264",
     outputLocation: outputFile,
     inputProps: compositionProps,
-    crf: 18, // High quality (lower = better, 18 is visually lossless)
+    crf: 23, // Good quality, reasonable file size (~25MB for 45s)
   });
 
   console.log(`[6/7] Rendered: ${outputFile}`);
