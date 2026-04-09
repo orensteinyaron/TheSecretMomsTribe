@@ -154,24 +154,7 @@ async function main() {
       );
   console.log(`[4/7] Audio split into ${segments.length} segments`);
 
-  // Build phrase timings from Whisper words
-  if (whisperWords.length > 0) {
-    // TODO: Use Haiku phrase parser for natural groupings (see parse-slides-v2.ts)
-    // Current: simple 4-word chunks. Future: AI-driven phrase boundaries with emphasis markers.
-    const MAX_WORDS = 4;
-    let i = 0;
-    while (i < whisperWords.length) {
-      const end = Math.min(i + MAX_WORDS, whisperWords.length);
-      const chunk = whisperWords.slice(i, end);
-      phraseTimings.push({
-        words: chunk.map((w) => w.word).join(" "),
-        emphasis: false,
-        startTime: chunk[0].start,
-        endTime: chunk[chunk.length - 1].end,
-      });
-      i = end;
-    }
-  }
+  // Phrase timings built AFTER timeline recalculation (step 5b) so they align with clip positions
 
   // 5. Render HeyGen clips
   console.log(`[5/7] Rendering ${segments.length} HeyGen clips...`);
@@ -226,24 +209,81 @@ async function main() {
     resolvedClips.push(resolved);
   }
 
-  // 5b. Recalculate timeline from ACTUAL HeyGen durations
-  // Stack clips sequentially — each starts where the previous ends.
-  // This eliminates gaps (freezes) and ensures sync with master audio.
+  // 5b. Recalculate timeline with OVERLAPPING crossfade
+  // Each clip overlaps the next by CROSSFADE_FRAMES/30 seconds.
+  // Clip N+1 starts before clip N ends = true crossfade (no black flash).
+  const CROSSFADE_SEC = 12 / 30; // CROSSFADE_FRAMES / FPS = 0.4s
   let cursor = 0;
-  for (const clip of resolvedClips) {
-    clip.startSec = cursor;
-    cursor += clip.durationSec;
+  for (let ci = 0; ci < resolvedClips.length; ci++) {
+    resolvedClips[ci].startSec = cursor;
+    // Next clip starts CROSSFADE_SEC before this clip ends (except last clip)
+    if (ci < resolvedClips.length - 1) {
+      cursor += resolvedClips[ci].durationSec - CROSSFADE_SEC;
+    } else {
+      cursor += resolvedClips[ci].durationSec;
+    }
   }
-  console.log(`   Timeline recalculated: ${resolvedClips.length} clips, ${cursor.toFixed(1)}s total`);
+  console.log(`   Timeline recalculated: ${resolvedClips.length} clips, ${cursor.toFixed(1)}s total (with ${(CROSSFADE_SEC * (resolvedClips.length - 1)).toFixed(1)}s crossfade overlap)`);
+
+  // 5c. Build phrase timings remapped to clip timeline
+  // Whisper timestamps are from the full audio. We remap them to match
+  // each clip's actual startSec in the overlapping timeline.
+  if (whisperWords.length > 0) {
+    let wordIdx = 0;
+    for (const clip of resolvedClips) {
+      if (clip.type === "broll" || !clip.script) continue;
+
+      const scriptWordCount = clip.script.split(/\s+/).filter((w: string) => w.length > 0).length;
+      const clipWhisperWords = whisperWords.slice(wordIdx, wordIdx + scriptWordCount);
+      wordIdx += scriptWordCount;
+
+      if (clipWhisperWords.length === 0) continue;
+
+      // The clip's audio starts at time 0 in HeyGen's output.
+      // The first Whisper word for this clip starts at clipWhisperWords[0].start (in full audio time).
+      // In the final video, this clip starts at clip.startSec.
+      // Offset = clip.startSec - clipWhisperWords[0].start
+      const audioOffset = clipWhisperWords[0].start;
+      const videoOffset = clip.startSec;
+
+      // Split into sentences first, then chunk within sentences
+      const scriptText = clip.script;
+      const sentences = scriptText.split(/(?<=[.!?])\s+/).filter((s: string) => s.trim().length > 0);
+
+      let sentWordIdx = 0;
+      for (const sentence of sentences) {
+        const sentWords = sentence.split(/\s+/).filter((w: string) => w.length > 0);
+        const sentWhisperWords = clipWhisperWords.slice(sentWordIdx, sentWordIdx + sentWords.length);
+        sentWordIdx += sentWords.length;
+
+        // Chunk this sentence into 3-4 word phrases
+        const MAX_WORDS = 4;
+        let si = 0;
+        while (si < sentWhisperWords.length) {
+          const end = Math.min(si + MAX_WORDS, sentWhisperWords.length);
+          const chunk = sentWhisperWords.slice(si, end);
+          if (chunk.length > 0) {
+            phraseTimings.push({
+              words: chunk.map((w: { word: string }) => w.word).join(" "),
+              emphasis: false,
+              // Remap: subtract full-audio offset, add video timeline offset
+              startTime: chunk[0].start - audioOffset + videoOffset,
+              endTime: chunk[chunk.length - 1].end - audioOffset + videoOffset,
+            });
+          }
+          si = end;
+        }
+      }
+    }
+    console.log(`   Phrase timings: ${phraseTimings.length} phrases (sentence-bounded, remapped to clip timeline)`);
+  }
 
   // 6. Remotion render
   console.log(`[6/7] Rendering with Remotion...`);
 
-  // Use whichever is longer: clip total or master audio duration
-  // HeyGen may trim silence, making clips shorter than the audio
-  const totalDurationSec = Math.max(cursor, audioDurationSec);
+  const totalDurationSec = cursor;
 
-  // Copy audio to public/ for Remotion
+  // Copy audio to public/ (still needed for Whisper reference, not for playback)
   const publicAudioName = `avatar-tts-${contentId}.mp3`;
   fs.copyFileSync(audioFile, path.join(publicDir, publicAudioName));
 
@@ -254,7 +294,7 @@ async function main() {
     ctaText: avatarConfig.clips.find((c) => c.purpose === "cta")?.script?.slice(0, 80) || "Follow for more",
     totalDurationSec,
     pillar: content.content_pillar || "parenting_insights",
-    audioFile: publicAudioName,
+    audioFile: publicAudioName, // kept for type compat, not used for playback
   };
 
   const bundled = await bundle({

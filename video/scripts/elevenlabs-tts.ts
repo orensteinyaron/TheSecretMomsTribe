@@ -7,7 +7,7 @@ import { parseFile } from "music-metadata";
 import { generateSpeech } from "../lib/elevenlabs";
 import { logCost } from "../lib/cost-tracker";
 
-const VOICE_ID = "9JqF6OmJtGjHTDODKG2c";
+const VOICE_ID = "tRhabdS7JjlQ0lVEImuM";
 const COST_PER_CHAR = 0.000018;
 
 export interface TTSResult {

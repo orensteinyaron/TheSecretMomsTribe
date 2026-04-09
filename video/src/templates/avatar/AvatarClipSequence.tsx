@@ -4,7 +4,6 @@ import {
   Sequence,
   OffthreadVideo,
   useCurrentFrame,
-  useVideoConfig,
   interpolate,
   staticFile,
 } from "remotion";
@@ -15,31 +14,32 @@ interface AvatarClipSequenceProps {
 }
 
 /**
- * Renders avatar clips using Remotion Sequences.
- * Each clip gets its own Sequence so OffthreadVideo plays from frame 0.
- * Crossfade: during overlap, both outgoing and incoming clips are visible.
+ * Renders avatar clips with OVERLAPPING crossfade transitions.
+ *
+ * Key design:
+ * - Each clip uses its OWN audio (volume=1) for perfect lip sync
+ * - NO master audio track — HeyGen bakes lip-synced audio into each clip
+ * - Clips OVERLAP by CROSSFADE_FRAMES — clip N+1 starts before clip N ends
+ * - During overlap: outgoing clip fades 1→0, incoming clip fades 0→1
+ * - At midpoint of crossfade, combined opacity = ~1 (no black flash)
  */
 export const AvatarClipSequence: React.FC<AvatarClipSequenceProps> = ({
   clips,
 }) => {
-  const { fps } = useVideoConfig();
-
   return (
     <AbsoluteFill>
       {clips.map((clip, i) => {
         if (!clip.videoFile) return null;
 
-        const startFrame = Math.round(clip.startSec * fps);
-        const durationFrames = Math.round(clip.durationSec * fps);
-
-        // Extend each clip by CROSSFADE_FRAMES so it overlaps with the next
-        const extendedDuration = durationFrames + (i < clips.length - 1 ? CROSSFADE_FRAMES : 0);
+        // startSec already accounts for overlap (set by orchestrator)
+        const startFrame = Math.round(clip.startSec * 30);
+        const durationFrames = Math.round(clip.durationSec * 30);
 
         return (
           <Sequence
             key={`clip-${i}`}
             from={startFrame}
-            durationInFrames={extendedDuration}
+            durationInFrames={durationFrames}
             layout="none"
           >
             <ClipRenderer
@@ -62,10 +62,6 @@ interface ClipRendererProps {
   durationFrames: number;
 }
 
-/**
- * Renders a single clip with fade-in/fade-out.
- * useCurrentFrame() here is LOCAL to the Sequence (starts at 0).
- */
 const ClipRenderer: React.FC<ClipRendererProps> = ({
   clip,
   clipIndex,
@@ -74,7 +70,7 @@ const ClipRenderer: React.FC<ClipRendererProps> = ({
 }) => {
   const localFrame = useCurrentFrame();
 
-  // Fade in (not on first clip)
+  // Fade in from 0→1 over CROSSFADE_FRAMES (not on first clip)
   const fadeIn = clipIndex > 0
     ? interpolate(localFrame, [0, CROSSFADE_FRAMES], [0, 1], {
         extrapolateLeft: "clamp",
@@ -82,7 +78,7 @@ const ClipRenderer: React.FC<ClipRendererProps> = ({
       })
     : 1;
 
-  // Fade out (not on last clip) — fade out at the END of the original duration
+  // Fade out from 1→0 over CROSSFADE_FRAMES at end (not on last clip)
   const fadeOut = clipIndex < totalClips - 1
     ? interpolate(
         localFrame,
@@ -94,6 +90,15 @@ const ClipRenderer: React.FC<ClipRendererProps> = ({
 
   const opacity = Math.min(fadeIn, fadeOut);
 
+  // During fade-in, mute this clip's audio (outgoing clip still plays)
+  // During fade-out, keep audio playing (incoming clip is still muting)
+  const audioVolume = clipIndex > 0
+    ? interpolate(localFrame, [0, CROSSFADE_FRAMES], [0, 1], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      })
+    : 1;
+
   return (
     <AbsoluteFill style={{ opacity }}>
       <OffthreadVideo
@@ -103,7 +108,7 @@ const ClipRenderer: React.FC<ClipRendererProps> = ({
           height: "100%",
           objectFit: "cover",
         }}
-        volume={0}
+        volume={audioVolume}
       />
     </AbsoluteFill>
   );

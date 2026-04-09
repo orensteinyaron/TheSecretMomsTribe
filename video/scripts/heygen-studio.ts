@@ -9,7 +9,7 @@ const HEYGEN_BASE = "https://api.heygen.com";
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_ATTEMPTS = 60;
 
-const DEFAULT_AVATAR_ID = "e160d35b8ea743a9b244ad67d968c7af";
+const DEFAULT_AVATAR_ID = "bf01f4fa47a04df48adbf99780abb95b";
 
 export interface HeyGenClipRequest {
   avatarId?: string;

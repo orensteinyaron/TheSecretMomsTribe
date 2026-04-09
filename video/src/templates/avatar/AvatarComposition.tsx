@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Audio, staticFile } from "remotion";
+import { AbsoluteFill, staticFile } from "remotion";
 import { type AvatarCompositionProps } from "./types";
 import { AvatarClipSequence } from "./AvatarClipSequence";
 import { SplitScreen } from "./SplitScreen";
@@ -63,8 +63,8 @@ export const AvatarComposition: React.FC<AvatarCompositionProps> = ({
       {/* Layer 6: Brand watermark */}
       <BrandWatermark accentColor={colors.accent} />
 
-      {/* Layer 7: Master audio track */}
-      {audioFile && <Audio src={staticFile(audioFile)} />}
+      {/* Audio: each HeyGen clip plays its own lip-synced audio (volume=1 in AvatarClipSequence) */}
+      {/* NO master audio track — HeyGen clips have perfectly synced audio baked in */}
     </AbsoluteFill>
   );
 };
