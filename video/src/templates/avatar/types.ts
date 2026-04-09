@@ -2,7 +2,7 @@
 import { type PhraseGroup } from "../v2/types";
 
 export const AVATAR_FPS = 30;
-export const CROSSFADE_FRAMES = 12; // 0.4s crossfade between clips
+export const CROSSFADE_FRAMES = 6; // 0.2s crossfade between clips (shorter = less double-vision)
 export const HOOK_OVERLAY_FRAMES = 90; // 3s hook text
 export const CTA_OVERLAY_FRAMES = 90; // 3s CTA text
 

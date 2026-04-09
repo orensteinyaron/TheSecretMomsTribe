@@ -7,6 +7,7 @@ export interface ElevenLabsConfig {
   voiceId: string;
   model?: string;
   outputFormat?: string;
+  speed?: number; // 0.25-4.0, default 1.0
 }
 
 const DEFAULT_MODEL = "eleven_multilingual_v2";
@@ -36,6 +37,7 @@ export async function generateSpeech(
           similarity_boost: 0.75,
           style: 0.0,
           use_speaker_boost: true,
+          speed: config.speed ?? 1.0,
         },
       }),
     },

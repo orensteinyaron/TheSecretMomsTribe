@@ -212,7 +212,7 @@ async function main() {
   // 5b. Recalculate timeline with OVERLAPPING crossfade
   // Each clip overlaps the next by CROSSFADE_FRAMES/30 seconds.
   // Clip N+1 starts before clip N ends = true crossfade (no black flash).
-  const CROSSFADE_SEC = 12 / 30; // CROSSFADE_FRAMES / FPS = 0.4s
+  const CROSSFADE_SEC = 6 / 30; // CROSSFADE_FRAMES / FPS = 0.2s
   let cursor = 0;
   for (let ci = 0; ci < resolvedClips.length; ci++) {
     resolvedClips[ci].startSec = cursor;

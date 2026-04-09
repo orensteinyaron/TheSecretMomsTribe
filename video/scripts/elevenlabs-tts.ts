@@ -32,6 +32,7 @@ export async function generateAvatarTTS(
   await generateSpeech(script, audioFile, {
     apiKey,
     voiceId: VOICE_ID,
+    speed: 0.9, // Slightly slower for natural delivery
   });
 
   const meta = await parseFile(audioFile);
