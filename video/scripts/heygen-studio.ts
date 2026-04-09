@@ -149,11 +149,28 @@ export async function renderAvatarClip(
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   await downloadVideo(result.videoUrl, outputPath);
 
-  const durationSec = result.duration ?? 0;
+  // Get EXACT duration from the downloaded file via ffprobe
+  const { execSync } = await import("child_process");
+  let durationSec = result.duration ?? 0;
+  try {
+    const probe = execSync(
+      `ffprobe -v quiet -print_format json -show_format "${outputPath}"`,
+      { encoding: "utf-8", env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}` } },
+    );
+    const probed = JSON.parse(probe);
+    const probedDur = parseFloat(probed?.format?.duration);
+    if (probedDur > 0) {
+      durationSec = probedDur;
+      console.log(`[heygen] ffprobe duration: ${durationSec.toFixed(3)}s`);
+    }
+  } catch (e) {
+    console.warn(`[heygen] ffprobe failed, using API duration: ${durationSec}s`);
+  }
+
   const credits = Math.ceil(durationSec / 3);
   await logCost(contentId, "heygen", "avatar-studio", 0, 0, 0);
 
-  console.log(`[heygen] Clip rendered: ${durationSec.toFixed(1)}s, ${credits} credits`);
+  console.log(`[heygen] Clip rendered: ${durationSec.toFixed(3)}s, ${credits} credits`);
 
   return { videoId, videoFile: outputPath, durationSec, credits };
 }

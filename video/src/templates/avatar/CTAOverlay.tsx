@@ -4,8 +4,10 @@ import {
   useCurrentFrame,
   interpolate,
 } from "remotion";
+import { loadFont } from "@remotion/google-fonts/Inter";
 import { CTA_OVERLAY_FRAMES } from "./types";
-import { TEXT_SHADOW } from "../v2/types";
+
+const { fontFamily: interFont } = loadFont();
 
 interface CTAOverlayProps {
   text: string;
@@ -36,11 +38,11 @@ export const CTAOverlay: React.FC<CTAOverlayProps> = ({ text, totalFrames }) => 
       <div
         style={{
           color: "#FFFFFF",
-          fontFamily: "Georgia, serif",
+          fontFamily: interFont,
           fontWeight: 700,
-          fontSize: 44,
+          fontSize: 40,
           textAlign: "center",
-          textShadow: TEXT_SHADOW,
+          textShadow: "0 2px 6px rgba(0,0,0,0.9), 0 0 20px rgba(0,0,0,0.5)",
           padding: "0 80px",
           lineHeight: 1.3,
           maxWidth: 900,

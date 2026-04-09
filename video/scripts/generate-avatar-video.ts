@@ -239,7 +239,9 @@ async function main() {
   // 6. Remotion render
   console.log(`[6/7] Rendering with Remotion...`);
 
-  const totalDurationSec = cursor;
+  // Use whichever is longer: clip total or master audio duration
+  // HeyGen may trim silence, making clips shorter than the audio
+  const totalDurationSec = Math.max(cursor, audioDurationSec);
 
   // Copy audio to public/ for Remotion
   const publicAudioName = `avatar-tts-${contentId}.mp3`;
