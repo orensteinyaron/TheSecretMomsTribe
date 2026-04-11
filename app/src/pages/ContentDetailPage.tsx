@@ -155,6 +155,31 @@ export default function ContentDetailPage() {
               <p className="text-sm text-text-primary whitespace-pre-line">{item.ai_magic_output}</p>
             </div>
           )}
+
+          {/* Sources */}
+          {item.source_urls && item.source_urls.length > 0 && (
+            <div className="bg-bg-surface border border-border-default rounded-lg p-6" data-testid="section-sources">
+              <h3 className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary mb-3">Sources</h3>
+              <div className="space-y-2">
+                {item.source_urls.map((src, idx) => (
+                  <a
+                    key={idx}
+                    href={src.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-sm text-text-secondary hover:text-accent transition-colors group"
+                  >
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-bg-elevated text-[10px] font-medium text-text-tertiary group-hover:text-accent capitalize">
+                      {src.source?.charAt(0).toUpperCase() || '?'}
+                    </span>
+                    <span className="capitalize text-xs text-text-tertiary w-20">{src.source?.replace(/_/g, ' ') || 'source'}</span>
+                    <span className="truncate text-xs text-text-secondary group-hover:text-accent">{src.url}</span>
+                    <ExternalLink size={12} className="flex-shrink-0 text-text-tertiary group-hover:text-accent" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: Metadata + Render */}

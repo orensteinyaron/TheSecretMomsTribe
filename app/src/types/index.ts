@@ -30,6 +30,7 @@ export interface ContentItem {
   created_at: string;
   updated_at: string;
   render_profiles?: RenderProfile;
+  source_urls: Array<{ url: string; source: string }> | null;
 }
 
 export interface Slide {

@@ -370,7 +370,8 @@ Each object:
   "ai_magic_output": "For wow: FULL magic content, min 200 words. Show input AND output for AI Magic. null for trust/cta.",
   "image_prompt": "REQUIRED. Single DALL-E prompt for hero/cover image. NO FACES.",
   "slides": [{"slide_number": 1, "text": "...", "type": "hook", "image_prompt": "...or null"}],
-  "audio_suggestion": "TikTok only. null for IG."
+  "audio_suggestion": "TikTok only. null for IG.",
+  "source_indices": [0, 2]  // array of integers: indices of input opportunities that inspired this post
 }
 
 Return ONLY the JSON array. No explanation.`;
@@ -584,6 +585,18 @@ async function writeContentQueue(posts, briefingId, renderProfileMap, briefingOp
       console.log(`[Content] Post ${i + 1} → render profile: ${recommendedSlug}`);
     }
 
+    // Resolve source_indices to source_urls
+    let sourceUrls = [];
+    if (Array.isArray(p.source_indices) && briefingOpps) {
+      sourceUrls = p.source_indices
+        .filter((idx) => typeof idx === 'number' && briefingOpps[idx])
+        .map((idx) => ({
+          url: briefingOpps[idx].source_url || '',
+          source: briefingOpps[idx].source || 'unknown',
+        }))
+        .filter((s) => s.url.length > 0);
+    }
+
     return {
       briefing_id: briefingId,
       platform: p.platform,
@@ -605,6 +618,7 @@ async function writeContentQueue(posts, briefingId, renderProfileMap, briefingOp
       quality_rating: null,
       render_profile_id: renderProfileId,
       render_status: renderProfileId ? 'pending' : null,
+      source_urls: sourceUrls,
     };
   });
 

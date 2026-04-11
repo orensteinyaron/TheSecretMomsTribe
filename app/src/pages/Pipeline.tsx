@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, X, Eye, Search } from 'lucide-react';
+import { Check, X, Eye, Search, Link2 } from 'lucide-react';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { PillarBadge } from '../components/shared/PillarBadge';
 import { PlatformIcon } from '../components/shared/PlatformIcon';
@@ -152,9 +152,17 @@ export default function Pipeline() {
               <label className="flex items-center">
                 <input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleSelect(item.id)} className="accent-accent" />
               </label>
-              <button onClick={() => navigate(`/pipeline/${item.id}`)} className="text-sm text-text-primary hover:text-accent truncate text-left">
-                {item.hook}
-              </button>
+              <div className="flex items-center gap-2 min-w-0">
+                <button onClick={() => navigate(`/pipeline/${item.id}`)} className="text-sm text-text-primary hover:text-accent truncate text-left">
+                  {item.hook}
+                </button>
+                {item.source_urls && item.source_urls.length > 0 && (
+                  <span className="flex items-center gap-0.5 text-[10px] text-text-tertiary flex-shrink-0" title={`${item.source_urls.length} source${item.source_urls.length > 1 ? 's' : ''}`}>
+                    <Link2 size={10} />
+                    {item.source_urls.length}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-1.5">
                 <PlatformIcon platform={item.platform} />
                 <span className="text-xs text-text-secondary capitalize">{item.platform}</span>
