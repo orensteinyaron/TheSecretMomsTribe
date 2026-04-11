@@ -277,6 +277,8 @@ CRITICAL RULES:
 - Before outputting any post, apply The SMT Test: "Would the friend in the group chat say this?"
 - If it sounds like a blog, textbook, or generic momfluencer → rewrite.
 - If it sounds like a text message you'd screenshot and forward → ship it.
+
+CRITICAL: Return ONLY valid JSON. No em dashes (\u2014), no special unicode. Use plain hyphens (-) only. Ensure all strings are properly escaped.
 - Return ONLY valid JSON. No markdown fences, no explanation.`;
 }
 
@@ -391,18 +393,66 @@ Return ONLY the JSON array. No explanation.`;
   });
 
   let text = msg.content[0].text.trim();
+
+  // Strip markdown code fences if present
   if (text.startsWith('```')) {
-    text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```$/, '').trim();
   }
 
+  // Attempt 1: Direct JSON.parse
   try {
     const posts = JSON.parse(text);
     return { posts, usage: msg.usage };
-  } catch (err) {
-    console.error('[Content] JSON parse failed. Raw:');
-    console.error(text.slice(0, 500));
-    throw new Error(`JSON parse failed: ${err.message}`);
+  } catch (err1) {
+    console.warn(`[Content] JSON parse attempt 1 failed: ${err1.message}`);
   }
+
+  // Attempt 2: Regex extraction — find array between first [ and last ]
+  try {
+    const match = text.match(/\[[\s\S]*\]/);
+    if (match) {
+      const posts = JSON.parse(match[0]);
+      console.warn('[Content] JSON recovered via regex extraction');
+      return { posts, usage: msg.usage };
+    }
+    console.warn('[Content] No JSON array found via regex');
+  } catch (err2) {
+    console.warn(`[Content] JSON parse attempt 2 (regex) failed: ${err2.message}`);
+  }
+
+  // Attempt 3: Haiku repair call
+  try {
+    console.log('[Content] Attempting JSON repair via Haiku...');
+    const repairMsg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 16000,
+      messages: [{
+        role: 'user',
+        content: `The following text is supposed to be a valid JSON array but has syntax errors. Fix the JSON and return ONLY the valid JSON array. No explanation, no code fences, no extra text.\n\n${text}`,
+      }],
+    });
+    let repaired = repairMsg.content[0].text.trim();
+    if (repaired.startsWith('```')) {
+      repaired = repaired.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```$/, '').trim();
+    }
+    const posts = JSON.parse(repaired);
+    console.warn('[Content] JSON recovered via Haiku repair');
+    await logCost(supabase, {
+      pipeline_stage: 'content_generation', service: 'anthropic', model: 'claude-haiku-4-5',
+      input_tokens: repairMsg.usage.input_tokens,
+      output_tokens: repairMsg.usage.output_tokens,
+      briefing_id: briefing.id,
+      description: 'JSON repair (Haiku fallback)',
+    });
+    return { posts, usage: msg.usage };
+  } catch (err3) {
+    console.error(`[Content] JSON repair attempt 3 (Haiku) failed: ${err3.message}`);
+  }
+
+  // All 3 attempts failed
+  console.error('[Content] All JSON parse attempts failed. Raw text (first 500 chars):');
+  console.error(text.slice(0, 500));
+  throw new Error('JSON parse failed after 3 attempts (direct, regex, Haiku repair)');
 }
 
 // --- Validation ---
