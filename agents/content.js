@@ -364,7 +364,7 @@ Each object:
   "age_range": "toddler" | "little_kid" | "school_age" | "teen" | "universal",
   "hook": "First thing viewer sees. Stops scroll in 0-2 seconds.",
   "caption": "Full caption following platform rules.",
-  "hashtags": ["5-8 hashtags"],
+  "hashtags": ["#example1", "#example2", "... 5-8 relevant hashtags"],
   "ai_magic_output": "For wow: FULL magic content, min 200 words. Show input AND output for AI Magic. null for trust/cta.",
   "image_prompt": "REQUIRED. Single DALL-E prompt for hero/cover image. NO FACES.",
   "slides": [{"slide_number": 1, "text": "...", "type": "hook", "image_prompt": "...or null"}],
@@ -427,7 +427,18 @@ function validateBatch(posts) {
     try {
       if (!p.hook || p.hook.length < 10) throw new Error('missing/short hook');
       if (!p.caption || p.caption.length < 20) throw new Error('missing/short caption');
-      if (!Array.isArray(p.hashtags) || p.hashtags.length < 3) throw new Error('needs 3+ hashtags');
+      if (!Array.isArray(p.hashtags) || p.hashtags.length < 3) {
+        const fallback = {
+          parenting_insights: { toddler: ['#momlife', '#toddlermom', '#parentingtips', '#momhacks', '#toddlerlife'], little_kid: ['#momlife', '#littlekidmom', '#parentingtips', '#momhacks', '#kidslife'], school_age: ['#momlife', '#schoolkidmom', '#parentingtips', '#momhacks', '#raisingkids'], teen: ['#momlife', '#teenmom', '#parentingtips', '#momhacks', '#raisingteens'], universal: ['#momlife', '#parentingtips', '#momhacks', '#raisingkids', '#motherhood'] },
+          ai_magic: { toddler: ['#aimom', '#aitools', '#toddlermom', '#momtech', '#aiforparents'], little_kid: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], school_age: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], teen: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], universal: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'] },
+          tech_for_moms: { toddler: ['#momtech', '#techformoms', '#toddlermom', '#smartparenting', '#momlife'], little_kid: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#kidstech'], school_age: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#kidstech'], teen: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#teentech'], universal: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#motherhood'] },
+          mom_health: { toddler: ['#momhealth', '#selfcare', '#toddlermom', '#momwellness', '#healthymom'], little_kid: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], school_age: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], teen: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], universal: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#motherhood'] },
+          trending: { toddler: ['#momlife', '#trending', '#toddlermom', '#momhacks', '#viral'], little_kid: ['#momlife', '#trending', '#momhacks', '#viral', '#kidslife'], school_age: ['#momlife', '#trending', '#momhacks', '#viral', '#raisingkids'], teen: ['#momlife', '#trending', '#momhacks', '#viral', '#raisingteens'], universal: ['#momlife', '#trending', '#momhacks', '#viral', '#motherhood'] },
+        };
+        const pillar = fallback[p.content_pillar] || fallback.parenting_insights;
+        p.hashtags = pillar[p.age_range] || pillar.universal;
+        console.warn(`[Content] ${prefix}: hashtags missing/insufficient, auto-generated defaults`);
+      }
       if (!VALID_POST_FORMATS.includes(p.post_format)) throw new Error(`invalid post_format "${p.post_format}"`);
       if (!VALID_AGE_RANGES.includes(p.age_range)) throw new Error(`invalid age_range "${p.age_range}"`);
       if (!VALID_PILLARS.includes(p.content_pillar)) throw new Error(`invalid content_pillar "${p.content_pillar}"`);
