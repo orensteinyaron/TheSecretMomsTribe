@@ -50,7 +50,7 @@ const ORCHESTRATOR_INTERVAL_MIN = 15;
 
 /**
  * Checks whether a cron field matches a value.
- * Supports: *, specific numbers, */N step values, and comma-separated lists.
+ * Supports: *, specific numbers, star-slash-N step values, and comma-separated lists.
  */
 function matchesField(field, value) {
   if (field === '*') return true;
