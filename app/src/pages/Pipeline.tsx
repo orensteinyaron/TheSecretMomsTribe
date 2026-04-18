@@ -175,7 +175,7 @@ export default function Pipeline() {
                 <span className="text-xs text-text-tertiary">—</span>
               )}
               <div className="flex gap-1">
-                {(item.status === 'draft' || item.status === 'pending_approval') && (
+                {(item.status === 'draft' || item.status === 'draft_needs_review' || item.status === 'pending_approval') && (
                   <>
                     <button onClick={() => approve(item.id)} className="p-1 rounded hover:bg-success/20 text-text-tertiary hover:text-success" title="Approve">
                       <Check size={16} />

@@ -13,7 +13,10 @@
 import { createClient } from '@supabase/supabase-js';
 import { ApifyClient } from 'apify-client';
 import Anthropic from '@anthropic-ai/sdk';
+import { randomUUID } from 'crypto';
 import { logCost, printCostSummary } from '../scripts/utils/cost-logger.js';
+import { logActivity } from './lib/activity.js';
+import { validateSocialUrl } from './lib/url-validator.js';
 
 // --- Config ---
 
@@ -556,6 +559,67 @@ async function generateBriefing(sources) {
   return validateOpportunities(opportunities);
 }
 
+// --- Signal ID + URL validation ---
+
+/**
+ * Attach a stable signal_id (UUID) to each opportunity so downstream content
+ * pieces can point back to the specific signal that inspired them.
+ * Idempotent: preserves signal_ids if Claude somehow returned them.
+ */
+function attachSignalIds(opportunities) {
+  for (const opp of opportunities) {
+    if (!opp.signal_id || typeof opp.signal_id !== 'string') {
+      opp.signal_id = randomUUID();
+    }
+  }
+  return opportunities;
+}
+
+/**
+ * Validate every source_url attached to an opportunity. Dead URLs are
+ * cleared from the briefing (opp retained, url emptied) and logged to
+ * activity_log so they show up in the debug stream.
+ */
+async function validateBriefingUrls(opportunities) {
+  let checked = 0;
+  let dropped = 0;
+
+  for (const opp of opportunities) {
+    const url = typeof opp.source_url === 'string' ? opp.source_url.trim() : '';
+    if (!url) continue;
+    checked++;
+
+    const result = await validateSocialUrl(url);
+    if (result.valid) continue;
+
+    dropped++;
+    const reason = result.reason || result.error || 'unknown';
+    console.warn(`[Research] URL validation failed — dropping: ${url} (${reason})`);
+
+    await logActivity({
+      category: 'debug',
+      actor_type: 'agent',
+      actor_name: 'research-agent',
+      action: 'url_validation_dropped',
+      description: `URL validation failed: ${url} — ${reason}`,
+      metadata: {
+        url,
+        reason,
+        status: result.status ?? null,
+        platform: result.platform ?? null,
+        signal_id: opp.signal_id,
+        topic: opp.topic,
+      },
+    });
+
+    opp.source_url = '';
+    opp.source_url_invalid_reason = reason;
+  }
+
+  console.log(`[Research] URL validation: ${checked} checked, ${dropped} dropped`);
+  return { checked, dropped };
+}
+
 // --- Write to Supabase ---
 
 async function writeBriefing(opportunities, sourceSummary) {
@@ -621,6 +685,12 @@ async function main() {
 
   // Synthesize with Claude
   const opportunities = await generateBriefing(sources);
+
+  // Attach stable signal_ids (used by content_queue.source_urls.signal_id)
+  attachSignalIds(opportunities);
+
+  // Validate every source_url — drop dead links before writing briefing
+  await validateBriefingUrls(opportunities);
 
   // Build source summary for Supabase
   const sourceSummary = {
