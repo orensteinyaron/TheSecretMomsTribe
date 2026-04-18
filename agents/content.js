@@ -30,6 +30,7 @@ import {
   normalizeAxisValue,
   auditBatchDiversity,
   suggestUntakenAxes,
+  enforceBatchDiversity as sharedEnforceBatchDiversity,
   buildImagePromptGuidelines,
 } from './lib/image-diversity.js';
 import {
@@ -719,53 +720,29 @@ Return ONLY valid JSON, no code fences:
 }
 
 /**
- * Enforce batch diversity across {shot_type, lighting}. Regenerate duplicates
- * via Haiku. If a post can't be made distinct, fall back to forcing the
- * axes slug (prompt text stays stale but axes become accurate).
+ * Enforce batch diversity via the shared helper. Haiku rewrites any
+ * duplicate; last-resort fallback stamps untaken axes.
  */
 async function enforceBatchDiversity(posts) {
-  let audit = auditBatchDiversity(posts);
-  if (audit.violations.length === 0) return { regenerated: 0, forced: 0 };
+  const result = await sharedEnforceBatchDiversity(posts, {
+    regenerateFn: (post, target) => regenerateImagePrompt(post, target),
+    logEvent: ({ index, key, target, regenerated }) =>
+      logActivity({
+        category: 'debug',
+        actor_type: 'agent',
+        actor_name: 'content-agent',
+        action: 'image_diversity_regenerated',
+        description: `Image duplicate shot+lighting — regenerated to ${target.shot_type}+${target.lighting}`,
+        metadata: { index, key, target, regenerated },
+      }),
+  });
 
-  console.warn(`[Content] Image diversity: ${audit.violations.length} duplicate(s) — regenerating`);
-  let regenerated = 0;
-  let forced = 0;
-
-  for (const violation of audit.violations) {
-    const post = posts[violation.index];
-    const takenPairs = posts
-      .filter((_, i) => i !== violation.index)
-      .map((p) => ({ shot_type: readAxes(p).shot_type, lighting: readAxes(p).lighting }));
-    const target = suggestUntakenAxes(takenPairs);
-
-    const ok = await regenerateImagePrompt(post, target);
-    if (ok) {
-      regenerated++;
-    } else {
-      // Last-resort: stamp the untaken pair on axes so downstream grid rules
-      // still see distinct axes even if the prompt text wasn't updated.
-      post.image_axes = { ...post.image_axes, shot_type: target.shot_type, lighting: target.lighting };
-      forced++;
-    }
-
-    await logActivity({
-      category: 'debug',
-      actor_type: 'agent',
-      actor_name: 'content-agent',
-      action: 'image_diversity_regenerated',
-      description: `Image duplicate shot+lighting — regenerated to ${target.shot_type}+${target.lighting}`,
-      metadata: {
-        index: violation.index,
-        key: violation.key,
-        target,
-        regenerated: ok,
-      },
-    });
+  if (result.violations > 0) {
+    console.warn(`[Content] Image diversity: ${result.violations} duplicate(s) — ${result.regenerated} regenerated, ${result.forced} forced`);
   }
-
-  audit = auditBatchDiversity(posts);
+  const audit = auditBatchDiversity(posts);
   console.log(`[Content] Image diversity after regen: ${audit.violations.length} violations remain`);
-  return { regenerated, forced };
+  return { regenerated: result.regenerated, forced: result.forced };
 }
 
 /**
