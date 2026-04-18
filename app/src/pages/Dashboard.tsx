@@ -54,7 +54,7 @@ function SnapshotCards() {
       <MetricCard label="Pipeline" value={health ? `${health.pending_content + (health.agents?.total ?? 0)} total` : '—'} icon={<Layers size={20} />} onClick={() => navigate('/pipeline')} data-testid="metric-pipeline" />
       <MetricCard label="Renders" value={health?.failed_renders !== undefined ? `${health.failed_renders} failed` : '—'} icon={<Film size={20} />} onClick={() => navigate('/renders')} data-testid="metric-renders" />
       <MetricCard
-        label="Pipeline"
+        label="System"
         value={health?.pipeline
           ? `${health.pipeline.on_time}/${health.pipeline.total} on time`
           : health ? `${health.agents?.healthy ?? 0}/${health.agents?.total ?? 0} healthy` : '—'}
