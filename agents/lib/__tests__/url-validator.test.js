@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost';
 process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'stub';
 
-const { validateUrl, validateSocialUrl } = await import('../url-validator.js');
+const { validateUrl, validateSocialUrl, platformOf } = await import('../url-validator.js');
 
 function makeResponse({ ok = true, status = 200, body = '' } = {}) {
   return { ok, status, text: async () => body };
@@ -165,4 +165,32 @@ test('validateSocialUrl: timeout/AbortError → invalid with timeout reason', as
   });
   assert.equal(out.valid, false);
   assert.equal(out.reason, 'timeout');
+});
+
+// --- platformOf ------------------------------------------------------------
+
+test('platformOf: major social platforms return short slugs', () => {
+  assert.equal(platformOf('https://www.tiktok.com/@x/video/1'),     'tiktok');
+  assert.equal(platformOf('https://tiktok.com/@x/video/1'),         'tiktok');
+  assert.equal(platformOf('https://www.reddit.com/r/Parenting/'),   'reddit');
+  assert.equal(platformOf('https://old.reddit.com/r/x/'),           'reddit');
+  assert.equal(platformOf('https://www.instagram.com/p/abc/'),      'instagram');
+  assert.equal(platformOf('https://www.youtube.com/watch?v=abc'),   'youtube');
+  assert.equal(platformOf('https://youtu.be/abc'),                  'youtube');
+  assert.equal(platformOf('https://twitter.com/u/status/1'),        'twitter');
+  assert.equal(platformOf('https://x.com/u/status/1'),              'twitter');
+  assert.equal(platformOf('https://trends.google.com/trends/x'),    'google_trends');
+});
+
+test('platformOf: unrecognized host → "other"', () => {
+  assert.equal(platformOf('https://nytimes.com/article'), 'other');
+  assert.equal(platformOf('https://some-blog.net/post'),  'other');
+});
+
+test('platformOf: null / empty / malformed → "unknown"', () => {
+  assert.equal(platformOf(null),        'unknown');
+  assert.equal(platformOf(undefined),   'unknown');
+  assert.equal(platformOf(''),          'unknown');
+  assert.equal(platformOf('not a url'), 'unknown');
+  assert.equal(platformOf(12345),       'unknown');
 });
