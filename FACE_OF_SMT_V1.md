@@ -102,6 +102,7 @@ Rachel is a name we chose so *we* have a clear character to write for — consis
 - "Let me walk you through…" (teacher voice)
 - "You got this!" (hollow affirmation)
 - "Trust me" (if she has to say it, she's already lost them)
+- **"You should [invest/buy/put your money in]…"** (hard rule for Financial pillar — Rachel shares first-person experience, never gives second-person directives. See `CONTENT_STRATEGY_V1.md` §3a.)
 
 **Pacing on camera:** Fast start, no warm-up, no "hi guys." Hook at frame 1. She's already talking when the video opens.
 
@@ -309,3 +310,5 @@ This document is the source of truth for Rachel as a character. Downstream artif
 ## Change log
 
 - **2026-04-17 — V1 locked.** Name: Rachel. Three kids (5, 11, 15 — oldest a teen boy). Tiered naming policy (never in short-form; named in bio, podcast/collabs, and **Ask Rachel format**). Visual identity, look reasoning, generation prompt (preserved verbatim with regeneration rule), wardrobe rotation, voice spec, Rachel format distribution (Avatar Full 55% / Ask Rachel 30% / Avatar+Visual 15%), and canonical asset references documented. Two public asset URLs (reference face + voice sample) reserved in Supabase — pending upload. Cross-reference to `CONTENT_STRATEGY_V1.md` established.
+
+- **2026-04-17 — V1.1.** Added "You should [invest/buy/put your money in]…" to Rachel's banned phrases list, enforcing the first-person-only rule for the new Financial pillar. Cross-reference to `CONTENT_STRATEGY_V1.md` §3a.

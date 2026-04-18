@@ -17,7 +17,7 @@
 
 ---
 
-## 1. The five pillars
+## 1. The six pillars
 
 Pillars are *topic* buckets. Every content piece is tagged to exactly one.
 
@@ -26,8 +26,9 @@ Pillars are *topic* buckets. Every content piece is tagged to exactly one.
 | **Parenting Insights** | 35% | Rachel's strongest territory. Emotional reframes across toddler → teen, delivered by someone currently parenting a 5, 11, and 15-year-old. Unbeatable vs. slideshow format. |
 | **Mom Health & Wellness** | 25% | Mental load, burnout, nervous system. High-trust content. Rachel's imperfections + voice are the delivery mechanism this pillar needs. Never preachy. |
 | **AI Magic** | 15% | Redefined. Rachel-fronted ("what I've been using"), not tool-demo. See section 3. |
-| **Tech for Moms** | 15% | Apps, gadgets, shortcuts. Lead with result, not tool. Lower volume = sharper picks. |
+| **Tech for Moms** | 10% | Apps, gadgets, shortcuts. Lead with result, not tool. Lower volume = sharper picks. |
 | **Trending & Culture** | 10% | Reactive takes on news, studies, viral moments. Reframed for moms. Only time-sensitive pillar. |
+| **Financial** | 5% | Money through a mom's lens — kids + money, household finance, mom's-own-money reality. First-person experience only, never advice. See section 3a. |
 
 **Totals to 100%.** These are **published content** targets, measured on a rolling 7-day basis.
 
@@ -84,6 +85,81 @@ A shortlist of AI tools Rachel "has been using" is the production-side constrain
 
 ---
 
+## 3a. Financial — pillar definition
+
+Money through a mom's lens. 5% of our publish mix. The newest pillar; added because moms are a massively underserved financial audience, and Rachel's lived credibility across three life stages (young mom of a 5-year-old, mid-career mom of a tween, close-to-empty-nest mom of a teen) maps directly onto the most emotionally loaded money transitions in a woman's life.
+
+### Scope — the three territories
+
+| Territory | What it covers | Example topics |
+|---|---|---|
+| **Family financial literacy** | Raising money-smart kids | Allowance mechanics, first debit card, "we can't afford that" conversations, first job, first credit card, college-money talks |
+| **Household finance (mom's mental load)** | The invisible labor of being the family's financial point person | Bill tracking, family subscriptions audit, grocery inflation coping, back-to-school spending, birthday/holiday budgeting |
+| **Mom's own money (trimmed)** | The emotional/experiential side of mom-specific money reality | Return-to-work transition, SAHM-to-earner reality, career pivots in your 30s/40s, the "where did my money go" moment, organizing finances after divorce (emotional framing only) |
+
+### The first-person / second-person rule — HARD
+
+This is the single most important rule for this pillar. ContentGen must enforce it mechanically.
+
+**✅ Safe framings Rachel uses:**
+- "Here's what I do with [my kid's allowance / our household budget / my own money]"
+- "Here's what I learned the hard way"
+- "Here's what I wish someone had told me"
+- "Here's how we handle [specific situation] in our house"
+- "This worked for us — your mileage may vary"
+
+**❌ Unsafe framings Rachel never uses:**
+- "You should [invest / buy / put your money in]…"
+- "The right move is…"
+- "Invest in…" / "Put your money in…"
+- "The best [fund / account / app / insurance / card] is…"
+- Anything that names a specific financial product as a recommendation
+
+**The test:** First-person lived experience = safe. Second-person directive = unsafe. ContentGen rejects any Financial-pillar output that fails this test.
+
+### Out-of-bounds topics
+
+We simply don't cover these, even carefully:
+
+- Specific investment picks (no stocks named, no funds named, no sectors picked)
+- Specific insurance product recommendations (you can mention you have X kind of insurance as a fact of life, never as "the right choice")
+- Tax strategy specifics ("you should claim X deduction" is out)
+- Legal advice (divorce prep becomes "here's how I organized it emotionally," never "here's what to file")
+- Crypto of any kind
+- Day-trading, active trading, options, anything speculative
+
+### The mandatory disclaimer
+
+Every Financial pillar post includes this disclaimer in the caption (not the video):
+
+> *Sharing what works in our house — not financial advice. Talk to a pro for your specific situation.*
+
+Rules:
+- **Caption only**, never in the video itself (doesn't break pacing, doesn't kill the hook)
+- **Mandatory on 100% of Financial posts**, automatically inserted by ContentGen
+- **Final line of the caption**, so it doesn't compete with the hook
+- **Tone matches Rachel** — it's not lawyer-speak, it's honest peer disclosure
+
+### Pillar → format routing for Financial
+
+| Format | Primary / secondary | Notes |
+|---|---|---|
+| Avatar Full | Primary | Rachel sharing lived experience. Voice rules critical — this is where the first-person lock matters most. |
+| Ask Rachel | Primary | Works exceptionally well here — "So Rachel, how do you talk to a teen about money?" Question frame + experiential answer = perfect fit. |
+| Avatar + Visual | Secondary | Used when visual proof helps (budget spreadsheet, allowance chart, etc.) — but never showing specific account balances or real financial data. |
+| AI Magic Video | Compatible | When an AI tool genuinely helps with household finance (e.g., "I gave Claude our subscription list and it found $340/month in duplicates") |
+| Moving Images | Compatible | Good for trending financial topics ("that viral take on teen credit cards — here's the nuance") |
+
+### Shelf-life
+
+Evergreen, same as every pillar except Trending. Money conversations in 2026 are money conversations in 2030.
+
+### The growth path
+
+If Financial engagement outperforms the pillar average on save rate by 25%+ over a 90-day window, we re-evaluate the pillar weighting. Potential path: 5% → 10%, likely by taking additional points from Tech for Moms (already reduced once) or from Trending.
+
+---
+
 ## 4. Format taxonomy
 
 Formats are *delivery* mechanisms, tracked independently from pillars. Six render profiles.
@@ -116,6 +192,7 @@ Of Rachel-delivered content, target split:
 | AI Magic | AI Magic Video | — |
 | Tech for Moms | Avatar + Visual, Moving Images | Avatar Full |
 | Trending & Culture | Moving Images, Ask Rachel (reactive takes) | Avatar Full |
+| Financial | Avatar Full, Ask Rachel | Avatar + Visual, AI Magic Video (when AI tool applies), Moving Images (reactive takes) |
 
 ---
 
@@ -237,6 +314,7 @@ Carousel is silent. AI Magic without Rachel's voice strips out the most valuable
 | Parenting Insights | Evergreen | "Why your teen says fine" works in 2026 and 2030. |
 | Tech for Moms | Evergreen | App still works = content still works. Queue tagged for app-deprecation watch, but otherwise evergreen. |
 | Mom Health | Evergreen | Human nervous system gets no software updates. |
+| Financial | Evergreen | Money conversations don't age out. Only exception: if a specific app or tool Rachel mentions shuts down, that piece gets archived. |
 | Trending & Culture | **Time-sensitive** | 48–72h typical decay window. |
 
 **Operational consequence:** Only Trending has a ticking clock. Everything else accumulates as a library.
@@ -379,6 +457,7 @@ Every piece must pass all of these before publish:
 - [ ] No platform watermarks
 - [ ] Age-range diversity within the batch (no 3+ posts same age range in a day)
 - [ ] Pillar target check (scheduler enforces — no pillar skew beyond the 7-day window)
+- [ ] **Financial-pillar-specific:** First-person framing only (no "you should…" directives); no specific financial products named; mandatory disclaimer present in caption
 
 QA agent scores on these gates. Anything failing a hard gate is rejected back to ContentGen.
 
@@ -453,9 +532,12 @@ Tracked in Linear, pending future conversations:
 - **Interviewer voice pool selection** — pick 2–3 ElevenLabs voices.
 - **Push notification channel for Hot Signals** — Gmail vs Slack, implement when push goes live.
 - **Per-pillar optimal posting times** — requires analytics volume before tuning.
+- **Financial pillar topic seed** — seed 20+ evergreen topics across the three territories (family financial literacy, household finance, mom's own money), plus banned-topic list and final disclaimer wording.
 
 ---
 
 ## Change log
 
 - **2026-04-17 — V1 locked.** Pillar mix revised to AI Magic 15% / Parenting Insights 35% / Tech for Moms 15% / Mom Health 25% / Trending 10%. AI Magic redefined as Rachel-fronted. Produce-everything-schedule-with-discipline principle. Shelf-life rules. 1-week buffer rule. Hot Signal trending override protocol with proactive Claude flagging. Cross-posting model: one render, platform-native captions, offset timing (no re-export). Two new render profiles specced: AI Magic Video (#5), Ask Rachel (#6). Rachel format distribution: Avatar Full 55% / Ask Rachel 30% / Avatar+Visual 15%. Pillar vs format separation formalized.
+
+- **2026-04-17 — V1.1.** Financial pillar added at 5%. Tech for Moms reduced from 15% to 10% to accommodate. Now six pillars total. Financial covers three territories: family financial literacy, household finance (mental load), mom's own money (trimmed — emotional/experiential framing only). Regulatory safety rules locked: first-person lived experience only, never second-person directive; no specific financial products/stocks/crypto/tax-legal specifics; mandatory caption disclaimer on 100% of Financial posts. Quality gates updated.
