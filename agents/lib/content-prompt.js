@@ -61,7 +61,7 @@ Pick the best post_format for each opportunity:
 ## QUALITY RULES (these still apply to EVERY post)
 - Follow ALL voice rules from Brand Voice Bible
 - Use hook formulas from Content DNA Framework
-- Follow caption structure per platform (TikTok: 2-3 lines max 40 words, IG: 100-180 words)
+- Caption LENGTH is enforced by the per-format char caps listed below under "Caption length caps". Word counts are NOT the rule — char counts are. Any caption over the cap for its post_format will be REJECTED; stay under the char cap for your chosen format.
 - Hashtags: 5-8 per post, NEVER use #momlife or #parenting (mega-tags)
 - Emoji: only 👀 🤍 💛, max 1-2 per caption
 - No duplicate topics within this batch
@@ -106,8 +106,10 @@ Then pick format:
 - story with reveal/twist → tiktok_slideshow
 - Rachel-delivered direct-to-camera → tiktok_avatar / tiktok_avatar_visual
 
-Caption length caps (HARD — longer captions get flagged):
+Caption length caps (HARD — captions over the cap are REJECTED and regenerated):
 ${Object.entries(CAPTION_MAX_BY_FORMAT).map(([f, n]) => `  ${f}: ≤${n} chars`).join('\n')}
+
+Count characters — this is not a soft target. Picking ig_static then writing a 200-char caption = rejection. If your content needs more room, pick ig_carousel (400 char cap) or tiktok_avatar (150 char cap) instead.
 
 ### slides (REQUIRED for slideshow and carousel posts)
 JSON array of slide objects. Each slide:
@@ -129,7 +131,7 @@ Each object:
   "content_pillar": "ai_magic" | "parenting_insights" | "tech_for_moms" | "mom_health" | "trending",
   "age_range": "toddler" | "little_kid" | "school_age" | "teen" | "universal",
   "hook": "First thing viewer sees. Stops scroll in 0-2 seconds.",
-  "caption": "Full caption following platform + length rules above.",
+  "caption": "Caption under the cap for your chosen post_format. HARD CAPS: ig_static≤125, ig_carousel≤400, ig_meme≤125, tiktok_slideshow≤100, tiktok_text≤100, tiktok_avatar≤150, tiktok_avatar_visual≤150. Count chars. Going over = REJECTED.",
   "hashtags": ["#example1", "#example2", "... 5-8 relevant hashtags"],
   "ai_magic_output": "For wow: FULL magic content, min 200 words. Show input AND output for AI Magic. null for trust/cta.",
   "image_prompt": { "prompt": "...NO FACES EVER...", "axes": { "shot_type": "...", "lighting": "...", "palette": "...", "subject": "...", "mood": "...", "rachel_mode": "rachel_in_frame|broll" } },
