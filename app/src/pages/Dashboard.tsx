@@ -1,9 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { Layers, Film, CalendarDays, Bot, AlertTriangle, Clock, XCircle, Target } from 'lucide-react';
+import { Layers, Film, CalendarDays, Bot, Clock, XCircle, Target } from 'lucide-react';
 import { MetricCard } from '../components/shared/MetricCard';
 import { StatusBadge } from '../components/shared/StatusBadge';
+import { PipelineHealthStrip } from '../components/PipelineHealthStrip';
 import { useSystemHealth } from '../hooks/useSystem';
-import { useContentList } from '../hooks/useContent';
 import { useQuery } from '@tanstack/react-query';
 import { strategyApi } from '../api/strategy';
 import { systemApi } from '../api/system';
@@ -53,7 +53,15 @@ function SnapshotCards() {
     <div className="grid grid-cols-4 gap-4 mb-8">
       <MetricCard label="Pipeline" value={health ? `${health.pending_content + (health.agents?.total ?? 0)} total` : '—'} icon={<Layers size={20} />} onClick={() => navigate('/pipeline')} data-testid="metric-pipeline" />
       <MetricCard label="Renders" value={health?.failed_renders !== undefined ? `${health.failed_renders} failed` : '—'} icon={<Film size={20} />} onClick={() => navigate('/renders')} data-testid="metric-renders" />
-      <MetricCard label="System" value={health ? `${health.agents?.healthy ?? 0}/${health.agents?.total ?? 0} healthy` : '—'} icon={<Bot size={20} />} onClick={() => navigate('/system/agents')} data-testid="metric-system" />
+      <MetricCard
+        label="Pipeline"
+        value={health?.pipeline
+          ? `${health.pipeline.on_time}/${health.pipeline.total} on time`
+          : health ? `${health.agents?.healthy ?? 0}/${health.agents?.total ?? 0} healthy` : '—'}
+        icon={<Bot size={20} />}
+        onClick={() => navigate('/system/agents')}
+        data-testid="metric-system"
+      />
       <MetricCard label="Today's Cost" value={health?.today_cost !== undefined ? `$${health.today_cost.toFixed(2)}` : '—'} icon={<CalendarDays size={20} />} onClick={() => navigate('/system/costs')} data-testid="metric-cost" />
     </div>
   );
@@ -122,6 +130,7 @@ export default function Dashboard() {
   return (
     <div>
       <h1 className="text-2xl font-bold text-text-primary tracking-tight mb-6">Dashboard</h1>
+      <PipelineHealthStrip />
       <ActionCenter />
       <SnapshotCards />
       <div className="grid grid-cols-2 gap-6">

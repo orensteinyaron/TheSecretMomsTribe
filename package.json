@@ -7,7 +7,8 @@
     "scrape:ig": "node scripts/scrape-instagram.js",
     "scrape:tt": "node scripts/scrape-tiktok.js",
     "scrape:all": "node scripts/scrape-instagram.js && node scripts/scrape-tiktok.js",
-    "report": "node scripts/baseline-report.js"
+    "report": "node scripts/baseline-report.js",
+    "test": "node --test agents/lib/__tests__/"
   },
   "keywords": [],
   "author": "",

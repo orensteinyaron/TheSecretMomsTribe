@@ -27,11 +27,12 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label?: string }
   expired: { bg: 'bg-bg-elevated', text: 'text-text-tertiary', label: 'Expired' },
 };
 
-interface Props { status: string; label?: string; size?: 'sm' | 'md'; }
+interface Props { status: string | null | undefined; label?: string; size?: 'sm' | 'md'; }
 
 export function StatusBadge({ status, label, size = 'sm' }: Props) {
-  const style = STATUS_STYLES[status] || { bg: 'bg-bg-elevated', text: 'text-text-secondary' };
-  const displayLabel = label || style.label || status.replace(/_/g, ' ');
+  const safeStatus = status ?? '';
+  const style = STATUS_STYLES[safeStatus] || { bg: 'bg-bg-elevated', text: 'text-text-secondary' };
+  const displayLabel = label || style.label || (safeStatus ? safeStatus.replace(/_/g, ' ') : '—');
   const sizeClass = size === 'sm' ? 'text-[11px] px-2 py-0.5' : 'text-xs px-2.5 py-1';
   return (
     <span className={`${style.bg} ${style.text} ${sizeClass} font-semibold tracking-wide uppercase rounded-full inline-flex items-center`}>

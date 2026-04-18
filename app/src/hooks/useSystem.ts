@@ -4,7 +4,19 @@ import { agentsApi } from '../api/agents';
 import { analyticsApi } from '../api/analytics';
 
 export function useSystemHealth() {
-  return useQuery({ queryKey: ['system', 'health'], queryFn: () => systemApi.health() });
+  return useQuery({
+    queryKey: ['system', 'health'],
+    queryFn: () => systemApi.health(),
+    refetchInterval: 60_000,
+  });
+}
+
+export function usePipelineHealth() {
+  return useQuery({
+    queryKey: ['system', 'pipeline_health'],
+    queryFn: () => systemApi.pipelineHealth(),
+    refetchInterval: 60_000,
+  });
 }
 
 export function useServices() {

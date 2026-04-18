@@ -164,10 +164,59 @@ export interface SystemDirective {
 export interface SystemHealth {
   agents: { total: number; healthy: number; failed: number; disabled: number };
   services: { total: number; active: number; down: number };
+  pipeline?: {
+    total: number;
+    on_time: number;
+    late: number;
+    missed: number;
+    pending: number;
+    detail: Array<{
+      slug: string;
+      deadline_utc: string;
+      status: 'on_time' | 'late' | 'missed' | 'pending';
+      completed_at: string | null;
+    }>;
+  };
   today_cost: number;
   pending_tasks: number;
   pending_content: number;
   failed_renders: number;
+}
+
+export interface PipelineHealth {
+  state: 'green' | 'yellow' | 'red';
+  counts: {
+    total: number;
+    on_time: number;
+    late: number;
+    missed: number;
+    pending: number;
+  };
+  rows: Array<{
+    slug: string;
+    name: string;
+    schedule: string | null;
+    deadline_utc: string;
+    status: 'on_time' | 'late' | 'missed' | 'pending' | 'running' | 'failed';
+    last_run_at: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+  }>;
+  orchestrator: {
+    last_tick: string | null;
+    last_status: string | null;
+    silent_hours: number | null;
+    silent: boolean;
+  };
+  monitor: { last_run_at: string | null };
+  alerts: Array<{
+    id: string;
+    title: string;
+    description: string;
+    severity: string;
+    subject_id: string;
+    created_at: string;
+  }>;
 }
 
 // Analytics
