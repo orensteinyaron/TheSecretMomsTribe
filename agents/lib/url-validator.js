@@ -39,6 +39,32 @@ export function clearCache() {
   cache.clear();
 }
 
+/**
+ * Short platform slug for an opportunity's source URL. For the full host
+ * (e.g. "tiktok.com") use the internal classifier via validateSocialUrl's
+ * result.platform. This returns compact slugs suitable for storage on
+ * daily_briefings.opportunities[].platform.
+ *
+ * Returns one of: tiktok, reddit, instagram, youtube, twitter,
+ * google_trends, other, unknown.
+ */
+export function platformOf(url) {
+  if (!url || typeof url !== 'string') return 'unknown';
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === 'tiktok.com'    || host.endsWith('.tiktok.com'))    return 'tiktok';
+    if (host === 'reddit.com'    || host.endsWith('.reddit.com'))    return 'reddit';
+    if (host === 'instagram.com' || host.endsWith('.instagram.com')) return 'instagram';
+    if (host === 'youtube.com'   || host.endsWith('.youtube.com') || host === 'youtu.be') return 'youtube';
+    if (host === 'twitter.com'   || host.endsWith('.twitter.com')
+     || host === 'x.com'         || host.endsWith('.x.com'))         return 'twitter';
+    if (host === 'google.com'    || host.endsWith('.google.com'))    return 'google_trends';
+    return 'other';
+  } catch {
+    return 'unknown';
+  }
+}
+
 export function getCacheSize() {
   return cache.size;
 }
