@@ -4,7 +4,7 @@ export interface ContentItem {
   briefing_id: string | null;
   platform: 'instagram' | 'tiktok';
   content_type: 'wow' | 'trust' | 'cta';
-  status: 'draft' | 'pending_approval' | 'approved' | 'rejected';
+  status: 'draft' | 'draft_needs_review' | 'pending_approval' | 'approved' | 'rejected';
   hook: string;
   caption: string;
   hashtags: string[];
@@ -30,7 +30,12 @@ export interface ContentItem {
   created_at: string;
   updated_at: string;
   render_profiles?: RenderProfile;
-  source_urls: Array<{ url: string; source: string }> | null;
+  source_urls: Array<{
+    url: string;
+    source: string;
+    signal_id?: string | null;
+    relation?: 'primary_inspiration' | 'supporting_context' | 'viral_reference';
+  }> | null;
 }
 
 export interface Slide {

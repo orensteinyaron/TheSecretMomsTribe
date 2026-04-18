@@ -22,6 +22,23 @@ import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { logCost, printCostSummary } from '../scripts/utils/cost-logger.js';
+import { logActivity } from './lib/activity.js';
+import {
+  AXES,
+  pickRachelMode,
+  readAxes,
+  normalizeAxisValue,
+  auditBatchDiversity,
+  suggestUntakenAxes,
+  buildImagePromptGuidelines,
+} from './lib/image-diversity.js';
+import {
+  CAPTION_MAX_BY_FORMAT,
+  MIN_CAROUSEL_SLIDES,
+  classifyDensity,
+  validateFormat,
+} from './lib/format-selector.js';
+import { validateSocialUrl } from './lib/url-validator.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -334,16 +351,45 @@ Pick the best post_format for each opportunity:
 
 ## IMPORTANT: Every post MUST include image_prompt and slides
 
-### image_prompt (REQUIRED for ALL posts)
-A single DALL-E prompt for the hero/cover image. Describe:
-- Camera angle (close-up, over-shoulder, overhead, etc)
-- Subject (hands, back of head, child's feet — NO FACES EVER)
-- Action/gesture being performed
-- Environment (kitchen, living room, park, bedroom)
-- Lighting: warm/golden hour always
-- Colors: warm amber, soft cream, dusty blush, muted sage
-- Mood: tender, real, quiet, editorial-warm
-- Style: editorial photography, not stock, not AI-looking
+### image_prompt (REQUIRED for ALL posts — OBJECT, not string)
+
+Return image_prompt as an OBJECT shaped like:
+{
+  "prompt": "Full DALL-E prompt. Describe angle, subject, gesture, environment, light, palette, mood, style. NO FACES EVER. No stock, no AI-looking.",
+  "axes": {
+    "shot_type": one of ${JSON.stringify(AXES.shot_type)},
+    "lighting": one of ${JSON.stringify(AXES.lighting)},
+    "palette": one of ${JSON.stringify(AXES.palette)},
+    "subject": one of ${JSON.stringify(AXES.subject)},
+    "mood": one of ${JSON.stringify(AXES.mood)},
+    "rachel_mode": "rachel_in_frame" if post_format is tiktok_avatar or tiktok_avatar_visual, else "broll"
+  }
+}
+
+### Rachel location constraint
+If axes.rachel_mode is "rachel_in_frame", the scene MUST be one of Rachel's
+real locations: kitchen, living_room_couch, car_drivers_seat, bedroom,
+bathroom, front_door_porch_walk, school_pickup, grocery_cafe.
+If axes.rachel_mode is "broll", ANY scene that supports the content is fine.
+
+### Batch-level diversity (HARD RULE)
+Across this batch, NO TWO posts may share the same shot_type + lighting pair.
+Maximize variation across all axes. The feed grid must feel visually diverse,
+not one repeated photo. Avoid over-using warm_golden_hour + amber_cream.
+
+### Format selection (content density rule)
+BEFORE picking post_format, classify the content:
+- Core payload words (irreducible message).
+- Structure: single_punch | method | list | story | conversation.
+
+Then pick format:
+- payload ≤20 words AND single_punch → ig_static (or tiktok_text / ig_meme)
+- method or list with ${MIN_CAROUSEL_SLIDES}+ distinct points → ig_carousel (IG) or tiktok_slideshow (TT)
+- story with reveal/twist → tiktok_slideshow
+- Rachel-delivered direct-to-camera → tiktok_avatar / tiktok_avatar_visual
+
+Caption length caps (HARD — longer captions get flagged):
+${Object.entries(CAPTION_MAX_BY_FORMAT).map(([f, n]) => `  ${f}: ≤${n} chars`).join('\n')}
 
 ### slides (REQUIRED for slideshow and carousel posts)
 JSON array of slide objects. Each slide:
@@ -365,13 +411,14 @@ Each object:
   "content_pillar": "ai_magic" | "parenting_insights" | "tech_for_moms" | "mom_health" | "trending",
   "age_range": "toddler" | "little_kid" | "school_age" | "teen" | "universal",
   "hook": "First thing viewer sees. Stops scroll in 0-2 seconds.",
-  "caption": "Full caption following platform rules.",
+  "caption": "Full caption following platform + length rules above.",
   "hashtags": ["#example1", "#example2", "... 5-8 relevant hashtags"],
   "ai_magic_output": "For wow: FULL magic content, min 200 words. Show input AND output for AI Magic. null for trust/cta.",
-  "image_prompt": "REQUIRED. Single DALL-E prompt for hero/cover image. NO FACES.",
+  "image_prompt": { "prompt": "...NO FACES EVER...", "axes": { "shot_type": "...", "lighting": "...", "palette": "...", "subject": "...", "mood": "...", "rachel_mode": "rachel_in_frame|broll" } },
   "slides": [{"slide_number": 1, "text": "...", "type": "hook", "image_prompt": "...or null"}],
   "audio_suggestion": "TikTok only. null for IG.",
-  "source_indices": [0, 2]  // array of integers: indices of input opportunities that inspired this post
+  "source_signal_ids": ["uuid-of-primary-opp"],  // REQUIRED: signal_id(s) of the briefing opportunity/opportunities that ACTUALLY inspired this post. Only include signals that directly informed the content. First element is the primary inspiration.
+  "source_indices": [0, 2]  // deprecated fallback: integer indices into briefing.opportunities. Prefer source_signal_ids.
 }
 
 Return ONLY the JSON array. No explanation.`;
@@ -571,37 +618,318 @@ function validateBatch(posts) {
   return valid;
 }
 
+// --- Post-processing (axes normalization, format validation, diversity,
+//     URL revalidation). Runs AFTER shape-validateBatch, BEFORE write.
+
+/**
+ * Convert the LLM-returned image_prompt — which we ask for as
+ * { prompt, axes } — back into a plain string (for image_prompt column)
+ * plus an axes object (for metadata.image_axes). Tolerates legacy string
+ * output too.
+ */
+function normalizeImageFields(post) {
+  const raw = post.image_prompt;
+  let promptText = '';
+  let axes = {};
+
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    promptText = typeof raw.prompt === 'string' ? raw.prompt : '';
+    axes = raw.axes && typeof raw.axes === 'object' ? raw.axes : {};
+  } else if (typeof raw === 'string') {
+    promptText = raw;
+  } else if (Array.isArray(raw)) {
+    promptText = JSON.stringify(raw);
+  }
+
+  // Normalize each axis to a canonical slug; default rachel_mode from format.
+  const normalizedAxes = {};
+  for (const axisName of Object.keys(AXES)) {
+    const val = normalizeAxisValue(axes[axisName]);
+    normalizedAxes[axisName] = val || null;
+  }
+  if (!normalizedAxes.rachel_mode) {
+    normalizedAxes.rachel_mode = pickRachelMode(post.post_format);
+  }
+
+  post.image_prompt = promptText;
+  post.image_axes = normalizedAxes;
+  return post;
+}
+
+/**
+ * Regenerate a single post's image_prompt + axes via Haiku, with the
+ * target untaken shot_type+lighting pair supplied as a constraint.
+ */
+async function regenerateImagePrompt(post, targetAxes) {
+  const promptBody = `You are a DALL-E art director for a parenting brand. The following post
+needs a brand-new cover image prompt that strictly uses the given axes.
+
+Post hook: ${JSON.stringify(post.hook)}
+Post caption: ${JSON.stringify((post.caption || '').slice(0, 200))}
+Post pillar: ${post.content_pillar}
+Post format: ${post.post_format}
+
+REQUIRED axes (override any previous choice):
+  shot_type: ${targetAxes.shot_type}
+  lighting:  ${targetAxes.lighting}
+  rachel_mode: ${pickRachelMode(post.post_format)}
+
+Return ONLY valid JSON, no code fences:
+{
+  "prompt": "Full DALL-E prompt. NO FACES EVER.",
+  "axes": {
+    "shot_type": "${targetAxes.shot_type}",
+    "lighting": "${targetAxes.lighting}",
+    "palette": one of ${JSON.stringify(AXES.palette)},
+    "subject": one of ${JSON.stringify(AXES.subject)},
+    "mood": one of ${JSON.stringify(AXES.mood)},
+    "rachel_mode": "${pickRachelMode(post.post_format)}"
+  }
+}`;
+
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 600,
+      messages: [{ role: 'user', content: promptBody }],
+    });
+    let text = msg.content[0].text.trim();
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```$/, '').trim();
+    }
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed.prompt === 'string' && parsed.axes) {
+      post.image_prompt = parsed.prompt;
+      post.image_axes = {};
+      for (const axisName of Object.keys(AXES)) {
+        post.image_axes[axisName] = normalizeAxisValue(parsed.axes[axisName]) || null;
+      }
+      await logCost(supabase, {
+        pipeline_stage: 'content_generation', service: 'anthropic', model: 'claude-haiku-4-5',
+        input_tokens: msg.usage.input_tokens,
+        output_tokens: msg.usage.output_tokens,
+        description: 'Image prompt regen for diversity enforcement',
+      });
+      return true;
+    }
+  } catch (err) {
+    console.warn(`[Content] Image regen failed: ${err.message}`);
+  }
+  return false;
+}
+
+/**
+ * Enforce batch diversity across {shot_type, lighting}. Regenerate duplicates
+ * via Haiku. If a post can't be made distinct, fall back to forcing the
+ * axes slug (prompt text stays stale but axes become accurate).
+ */
+async function enforceBatchDiversity(posts) {
+  let audit = auditBatchDiversity(posts);
+  if (audit.violations.length === 0) return { regenerated: 0, forced: 0 };
+
+  console.warn(`[Content] Image diversity: ${audit.violations.length} duplicate(s) — regenerating`);
+  let regenerated = 0;
+  let forced = 0;
+
+  for (const violation of audit.violations) {
+    const post = posts[violation.index];
+    const takenPairs = posts
+      .filter((_, i) => i !== violation.index)
+      .map((p) => ({ shot_type: readAxes(p).shot_type, lighting: readAxes(p).lighting }));
+    const target = suggestUntakenAxes(takenPairs);
+
+    const ok = await regenerateImagePrompt(post, target);
+    if (ok) {
+      regenerated++;
+    } else {
+      // Last-resort: stamp the untaken pair on axes so downstream grid rules
+      // still see distinct axes even if the prompt text wasn't updated.
+      post.image_axes = { ...post.image_axes, shot_type: target.shot_type, lighting: target.lighting };
+      forced++;
+    }
+
+    await logActivity({
+      category: 'debug',
+      actor_type: 'agent',
+      actor_name: 'content-agent',
+      action: 'image_diversity_regenerated',
+      description: `Image duplicate shot+lighting — regenerated to ${target.shot_type}+${target.lighting}`,
+      metadata: {
+        index: violation.index,
+        key: violation.key,
+        target,
+        regenerated: ok,
+      },
+    });
+  }
+
+  audit = auditBatchDiversity(posts);
+  console.log(`[Content] Image diversity after regen: ${audit.violations.length} violations remain`);
+  return { regenerated, forced };
+}
+
+/**
+ * Run deterministic format gates. On failure, mark the post for review (no
+ * silent ship) and attach diagnostic metadata.
+ */
+async function enforceFormatGates(posts) {
+  let flagged = 0;
+  for (const post of posts) {
+    const errors = validateFormat(post);
+    if (errors.length === 0) continue;
+
+    flagged++;
+    post.format_flags = errors;
+    post.status_hint = 'draft_needs_review';
+
+    await logActivity({
+      category: 'debug',
+      actor_type: 'agent',
+      actor_name: 'content-agent',
+      action: 'format_validation_failed',
+      description: `Format check failed for ${post.post_format}: ${errors.join(', ')}`,
+      metadata: {
+        post_format: post.post_format,
+        errors,
+        caption_length: (post.caption || '').length,
+        slide_count: Array.isArray(post.slides) ? post.slides.length : 0,
+      },
+    });
+  }
+  if (flagged > 0) {
+    console.warn(`[Content] Format validation flagged ${flagged} post(s) as draft_needs_review`);
+  }
+  return { flagged };
+}
+
+/**
+ * Resolve source signals for a post. Prefers explicit source_signal_ids
+ * from the LLM; falls back to source_indices for backwards compat.
+ *
+ * @returns {Array<{url: string, signal_id: string|null, relation: string, source: string}>}
+ */
+function resolveSourceUrls(post, briefingOpps) {
+  const signalMap = new Map();
+  (briefingOpps || []).forEach((opp, idx) => {
+    if (opp && opp.signal_id) signalMap.set(opp.signal_id, { opp, idx });
+  });
+
+  // Primary: source_signal_ids
+  const signalIds = Array.isArray(post.source_signal_ids)
+    ? post.source_signal_ids.filter((s) => typeof s === 'string' && s.length > 0)
+    : [];
+
+  const entries = [];
+  const seenUrls = new Set();
+
+  for (let i = 0; i < signalIds.length; i++) {
+    const hit = signalMap.get(signalIds[i]);
+    if (!hit) continue;
+    const opp = hit.opp;
+    const url = (opp.source_url || '').trim();
+    if (!url || seenUrls.has(url)) continue;
+    seenUrls.add(url);
+    entries.push({
+      url,
+      signal_id: opp.signal_id,
+      relation: i === 0 ? 'primary_inspiration' : 'supporting_context',
+      source: opp.source || 'unknown',
+    });
+  }
+
+  // Fallback: source_indices (legacy)
+  if (entries.length === 0 && Array.isArray(post.source_indices) && briefingOpps) {
+    post.source_indices
+      .filter((idx) => typeof idx === 'number' && briefingOpps[idx])
+      .forEach((idx, i) => {
+        const opp = briefingOpps[idx];
+        const url = (opp.source_url || '').trim();
+        if (!url || seenUrls.has(url)) return;
+        seenUrls.add(url);
+        entries.push({
+          url,
+          signal_id: opp.signal_id || null,
+          relation: i === 0 ? 'primary_inspiration' : 'supporting_context',
+          source: opp.source || 'unknown',
+        });
+      });
+  }
+
+  return entries;
+}
+
+/**
+ * Revalidate every URL attached to posts right before writing. Any dead URL
+ * is dropped from its post's source_urls and logged. If a post's only
+ * primary_inspiration URL dies, the post is marked draft_needs_review.
+ */
+async function revalidatePostSourceUrls(posts) {
+  let checked = 0;
+  let dropped = 0;
+  let staleBlocked = 0;
+
+  for (const post of posts) {
+    const urls = Array.isArray(post.source_urls) ? post.source_urls : [];
+    if (urls.length === 0) continue;
+
+    const keep = [];
+    for (const entry of urls) {
+      if (!entry || !entry.url) continue;
+      checked++;
+      const result = await validateSocialUrl(entry.url);
+      if (result.valid) {
+        keep.push(entry);
+        continue;
+      }
+      dropped++;
+      const reason = result.reason || result.error || 'unknown';
+      console.warn(`[Content] Dropping stale source URL for ${post.post_format}: ${entry.url} (${reason})`);
+
+      await logActivity({
+        category: 'debug',
+        actor_type: 'agent',
+        actor_name: 'content-agent',
+        action: 'url_validation_dropped_content',
+        description: `Content-time URL validation failed: ${entry.url} — ${reason}`,
+        metadata: {
+          url: entry.url,
+          reason,
+          status: result.status ?? null,
+          platform: result.platform ?? null,
+          relation: entry.relation,
+          signal_id: entry.signal_id,
+        },
+      });
+
+      if (entry.relation === 'primary_inspiration') {
+        staleBlocked++;
+        post.status_hint = 'draft_needs_review';
+        post.format_flags = [...(post.format_flags || []), 'primary_source_stale'];
+      }
+    }
+    post.source_urls = keep;
+  }
+
+  console.log(`[Content] URL revalidation: ${checked} checked, ${dropped} dropped, ${staleBlocked} blocked draft`);
+  return { checked, dropped, staleBlocked };
+}
+
 // --- Write to Supabase ---
 
-async function writeContentQueue(posts, briefingId, renderProfileMap, briefingOpps) {
-  const rows = posts.map((p, i) => {
-    // Resolve render_profile_id: briefing recommendation → format fallback → null
-    const opp = briefingOpps?.[i];
-    const recommendedSlug = opp?.recommended_format || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
+async function writeContentQueue(posts, briefingId, renderProfileMap) {
+  const rows = posts.map((p) => {
+    const recommendedSlug = p._recommendedSlug || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
     const profile = renderProfileMap[recommendedSlug];
     const renderProfileId = profile?.id || null;
 
-    if (renderProfileId) {
-      console.log(`[Content] Post ${i + 1} → render profile: ${recommendedSlug}`);
-    }
-
-    // Resolve source_indices to source_urls
-    let sourceUrls = [];
-    if (Array.isArray(p.source_indices) && briefingOpps) {
-      sourceUrls = p.source_indices
-        .filter((idx) => typeof idx === 'number' && briefingOpps[idx])
-        .map((idx) => ({
-          url: briefingOpps[idx].source_url || '',
-          source: briefingOpps[idx].source || 'unknown',
-        }))
-        .filter((s) => s.url.length > 0);
-    }
+    const density = classifyDensity(p);
+    const status = p.status_hint === 'draft_needs_review' ? 'draft_needs_review' : 'draft';
 
     return {
       briefing_id: briefingId,
       platform: p.platform,
       content_type: p.content_type,
-      status: 'draft',
+      status,
       hook: p.hook,
       caption: p.caption,
       hashtags: p.hashtags,
@@ -618,7 +946,13 @@ async function writeContentQueue(posts, briefingId, renderProfileMap, briefingOp
       quality_rating: null,
       render_profile_id: renderProfileId,
       render_status: renderProfileId ? 'pending' : null,
-      source_urls: sourceUrls,
+      source_urls: Array.isArray(p.source_urls) ? p.source_urls : [],
+      metadata: {
+        ...(p.metadata || {}),
+        image_axes: p.image_axes || null,
+        density_classification: density,
+        format_flags: p.format_flags || [],
+      },
     };
   });
 
@@ -662,11 +996,25 @@ async function main() {
   // Generate batch via Claude
   const { posts: rawPosts, usage } = await generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights);
 
-  // Validate
+  // Validate (shape)
   const posts = validateBatch(rawPosts);
 
+  // Post-process: normalize image fields, resolve source_urls, enforce
+  // format + diversity gates, revalidate URLs. Each step logs its own
+  // activity_log events so failures are visible in the debug stream.
+  for (const p of posts) {
+    normalizeImageFields(p);
+    p.source_urls = resolveSourceUrls(p, briefing.opportunities);
+    const opp = (briefing.opportunities || []).find((o) => o.signal_id === p.source_urls[0]?.signal_id);
+    p._recommendedSlug = opp?.recommended_format || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
+  }
+
+  await enforceFormatGates(posts);
+  await enforceBatchDiversity(posts);
+  await revalidatePostSourceUrls(posts);
+
   // Write to Supabase
-  await writeContentQueue(posts, briefing.id, renderProfileMap, briefing.opportunities);
+  await writeContentQueue(posts, briefing.id, renderProfileMap);
 
   // Log per-post cost share (split generation cost evenly)
   if (usage && posts.length > 0) {
@@ -675,7 +1023,7 @@ async function main() {
       .from('content_queue')
       .select('id')
       .eq('briefing_id', briefing.id)
-      .eq('status', 'draft')
+      .in('status', ['draft', 'draft_needs_review'])
       .order('created_at', { ascending: false })
       .limit(posts.length);
 
