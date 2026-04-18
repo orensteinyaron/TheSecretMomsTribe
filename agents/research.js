@@ -16,7 +16,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'crypto';
 import { logCost, printCostSummary } from '../scripts/utils/cost-logger.js';
 import { logActivity } from './lib/activity.js';
-import { validateSocialUrl } from './lib/url-validator.js';
+import {
+  BRIEFING_TARGET,
+  BRIEFING_REQUEST_COUNT,
+  MIN_ACCEPTABLE_BRIEFING,
+  validateBriefingUrls,
+} from './lib/briefing-urls.js';
 
 // --- Config ---
 
@@ -324,7 +329,7 @@ Warm, knowing mom friend. Uses "we" and "us." Slight humor, never condescending.
 - Apps/tools perform best when you show the RESULT first
 - Cross-posting fails — each platform needs NATIVE content
 
-## Category Mix Target (across 5 opportunities)
+## Category Mix Target (across ${BRIEFING_REQUEST_COUNT} opportunities)
 - 1-2x ai_magic
 - 1x parenting_insights
 - 1x tech_for_moms
@@ -350,12 +355,12 @@ Tag each opportunity with the most relevant age range:
 - little_kid (4-7)
 - school_age (8-12)
 - teen (13-16)
-- universal (all ages — max 1 per batch of 5)
+- universal (all ages — max 1 per batch)
 
-Ensure at least 2 different age ranges across the 5 opportunities.
+Ensure at least 2 different age ranges across the ${BRIEFING_REQUEST_COUNT} opportunities.
 
 ## Output Format
-Return a JSON array of exactly 5 objects. Each object:
+Return a JSON array of exactly ${BRIEFING_REQUEST_COUNT} objects. Each object:
 {
   "topic": "Short topic title (5-8 words)",
   "category": "ai_magic | parenting_insights | tech_for_moms | mom_health | trending_culture",
@@ -436,7 +441,7 @@ function buildUserPrompt(sources, recentTopics, directives, insights, renderProf
     sections.push('');
   }
 
-  sections.push('Analyze all signals above. Identify the 5 best content opportunities for today. Return ONLY a JSON array of 5 objects following the schema in your instructions.');
+  sections.push(`Analyze all signals above. Identify the ${BRIEFING_REQUEST_COUNT} best content opportunities for today. Return ONLY a JSON array of ${BRIEFING_REQUEST_COUNT} objects following the schema in your instructions.`);
 
   return sections.join('\n');
 }
@@ -448,8 +453,8 @@ const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 const VALID_PLATFORM_FIT = ['tiktok', 'instagram', 'both'];
 
 function validateOpportunities(opportunities) {
-  if (!Array.isArray(opportunities) || opportunities.length < 3 || opportunities.length > 5) {
-    throw new Error(`Expected 3-5 opportunities, got ${Array.isArray(opportunities) ? opportunities.length : typeof opportunities}`);
+  if (!Array.isArray(opportunities) || opportunities.length < 3 || opportunities.length > BRIEFING_REQUEST_COUNT) {
+    throw new Error(`Expected 3-${BRIEFING_REQUEST_COUNT} opportunities, got ${Array.isArray(opportunities) ? opportunities.length : typeof opportunities}`);
   }
 
   for (let i = 0; i < opportunities.length; i++) {
@@ -575,50 +580,9 @@ function attachSignalIds(opportunities) {
   return opportunities;
 }
 
-/**
- * Validate every source_url attached to an opportunity. Dead URLs are
- * cleared from the briefing (opp retained, url emptied) and logged to
- * activity_log so they show up in the debug stream.
- */
-async function validateBriefingUrls(opportunities) {
-  let checked = 0;
-  let dropped = 0;
-
-  for (const opp of opportunities) {
-    const url = typeof opp.source_url === 'string' ? opp.source_url.trim() : '';
-    if (!url) continue;
-    checked++;
-
-    const result = await validateSocialUrl(url);
-    if (result.valid) continue;
-
-    dropped++;
-    const reason = result.reason || result.error || 'unknown';
-    console.warn(`[Research] URL validation failed — dropping: ${url} (${reason})`);
-
-    await logActivity({
-      category: 'debug',
-      actor_type: 'agent',
-      actor_name: 'research-agent',
-      action: 'url_validation_dropped',
-      description: `URL validation failed: ${url} — ${reason}`,
-      metadata: {
-        url,
-        reason,
-        status: result.status ?? null,
-        platform: result.platform ?? null,
-        signal_id: opp.signal_id,
-        topic: opp.topic,
-      },
-    });
-
-    opp.source_url = '';
-    opp.source_url_invalid_reason = reason;
-  }
-
-  console.log(`[Research] URL validation: ${checked} checked, ${dropped} dropped`);
-  return { checked, dropped };
-}
+// Briefing URL validation + sizing lives in ./lib/briefing-urls.js so it
+// can be exercised by unit + integration tests without this module's
+// auto-main side effects.
 
 // --- Write to Supabase ---
 
@@ -683,14 +647,45 @@ async function main() {
     process.exit(1);
   }
 
-  // Synthesize with Claude
+  // Synthesize with Claude — we over-generate by BRIEFING_REQUEST_COUNT so
+  // URL validation can prune dead ones without shortening the final briefing.
   const opportunities = await generateBriefing(sources);
 
   // Attach stable signal_ids (used by content_queue.source_urls.signal_id)
   attachSignalIds(opportunities);
 
-  // Validate every source_url — drop dead links before writing briefing
-  await validateBriefingUrls(opportunities);
+  // Validate every source_url — drop dead links before writing briefing.
+  // Survivors get a platform slug stamped on them.
+  const { surviving, dropped } = await validateBriefingUrls(opportunities);
+
+  // Slice to target. Buffer eats the drops; if it wasn't enough, fail loud.
+  const finalOpps = surviving.slice(0, BRIEFING_TARGET);
+
+  if (finalOpps.length < BRIEFING_TARGET) {
+    await logActivity({
+      category: 'alert',
+      actor_type: 'agent',
+      actor_name: 'research-agent',
+      action: 'briefing_short',
+      description: `Briefing returned ${finalOpps.length}/${BRIEFING_TARGET} after URL validation (dropped=${dropped}, requested=${BRIEFING_REQUEST_COUNT})`,
+      metadata: {
+        target: BRIEFING_TARGET,
+        requested: BRIEFING_REQUEST_COUNT,
+        surviving: surviving.length,
+        dropped,
+      },
+    });
+    console.warn(`[Research] Only ${finalOpps.length} live opportunities after validation (target=${BRIEFING_TARGET}, dropped=${dropped}). Buffer exhausted.`);
+  }
+
+  if (finalOpps.length < MIN_ACCEPTABLE_BRIEFING) {
+    // Fail loud — pipeline-monitor picks it up and alerts. Slowly degrading
+    // into silently short briefings starves downstream content capacity;
+    // we'd rather surface an upstream source-health issue immediately.
+    throw new Error(
+      `Briefing unusable: ${finalOpps.length} opps < ${MIN_ACCEPTABLE_BRIEFING} minimum. Upstream source health degraded.`,
+    );
+  }
 
   // Build source summary for Supabase
   const sourceSummary = {
@@ -709,17 +704,17 @@ async function main() {
   };
 
   // Write to Supabase
-  await writeBriefing(opportunities, sourceSummary);
+  await writeBriefing(finalOpps, sourceSummary);
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n[Research Agent] Done in ${elapsed}s.`);
-  console.log(`[Research Agent] ${opportunities.length} opportunities written to Supabase.`);
+  console.log(`[Research Agent] ${finalOpps.length} opportunities written to Supabase.`);
 
   // Print summary
   console.log('\n=== TODAY\'S OPPORTUNITIES ===');
-  for (const opp of opportunities) {
+  for (const opp of finalOpps) {
     console.log(`\n${opp.priority}. [${opp.content_type.toUpperCase()}] ${opp.topic}`);
-    console.log(`   Category: ${opp.category} | Platform: ${opp.platform_fit}`);
+    console.log(`   Category: ${opp.category} | Platform: ${opp.platform_fit} | URL platform: ${opp.platform || 'unknown'}`);
     console.log(`   Hook: "${opp.suggested_hook}"`);
     console.log(`   Angle: ${opp.angle}`);
   }
