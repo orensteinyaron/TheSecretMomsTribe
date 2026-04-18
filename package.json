@@ -8,7 +8,8 @@
     "scrape:tt": "node scripts/scrape-tiktok.js",
     "scrape:all": "node scripts/scrape-instagram.js && node scripts/scrape-tiktok.js",
     "report": "node scripts/baseline-report.js",
-    "test": "node --test agents/lib/__tests__/*.test.js"
+    "regenerate-drafts": "node scripts/regenerate-stale-drafts.js",
+    "test": "node --test agents/lib/__tests__/*.test.js scripts/__tests__/*.test.js"
   },
   "keywords": [],
   "author": "",

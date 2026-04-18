@@ -165,6 +165,62 @@ export function suggestUntakenAxes(takenPairs) {
 }
 
 /**
+ * Run batch-level diversity enforcement. Audits the batch; for each
+ * duplicate shot_type+lighting pair, asks the caller to regenerate that
+ * post's prompt. Caller supplies `regenerateFn(post, targetAxes)` that
+ * returns true on a successful LLM rewrite; when it returns false, this
+ * helper stamps the target axes on the post so downstream code still sees
+ * distinct axes (a last-resort "forced" pair).
+ *
+ * `logEvent({ index, key, target, regenerated })` is optional and
+ * receives one call per violation so the caller can write to activity_log.
+ *
+ * @returns {Promise<{regenerated: number, forced: number, violations: number}>}
+ */
+export async function enforceBatchDiversity(posts, { regenerateFn, logEvent } = {}) {
+  let audit = auditBatchDiversity(posts);
+  const initial = audit.violations.length;
+  if (initial === 0) return { regenerated: 0, forced: 0, violations: 0 };
+
+  let regenerated = 0;
+  let forced = 0;
+
+  for (const violation of audit.violations) {
+    const post = posts[violation.index];
+    const takenPairs = posts
+      .filter((_, i) => i !== violation.index)
+      .map((p) => ({ shot_type: readAxes(p).shot_type, lighting: readAxes(p).lighting }));
+    const target = suggestUntakenAxes(takenPairs);
+
+    let ok = false;
+    if (typeof regenerateFn === 'function') {
+      try {
+        ok = await regenerateFn(post, target);
+      } catch {
+        ok = false;
+      }
+    }
+
+    if (ok) {
+      regenerated++;
+    } else {
+      post.image_axes = { ...(post.image_axes || {}), shot_type: target.shot_type, lighting: target.lighting };
+      forced++;
+    }
+
+    if (typeof logEvent === 'function') {
+      try {
+        await logEvent({ index: violation.index, key: violation.key, target, regenerated: ok });
+      } catch {
+        /* never break the batch on logging failure */
+      }
+    }
+  }
+
+  return { regenerated, forced, violations: initial };
+}
+
+/**
  * Instructional text block for the content-generation LLM. Asks it to emit
  * axes explicitly alongside the textual prompt and respect the
  * Rachel-location constraint.
