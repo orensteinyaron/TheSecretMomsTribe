@@ -14,13 +14,17 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const cache = new Map();
 
 // Domain → regexes that identify a dead/removed page even when HTTP is 200.
+//
+// V2 NOTE: TikTok is recognized as a social host for platform
+// classification, but its marker list is intentionally empty.
+// TikTok serves "Video isn't available" / "Couldn't find this
+// account" as its *region-block* response, indistinguishable from a
+// true takedown when viewed from a cloud-provider IP range (GitHub
+// Actions runners hit geo-blocks). Body-scanning from the runner
+// produces false negatives, so we trust apify-scraped TikTok URLs
+// instead of re-validating them. See URL_VALIDATION_V2_SPEC.
 const SOCIAL_DEAD_MARKERS = {
-  'tiktok.com': [
-    /video\s+isn'?t\s+available/i,
-    /this\s+video\s+is\s+unavailable/i,
-    /page\s+not\s+available/i,
-    /couldn'?t\s+find\s+this\s+account/i,
-  ],
+  'tiktok.com': [],
   'reddit.com': [
     /\[removed\]/i,
     /\[deleted\]/i,
@@ -34,6 +38,11 @@ const SOCIAL_DEAD_MARKERS = {
     /this\s+account\s+is\s+private/i,
   ],
 };
+
+// HTTP status codes that unambiguously mean the URL is dead. Anything
+// outside this set gets a softer treatment (valid-with-caveat) so
+// cloud-IP fingerprinting or transient errors don't drop real URLs.
+const UNAMBIGUOUS_DEAD_STATUSES = new Set([404, 410, 451]);
 
 export function clearCache() {
   cache.clear();
@@ -114,13 +123,20 @@ export async function validateUrl(url, deps = {}) {
 }
 
 /**
- * Full social-URL validation. For known platforms (TikTok, Reddit, IG) we
- * always fetch the body and scan for known "content removed" markers. Other
- * URLs just get a HEAD+GET liveness check. Cached for 1h per URL.
+ * Full social-URL validation (V2 — trust-biased).
+ *
+ * Only drops on UNAMBIGUOUS server signals: HTTP 404, 410, 451, or a
+ * Reddit/Instagram body marker that only appears for real moderation
+ * actions. Everything else (403, timeout, network error, TikTok body
+ * text) returns valid-with-caveat. The caller logs the caveat but
+ * does not drop the URL — the runner's vantage point is unreliable
+ * for cloud-IP-fingerprinted and geo-blocked content.
+ *
+ * Cached for 1h per URL.
  *
  * @param {string} url
  * @param {{fetch?: typeof fetch, now?: () => number, cache?: Map<string,{timestamp:number,result:object}>}} [deps]
- * @returns {Promise<{valid: boolean, reason?: string, status?: number, platform: string|null}>}
+ * @returns {Promise<{valid: boolean, reason?: string, caveat?: string, status?: number, platform: string|null}>}
  */
 export async function validateSocialUrl(url, deps = {}) {
   const cacheRef = deps.cache || cache;
@@ -134,10 +150,11 @@ export async function validateSocialUrl(url, deps = {}) {
   let result;
   try {
     if (platform) {
-      // Social platforms: always GET the body so we can scan it.
+      // Social platforms: always GET so we can scan the body for
+      // unambiguous moderation markers (Reddit [removed], IG private).
       const res = await fetchFn(url, { method: 'GET', redirect: 'follow' });
       if (!res.ok) {
-        result = { valid: false, reason: `http_${res.status}`, status: res.status, platform };
+        result = statusResult(res.status, platform);
       } else {
         const body = typeof res.text === 'function' ? await res.text() : '';
         const markers = SOCIAL_DEAD_MARKERS[platform] || [];
@@ -154,14 +171,30 @@ export async function validateSocialUrl(url, deps = {}) {
         const get = await fetchFn(url, { method: 'GET', redirect: 'follow' });
         result = get.ok
           ? { valid: true, status: get.status, platform: null }
-          : { valid: false, reason: `http_${get.status}`, status: get.status, platform: null };
+          : statusResult(get.status, null);
       }
     }
   } catch (err) {
-    const reason = err?.name === 'AbortError' ? 'timeout' : 'network_error';
-    result = { valid: false, reason, error: err?.message || String(err), platform };
+    result = {
+      valid: true,
+      caveat: 'fetch_failed',
+      error: err?.message || String(err),
+      platform,
+    };
   }
 
   cacheRef.set(url, { timestamp: now, result });
   return result;
+}
+
+function statusResult(status, platform) {
+  if (UNAMBIGUOUS_DEAD_STATUSES.has(status)) {
+    return { valid: false, reason: `http_${status}`, status, platform };
+  }
+  if (status === 403) {
+    return { valid: true, caveat: 'http_403_likely_ip_block', status, platform };
+  }
+  // Any other non-2xx: treat as valid-with-caveat. The runner's HTTP
+  // status is a weak signal; downstream should not drop on it.
+  return { valid: true, caveat: `http_${status}_ambiguous`, status, platform };
 }
