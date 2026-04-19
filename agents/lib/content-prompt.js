@@ -128,7 +128,7 @@ Each object:
   "platform": "tiktok" | "instagram",
   "post_format": "tiktok_slideshow" | "tiktok_text" | "ig_carousel" | "ig_static" | "ig_meme",
   "content_type": "wow" | "trust" | "cta",
-  "content_pillar": "ai_magic" | "parenting_insights" | "tech_for_moms" | "mom_health" | "trending",
+  "content_pillar": "ai_magic" | "parenting" | "tech" | "health" | "trending",
   "age_range": "toddler" | "little_kid" | "school_age" | "teen" | "universal",
   "hook": "First thing viewer sees. Stops scroll in 0-2 seconds.",
   "caption": "Caption under the cap for your chosen post_format. HARD CAPS: ig_static≤125, ig_carousel≤400, ig_meme≤125, tiktok_slideshow≤100, tiktok_text≤100, tiktok_avatar≤150, tiktok_avatar_visual≤150. Count chars. Going over = REJECTED.",

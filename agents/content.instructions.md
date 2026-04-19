@@ -111,7 +111,7 @@ Every batch of 4 MUST satisfy:
 | content_type | wow, trust, or cta |
 | post_format | tiktok_slideshow, tiktok_text, ig_carousel, ig_static, ig_meme |
 | age_range | toddler, little_kid, school_age, teen, universal |
-| content_pillar | ai_magic, parenting_insights, tech_for_moms, mom_health, trending |
+| content_pillar | ai_magic, parenting, tech, health, trending |
 | hook | The first thing the viewer sees |
 | caption | Full post caption (TikTok: 2-3 lines, IG: 100-180 words) |
 | hashtags | 5-8 per post, mix niche + medium |

@@ -123,7 +123,7 @@ For each opportunity, produce:
 ```json
 {
   "topic": "Short topic title (5-8 words)",
-  "category": "ai_magic | parenting_insights | tech_for_moms | mom_health | trending_culture",
+  "category": "ai_magic | parenting | tech | health | trending",
   "age_range": "toddler | little_kid | school_age | teen | universal",
   "angle": "The specific creative angle for SMT (1-2 sentences)",
   "source": "reddit | tiktok | google_trends | cross_signal",
@@ -148,10 +148,10 @@ of the age_range × content_pillar coverage matrix.
 
 Aim for at least 3 different categories represented:
 - 1-2x ai_magic
-- 1x parenting_insights
-- 1x tech_for_moms
-- 0-1x mom_health
-- 0-1x trending_culture
+- 1x parenting
+- 1x tech
+- 0-1x health
+- 0-1x trending
 
 Not every category needs to appear daily, but never have
 more than 2 from the same category.
