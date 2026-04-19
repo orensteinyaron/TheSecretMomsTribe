@@ -93,6 +93,7 @@ async function scanReddit() {
       .slice(0, 15)
       .map((p) => ({
         source: 'reddit',
+        signal_source: 'apify_reddit',
         title: p.title || '',
         content: (p.body || p.selftext || p.text || '').slice(0, 500),
         url: p.url || p.permalink || '',
@@ -132,6 +133,7 @@ async function scanTikTokTrends() {
       .slice(0, 15)
       .map((v) => ({
         source: 'tiktok',
+        signal_source: 'apify_tiktok',
         title: (v.text || '').slice(0, 200),
         url: v.webVideoUrl || '',
         views: v.playCount || 0,
@@ -172,6 +174,7 @@ async function scanGoogleTrends() {
 
     const signals = items.slice(0, 10).map((t) => ({
       source: 'google_trends',
+      signal_source: 'apify_trends',
       title: t.searchTerm || t.term || t.title || '',
       url: t.shareUrl || '',
       relatedQueries: (t.relatedQueries || t.risingQueries || []).slice(0, 5),
@@ -209,6 +212,7 @@ async function scanRedditFallback() {
 
     const signals = items.slice(0, 10).map((p) => ({
       source: 'reddit_fallback',
+      signal_source: 'apify_reddit',
       title: p.title || '',
       content: (p.body || p.selftext || p.text || '').slice(0, 500),
       url: p.url || p.permalink || '',
@@ -359,6 +363,11 @@ Tag each opportunity with the most relevant age range:
 
 Ensure at least 2 different age ranges across the ${BRIEFING_REQUEST_COUNT} opportunities.
 
+## Signal Provenance (REQUIRED)
+Every scraped signal above carries a \`signal_source\` tag: "apify_reddit", "apify_tiktok", or "apify_trends". You MUST copy that exact string to the opportunity you derive from that signal. Do not rename, mutate, or drop this field.
+
+If you synthesize an opportunity from multiple signals, pick the signal_source of the STRONGEST contributing signal. If you introduce a URL that wasn't in any scraped signal (e.g. a link you know exists from training data), set \`signal_source\` to "llm_inferred".
+
 ## Output Format
 Return a JSON array of exactly ${BRIEFING_REQUEST_COUNT} objects. Each object:
 {
@@ -367,6 +376,7 @@ Return a JSON array of exactly ${BRIEFING_REQUEST_COUNT} objects. Each object:
   "age_range": "toddler | little_kid | school_age | teen | universal",
   "angle": "The specific creative angle for SMT (1-2 sentences)",
   "source": "reddit | tiktok | google_trends | cross_signal",
+  "signal_source": "apify_reddit | apify_tiktok | apify_trends | llm_inferred — copy from the source signal or 'llm_inferred' if URL is synthesized",
   "source_url": "URL to the primary source signal (empty string if none)",
   "reasoning": "Why this will resonate with our audience (1-2 sentences)",
   "content_type": "wow | trust | cta",
@@ -451,8 +461,12 @@ function buildUserPrompt(sources, recentTopics, directives, insights, renderProf
 const VALID_CATEGORIES = ['ai_magic', 'parenting_insights', 'tech_for_moms', 'mom_health', 'trending_culture'];
 const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 const VALID_PLATFORM_FIT = ['tiktok', 'instagram', 'both'];
+const VALID_SIGNAL_SOURCES = new Set([
+  'apify_reddit', 'apify_tiktok', 'apify_trends', 'apify_instagram',
+  'llm_inferred', 'user_submitted',
+]);
 
-function validateOpportunities(opportunities) {
+async function validateOpportunities(opportunities) {
   if (!Array.isArray(opportunities) || opportunities.length < 3 || opportunities.length > BRIEFING_REQUEST_COUNT) {
     throw new Error(`Expected 3-${BRIEFING_REQUEST_COUNT} opportunities, got ${Array.isArray(opportunities) ? opportunities.length : typeof opportunities}`);
   }
@@ -481,6 +495,26 @@ function validateOpportunities(opportunities) {
     opp.priority = Number(opp.priority) || (i + 1);
     opp.recommended_format = opp.recommended_format || 'static-image';
     opp.signal_strength = Number(opp.signal_strength) || 5;
+
+    // Signal provenance: default missing / unknown to llm_inferred so
+    // URL validation still runs (safety net against LLM hallucination).
+    if (!opp.signal_source || !VALID_SIGNAL_SOURCES.has(opp.signal_source)) {
+      const originalSignalSource = opp.signal_source;
+      opp.signal_source = 'llm_inferred';
+      await logActivity({
+        category: 'debug',
+        actor_type: 'agent',
+        actor_name: 'research-agent',
+        action: 'signal_source_missing',
+        description: `Opportunity ${i + 1} missing/invalid signal_source — defaulted to llm_inferred`,
+        metadata: {
+          topic: opp.topic,
+          source: opp.source,
+          source_url: opp.source_url,
+          original_signal_source: originalSignalSource ?? null,
+        },
+      });
+    }
   }
 
   // Soft checks (warn but don't fail)
@@ -610,9 +644,20 @@ async function writeBriefing(opportunities, sourceSummary) {
 
 // --- Main ---
 
+function readSkipUrlValidation() {
+  return ['true', '1', 'yes'].includes(
+    String(process.env.SKIP_URL_VALIDATION || '').toLowerCase().trim(),
+  );
+}
+
 async function main() {
   console.log('[Research Agent] Starting daily scan...');
   const startTime = Date.now();
+
+  const skipUrlValidation = readSkipUrlValidation();
+  if (skipUrlValidation) {
+    console.warn('[Research] SKIP_URL_VALIDATION is enabled — bypassing all URL checks.');
+  }
 
   // Run all scrapers in parallel
   const [reddit, tiktok, googleTrends] = await Promise.allSettled([
@@ -654,9 +699,16 @@ async function main() {
   // Attach stable signal_ids (used by content_queue.source_urls.signal_id)
   attachSignalIds(opportunities);
 
-  // Validate every source_url — drop dead links before writing briefing.
-  // Survivors get a platform slug stamped on them.
-  const { surviving, dropped } = await validateBriefingUrls(opportunities);
+  // Validate every source_url — or skip entirely when the emergency
+  // SKIP_URL_VALIDATION kill switch is set. Apify-sourced opportunities
+  // are trusted and skip validation even in normal mode; only
+  // llm_inferred / user_submitted / missing signal_source values run
+  // through the validator.
+  const { surviving, dropped, trusted, skipped } = await validateBriefingUrls(opportunities, {
+    skipAll: skipUrlValidation,
+  });
+  if (trusted) console.log(`[Research] ${trusted} apify-sourced opportunities trusted without fetch.`);
+  if (skipped) console.log(`[Research] ${skipped} opportunities bypassed validation (SKIP_URL_VALIDATION).`);
 
   // Slice to target. Buffer eats the drops; if it wasn't enough, fail loud.
   const finalOpps = surviving.slice(0, BRIEFING_TARGET);
