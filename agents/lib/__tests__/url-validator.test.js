@@ -83,7 +83,10 @@ test('validateSocialUrl: [removed] Reddit post → invalid content_removed', asy
   assert.equal(out.platform, 'reddit.com');
 });
 
-test('validateSocialUrl: dead TikTok (200 but "Video isn\'t available") → invalid', async () => {
+test('V2: TikTok "Video isn\'t available" body (geo-block) → treated as valid', async () => {
+  // The exact string TikTok serves as a REGION BLOCK — not a removed-content
+  // response. GitHub Actions runners hit geo-blocks, so this marker is a
+  // false positive and must not cause a drop.
   const cache = new Map();
   const fakeFetch = makeFakeFetch(() =>
     makeResponse({
@@ -96,9 +99,66 @@ test('validateSocialUrl: dead TikTok (200 but "Video isn\'t available") → inva
     fetch: fakeFetch,
     cache,
   });
-  assert.equal(out.valid, false);
-  assert.equal(out.reason, 'content_removed');
+  assert.equal(out.valid, true);
   assert.equal(out.platform, 'tiktok.com');
+});
+
+test('V2: TikTok "Couldn\'t find this account" body → also treated as valid', async () => {
+  const cache = new Map();
+  const fakeFetch = makeFakeFetch(() =>
+    makeResponse({ ok: true, status: 200, body: "<h1>Couldn't find this account</h1>" }),
+  );
+  const out = await validateSocialUrl('https://tiktok.com/@ghost', {
+    fetch: fakeFetch,
+    cache,
+  });
+  assert.equal(out.valid, true);
+});
+
+test('V2: HTTP 403 returns valid with caveat=http_403_likely_ip_block (Reddit cloud-IP fingerprint)', async () => {
+  const cache = new Map();
+  const fakeFetch = makeFakeFetch(() => makeResponse({ ok: false, status: 403, body: '' }));
+  const out = await validateSocialUrl('https://reddit.com/r/x/comments/y/', {
+    fetch: fakeFetch,
+    cache,
+  });
+  assert.equal(out.valid, true);
+  assert.equal(out.caveat, 'http_403_likely_ip_block');
+  assert.equal(out.status, 403);
+});
+
+test('V2: HTTP 404 still returns invalid', async () => {
+  const cache = new Map();
+  const fakeFetch = makeFakeFetch(() => makeResponse({ ok: false, status: 404, body: '' }));
+  const out = await validateSocialUrl('https://example.com/nope', {
+    fetch: fakeFetch,
+    cache,
+  });
+  assert.equal(out.valid, false);
+  assert.equal(out.reason, 'http_404');
+  assert.equal(out.status, 404);
+});
+
+test('V2: HTTP 410 Gone still returns invalid', async () => {
+  const cache = new Map();
+  const fakeFetch = makeFakeFetch(() => makeResponse({ ok: false, status: 410, body: '' }));
+  const out = await validateSocialUrl('https://example.com/gone', {
+    fetch: fakeFetch,
+    cache,
+  });
+  assert.equal(out.valid, false);
+  assert.equal(out.reason, 'http_410');
+});
+
+test('V2: HTTP 451 legal removal still returns invalid', async () => {
+  const cache = new Map();
+  const fakeFetch = makeFakeFetch(() => makeResponse({ ok: false, status: 451, body: '' }));
+  const out = await validateSocialUrl('https://example.com/dmca', {
+    fetch: fakeFetch,
+    cache,
+  });
+  assert.equal(out.valid, false);
+  assert.equal(out.reason, 'http_451');
 });
 
 test('validateSocialUrl: private Instagram page → invalid', async () => {
@@ -152,7 +212,7 @@ test('validateSocialUrl: non-social URL uses HEAD first', async () => {
   assert.equal(methods[0], 'HEAD');
 });
 
-test('validateSocialUrl: timeout/AbortError → invalid with timeout reason', async () => {
+test('V2: timeout/AbortError → valid with caveat=fetch_failed (our infra flakiness)', async () => {
   const cache = new Map();
   const fakeFetch = async () => {
     const err = new Error('aborted');
@@ -163,8 +223,21 @@ test('validateSocialUrl: timeout/AbortError → invalid with timeout reason', as
     fetch: fakeFetch,
     cache,
   });
-  assert.equal(out.valid, false);
-  assert.equal(out.reason, 'timeout');
+  assert.equal(out.valid, true);
+  assert.equal(out.caveat, 'fetch_failed');
+});
+
+test('V2: generic network error → valid with caveat=fetch_failed', async () => {
+  const cache = new Map();
+  const fakeFetch = async () => {
+    throw new Error('ECONNRESET');
+  };
+  const out = await validateSocialUrl('https://example.com/flaky', {
+    fetch: fakeFetch,
+    cache,
+  });
+  assert.equal(out.valid, true);
+  assert.equal(out.caveat, 'fetch_failed');
 });
 
 // --- platformOf ------------------------------------------------------------

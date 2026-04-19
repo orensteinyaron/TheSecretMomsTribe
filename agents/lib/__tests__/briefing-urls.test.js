@@ -195,3 +195,122 @@ test('integration: 8 candidates with 6 dead → MIN_ACCEPTABLE boundary', async 
   // Caller (research.js main) would compare to MIN_ACCEPTABLE_BRIEFING and throw.
   assert.ok(surviving.length < MIN_ACCEPTABLE_BRIEFING);
 });
+
+// --- V2: signal_source trust rule ------------------------------------------
+
+test('V2: apify_reddit opportunities skip validation entirely', async () => {
+  const opps = [
+    { topic: 'A', source_url: 'https://reddit.com/r/x/1', signal_source: 'apify_reddit' },
+  ];
+  let called = 0;
+  const fakeValidate = async () => { called++; return { valid: false }; };
+  const { log } = makeCapturingLog();
+  const out = await validateBriefingUrls(opps, { validate: fakeValidate, log });
+  assert.equal(called, 0);
+  assert.equal(out.surviving.length, 1);
+  assert.equal(out.trusted, 1);
+  assert.equal(out.checked, 0);
+  assert.equal(out.dropped, 0);
+  assert.equal(out.surviving[0].platform, 'reddit');
+});
+
+test('V2: apify_tiktok opportunities skip validation even when validator would fail', async () => {
+  const opps = [
+    { topic: 'B', source_url: 'https://tiktok.com/@x/video/1', signal_source: 'apify_tiktok' },
+  ];
+  const fakeValidate = async () => ({ valid: false, reason: 'content_removed' });
+  const { log } = makeCapturingLog();
+  const out = await validateBriefingUrls(opps, { validate: fakeValidate, log });
+  assert.equal(out.surviving.length, 1);
+  assert.equal(out.dropped, 0);
+  assert.equal(out.trusted, 1);
+  assert.equal(out.surviving[0].platform, 'tiktok');
+});
+
+test('V2: apify_trends opportunities skip validation', async () => {
+  const opps = [
+    { topic: 'C', source_url: 'https://trends.google.com/trends/x', signal_source: 'apify_trends' },
+  ];
+  const fakeValidate = async () => ({ valid: false, reason: '404' });
+  const { log } = makeCapturingLog();
+  const out = await validateBriefingUrls(opps, { validate: fakeValidate, log });
+  assert.equal(out.surviving.length, 1);
+  assert.equal(out.trusted, 1);
+});
+
+test('V2: llm_inferred opportunities still validate and can be dropped', async () => {
+  const opps = [
+    { topic: 'D', source_url: 'https://example.com/dead', signal_source: 'llm_inferred' },
+  ];
+  const fakeValidate = async () => ({ valid: false, reason: '404' });
+  const { log } = makeCapturingLog();
+  const out = await validateBriefingUrls(opps, { validate: fakeValidate, log });
+  assert.equal(out.surviving.length, 0);
+  assert.equal(out.dropped, 1);
+  assert.equal(out.trusted, 0);
+});
+
+test('V2: missing signal_source still runs validation (no trust)', async () => {
+  const opps = [
+    { topic: 'E', source_url: 'https://example.com/check' },
+  ];
+  const fakeValidate = async () => ({ valid: true, status: 200 });
+  const { log } = makeCapturingLog();
+  const out = await validateBriefingUrls(opps, { validate: fakeValidate, log });
+  assert.equal(out.checked, 1);
+  assert.equal(out.trusted, 0);
+  assert.equal(out.surviving.length, 1);
+});
+
+test('V2: skipAll bypasses validation for all opps and logs url_validation_skipped', async () => {
+  const opps = [
+    { topic: 'A', source_url: 'https://reddit.com/r/x/1', signal_source: 'apify_reddit' },
+    { topic: 'B', source_url: 'https://random.site/', signal_source: 'llm_inferred' },
+  ];
+  let called = 0;
+  const fakeValidate = async () => { called++; return { valid: false }; };
+  const { log, events } = makeCapturingLog();
+  const out = await validateBriefingUrls(opps, { validate: fakeValidate, log, skipAll: true });
+  assert.equal(called, 0);
+  assert.equal(out.skipped, 2);
+  assert.equal(out.surviving.length, 2);
+  assert.equal(out.checked, 0);
+  assert.equal(out.dropped, 0);
+  // Platform slug still stamped
+  assert.equal(out.surviving[0].platform, 'reddit');
+  assert.equal(out.surviving[1].platform, 'other');
+  // Exactly one bypass event
+  assert.equal(events.length, 1);
+  assert.equal(events[0].action, 'url_validation_skipped');
+  assert.equal(events[0].category, 'alert');
+  assert.equal(events[0].metadata.count, 2);
+});
+
+test('V2: mixed batch — trusted counted separately from checked and dropped', async () => {
+  const opps = [
+    { topic: 'a', source_url: 'https://reddit.com/r/x/1', signal_source: 'apify_reddit' },
+    { topic: 'b', source_url: 'https://tiktok.com/@y/video/2', signal_source: 'apify_tiktok' },
+    { topic: 'c', source_url: 'https://example.com/live',     signal_source: 'llm_inferred' },
+    { topic: 'd', source_url: 'https://example.com/dead',     signal_source: 'llm_inferred' },
+  ];
+  const fakeValidate = async (url) =>
+    url.endsWith('/dead') ? { valid: false, reason: '404' } : { valid: true, status: 200 };
+  const { log } = makeCapturingLog();
+  const out = await validateBriefingUrls(opps, { validate: fakeValidate, log });
+  assert.equal(out.trusted, 2);
+  assert.equal(out.checked, 2);
+  assert.equal(out.dropped, 1);
+  assert.equal(out.surviving.length, 3);
+});
+
+test('V2: dropped llm_inferred opp logs signal_source in metadata', async () => {
+  const opps = [
+    { topic: 'x', source_url: 'https://example.com/dead', signal_source: 'llm_inferred', signal_id: 'sig-x' },
+  ];
+  const fakeValidate = async () => ({ valid: false, reason: '404', status: 404 });
+  const { log, events } = makeCapturingLog();
+  await validateBriefingUrls(opps, { validate: fakeValidate, log });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].action, 'url_validation_dropped_research');
+  assert.equal(events[0].metadata.signal_source, 'llm_inferred');
+});
