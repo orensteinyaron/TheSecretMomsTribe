@@ -44,6 +44,7 @@ import { buildUserPrompt } from './lib/content-prompt.js';
 import { generateBatch as generateBatchLib } from './lib/content-generate.js';
 import { buildContentQueueRow } from './lib/content-queue-row.js';
 import { VALID_PILLARS, normalizePillar } from './lib/pillars.js';
+import { enforceCaptionLengthWithRetry } from './lib/caption-retry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -797,6 +798,13 @@ async function main() {
     const opp = (briefing.opportunities || []).find((o) => o.signal_id === p.source_urls[0]?.signal_id);
     p._recommendedSlug = opp?.recommended_format || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
   }
+
+  // Caption length retry: one-shot regen for captions ≤5% over their
+  // hard cap. Runs BEFORE format gates so a successful retry replaces
+  // the caption and the gate sees the clean value. Posts that overshoot
+  // >5% (or whose retry fails) get status_hint='draft_needs_review' and
+  // a caption_length_overshoot debug event.
+  await enforceCaptionLengthWithRetry(posts, { client: anthropic });
 
   await enforceFormatGates(posts);
   await enforceBatchDiversity(posts);

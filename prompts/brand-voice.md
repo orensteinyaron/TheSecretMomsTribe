@@ -145,7 +145,10 @@ Energy: Quick, opinionated, reframed for moms.
 - Line 2: One-line CTA (save, share, tag)
 
 ### Instagram captions: STORY.
-Mini-essay format. 100-180 words. Feels like reading a text from your smartest friend.
+Mini-essay format. Feels like reading a text from your smartest friend.
+Caption length is set by the per-format char cap in the user prompt's "Caption length caps"
+table. Use the full cap for storytelling, never exceed it. For formats that cap short
+(ig_static 125, tiktok_slideshow 100), compress ruthlessly — one punch line, no throat-clearing.
 - Line 1: Repeat or expand the hook (bold statement)
 - Body: The insight, the reframe, the "here's what nobody tells you"
 - Close: Validating line + soft CTA

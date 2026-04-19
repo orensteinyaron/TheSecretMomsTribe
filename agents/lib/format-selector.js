@@ -23,6 +23,21 @@ export const CAPTION_MAX_BY_FORMAT = {
   video_script: 400,
 };
 
+// Soft target: what we ASK the LLM to write to. Hard cap stays as
+// CAPTION_MAX_BY_FORMAT — that's what the post-validator enforces.
+// The 20% headroom absorbs the LLM's observed ~15-30% miscalibration
+// (see PR #13 investigation). Empirically tuned; adjust if the
+// caption_length_overshoot debug log shows the margin is too tight or
+// too generous.
+export const CAPTION_TARGET_BY_FORMAT = Object.fromEntries(
+  Object.entries(CAPTION_MAX_BY_FORMAT).map(([fmt, cap]) => [fmt, Math.round(cap * 0.8)]),
+);
+
+// Max overshoot (as fraction of cap) that's still considered
+// "recoverable via one-shot retry". Above this, the LLM structurally
+// missed the target — retries won't help; go straight to flag.
+export const RECOVERABLE_OVERSHOOT_FRACTION = 0.05;
+
 export const MIN_CAROUSEL_SLIDES = 3;
 export const SINGLE_PUNCH_MAX_WORDS = 20;
 

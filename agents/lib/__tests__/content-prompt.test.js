@@ -62,6 +62,22 @@ test('prompt: all caption-max formats are enumerated in the caps block', () => {
   }
 });
 
+test('prompt: caps block lists TARGET alongside cap (PR #13 headroom)', () => {
+  const prompt = buildUserPrompt(stubParams());
+  // target ≤100 for ig_static (80% of 125), target ≤80 for tiktok_slideshow (80% of 100).
+  assert.match(prompt, /ig_static:\s*target\s*≤100[^\n]*hard cap\s*≤125/);
+  assert.match(prompt, /tiktok_slideshow:\s*target\s*≤80[^\n]*hard cap\s*≤100/);
+  assert.match(prompt, /ig_carousel:\s*target\s*≤320[^\n]*hard cap\s*≤400/);
+});
+
+test('prompt: schema caption field restates target/cap for every format', () => {
+  const prompt = buildUserPrompt(stubParams());
+  // The schema restates the numbers inline — critical for LLM attention
+  // at the exact point of writing the caption field.
+  assert.match(prompt, /"caption":[\s\S]*TARGET[\s\S]*cap\s*≤/);
+  assert.match(prompt, /ig_static:\s*target\s*≤100,\s*cap\s*≤125/);
+});
+
 test('prompt: still renders briefing opportunities and coverage gaps', () => {
   const prompt = buildUserPrompt(stubParams({
     briefing: { opportunities: [{ topic: 'AI bedtime stories', source: 'tiktok' }] },
