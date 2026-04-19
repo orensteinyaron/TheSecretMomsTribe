@@ -22,6 +22,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Emergency kill switch from URL_VALIDATION_V2_SPEC §3.4/§6.
+          # Set secret to "true" / "1" / "yes" to bypass URL checks.
+          # Leave wired permanently as a documented escape hatch.
+          SKIP_URL_VALIDATION: ${{ secrets.SKIP_URL_VALIDATION }}
         run: node agents/research.js
 
   trigger-content:
