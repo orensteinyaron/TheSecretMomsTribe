@@ -42,6 +42,7 @@ import {
 import { validateSocialUrl } from './lib/url-validator.js';
 import { buildUserPrompt } from './lib/content-prompt.js';
 import { generateBatch as generateBatchLib } from './lib/content-generate.js';
+import { buildContentQueueRow } from './lib/content-queue-row.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -707,39 +708,8 @@ async function writeContentQueue(posts, briefingId, renderProfileMap) {
     const recommendedSlug = p._recommendedSlug || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
     const profile = renderProfileMap[recommendedSlug];
     const renderProfileId = profile?.id || null;
-
     const density = classifyDensity(p);
-    const status = p.status_hint === 'draft_needs_review' ? 'draft_needs_review' : 'draft';
-
-    return {
-      briefing_id: briefingId,
-      platform: p.platform,
-      content_type: p.content_type,
-      status,
-      hook: p.hook,
-      caption: p.caption,
-      hashtags: p.hashtags,
-      ai_magic_output: p.ai_magic_output || null,
-      image_prompt: p.image_prompt || null,
-      audio_suggestion: p.audio_suggestion || null,
-      age_range: p.age_range,
-      content_pillar: p.content_pillar,
-      post_format: p.post_format,
-      slides: p.slides || [],
-      avatar_config: p.avatar_config || null,
-      image_status: 'pending',
-      launch_bank: false,
-      quality_rating: null,
-      render_profile_id: renderProfileId,
-      render_status: renderProfileId ? 'pending' : null,
-      source_urls: Array.isArray(p.source_urls) ? p.source_urls : [],
-      metadata: {
-        ...(p.metadata || {}),
-        image_axes: p.image_axes || null,
-        density_classification: density,
-        format_flags: p.format_flags || [],
-      },
-    };
+    return buildContentQueueRow(p, { briefingId, renderProfileId, density });
   });
 
   const { error } = await supabase.from('content_queue').insert(rows);
