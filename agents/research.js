@@ -49,7 +49,7 @@ const REDDIT_SUBREDDITS = [
   'https://www.reddit.com/r/Toddlers/',
   'https://www.reddit.com/r/NewParents/',
   'https://www.reddit.com/r/breakingmom/',
-  // Tech & AI (for ai_magic + tech_for_moms)
+  // Tech & AI (for ai_magic + tech pillars)
   'https://www.reddit.com/r/ChatGPT/',
   'https://www.reddit.com/r/LifeProTips/',
   'https://www.reddit.com/r/apps/',
@@ -313,12 +313,12 @@ The mom who always knows things first. Finds the AI hacks, the apps, the science
 ## Brand Voice
 Warm, knowing mom friend. Uses "we" and "us." Slight humor, never condescending. She knows things other moms don't — that's the "secret."
 
-## Content Categories (5 categories — scan for ALL)
+## Content Categories (V1.1 canonical names — scan for ALL)
 1. ai_magic (30%) — Shows AI doing something useful for a mom on screen. Always has: the prompt/input + the AI output. Examples: AI writes bedtime story, AI generates school lunches from fridge photo, AI writes the hard email to teacher, AI creates conversation starters for teen.
-2. parenting_insights (25%) — Science-backed, behavior-based, emotionally resonant. Always reframes something moms feel guilty about. Examples: why your teen says "fine", toddler meltdowns are nervous system not defiance, the 10 minute rule that changes bedtime.
-3. tech_for_moms (20%) — Apps, tools, shortcuts. Specific and actionable. Always leads with the result not the tool. Examples: app that scans fridge and plans dinner, Chrome extension for focus, 3 phone settings every mom should change tonight.
-4. mom_health (15%) — Mental load, burnout, sleep, physical health. Never preachy, always practical. Examples: the 90 second reset when you're about to snap, why you're always tired, the thing nobody tells you about mom brain.
-5. trending_culture (10%) — News, studies, viral moments reframed for moms. Always timely with a SMT angle. Examples: new screen time study (what it actually means), that viral parenting debate (here's the nuance).
+2. parenting (25%) — Science-backed, behavior-based, emotionally resonant. Always reframes something moms feel guilty about. Examples: why your teen says "fine", toddler meltdowns are nervous system not defiance, the 10 minute rule that changes bedtime.
+3. tech (20%) — Apps, tools, shortcuts. Specific and actionable. Always leads with the result not the tool. Examples: app that scans fridge and plans dinner, Chrome extension for focus, 3 phone settings every mom should change tonight.
+4. health (15%) — Mental load, burnout, sleep, physical health. Never preachy, always practical. Examples: the 90 second reset when you're about to snap, why you're always tired, the thing nobody tells you about mom brain.
+5. trending (10%) — News, studies, viral moments reframed for moms. Always timely with a SMT angle. Examples: new screen time study (what it actually means), that viral parenting debate (here's the nuance).
 
 ## Content Types
 - wow: AI-magic outputs, tech reveals, actionable tools that make viewers say "I need this." Show the OUTPUT, not the process.
@@ -335,10 +335,10 @@ Warm, knowing mom friend. Uses "we" and "us." Slight humor, never condescending.
 
 ## Category Mix Target (across ${BRIEFING_REQUEST_COUNT} opportunities)
 - 1-2x ai_magic
-- 1x parenting_insights
-- 1x tech_for_moms
-- 0-1x mom_health
-- 0-1x trending_culture
+- 1x parenting
+- 1x tech
+- 0-1x health
+- 0-1x trending
 At least 3 different categories must be represented. Never more than 2 from same category.
 
 ## Content Type Distribution
@@ -372,7 +372,7 @@ If you synthesize an opportunity from multiple signals, pick the signal_source o
 Return a JSON array of exactly ${BRIEFING_REQUEST_COUNT} objects. Each object:
 {
   "topic": "Short topic title (5-8 words)",
-  "category": "ai_magic | parenting_insights | tech_for_moms | mom_health | trending_culture",
+  "category": "ai_magic | parenting | tech | health | trending",
   "age_range": "toddler | little_kid | school_age | teen | universal",
   "angle": "The specific creative angle for SMT (1-2 sentences)",
   "source": "reddit | tiktok | google_trends | cross_signal",
@@ -458,7 +458,11 @@ function buildUserPrompt(sources, recentTopics, directives, insights, renderProf
 
 // --- Validation ---
 
-const VALID_CATEGORIES = ['ai_magic', 'parenting_insights', 'tech_for_moms', 'mom_health', 'trending_culture'];
+// V1.1 canonical category names — must match content_queue.content_pillar
+// check constraint. Re-declared here (rather than imported from pillars.js)
+// because research emits categories FOR content_queue; keep the alignment
+// enforced by the schema-contract integration test.
+const VALID_CATEGORIES = ['ai_magic', 'parenting', 'tech', 'health', 'trending'];
 const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 const VALID_PLATFORM_FIT = ['tiktok', 'instagram', 'both'];
 const VALID_SIGNAL_SOURCES = new Set([

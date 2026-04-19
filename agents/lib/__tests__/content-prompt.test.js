@@ -65,10 +65,10 @@ test('prompt: all caption-max formats are enumerated in the caps block', () => {
 test('prompt: still renders briefing opportunities and coverage gaps', () => {
   const prompt = buildUserPrompt(stubParams({
     briefing: { opportunities: [{ topic: 'AI bedtime stories', source: 'tiktok' }] },
-    coverageGaps: { gaps: 'Missing toddler + tech_for_moms' },
+    coverageGaps: { gaps: 'Missing toddler + tech' },
   }));
   assert.match(prompt, /AI bedtime stories/);
-  assert.match(prompt, /Missing toddler \+ tech_for_moms/);
+  assert.match(prompt, /Missing toddler \+ tech/);
 });
 
 test('prompt: strategy block only appears when directives or insights exist', () => {

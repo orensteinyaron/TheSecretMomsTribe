@@ -43,6 +43,7 @@ import { validateSocialUrl } from './lib/url-validator.js';
 import { buildUserPrompt } from './lib/content-prompt.js';
 import { generateBatch as generateBatchLib } from './lib/content-generate.js';
 import { buildContentQueueRow } from './lib/content-queue-row.js';
+import { VALID_PILLARS, normalizePillar } from './lib/pillars.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -189,7 +190,10 @@ async function getCoverageGaps() {
     const coveredSet = new Set(covered);
 
     const ageRanges = ['toddler', 'little_kid', 'school_age', 'teen'];
-    const pillars = ['ai_magic', 'parenting_insights', 'tech_for_moms', 'mom_health', 'trending'];
+    // Coverage is only meaningful for the LLM-emitted pillars, not
+    // the full DB set. financial/uncategorized exist in the schema
+    // but aren't part of the mom-audience rotation.
+    const pillars = ['ai_magic', 'parenting', 'tech', 'health', 'trending'];
     const uncovered = [];
 
     for (const age of ageRanges) {
@@ -317,11 +321,22 @@ async function generateBatch(briefing, dna, coverageGaps, recentHooks, directive
 // --- Validation ---
 
 const VALID_AGE_RANGES = ['toddler', 'little_kid', 'school_age', 'teen', 'universal'];
-const VALID_PILLARS = ['ai_magic', 'parenting_insights', 'tech_for_moms', 'mom_health', 'trending'];
 const VALID_POST_FORMATS = ['tiktok_slideshow', 'tiktok_text', 'ig_carousel', 'ig_static', 'ig_meme', 'video_script', 'tiktok_avatar', 'tiktok_avatar_visual'];
 const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 
-function validateBatch(posts) {
+// Hashtag fallbacks keyed by V1.1 canonical pillar. If the LLM leaks
+// a legacy long name we normalizePillar it before this lookup.
+const HASHTAG_FALLBACK_BY_PILLAR = {
+  parenting: { toddler: ['#momlife', '#toddlermom', '#parentingtips', '#momhacks', '#toddlerlife'], little_kid: ['#momlife', '#littlekidmom', '#parentingtips', '#momhacks', '#kidslife'], school_age: ['#momlife', '#schoolkidmom', '#parentingtips', '#momhacks', '#raisingkids'], teen: ['#momlife', '#teenmom', '#parentingtips', '#momhacks', '#raisingteens'], universal: ['#momlife', '#parentingtips', '#momhacks', '#raisingkids', '#motherhood'] },
+  ai_magic: { toddler: ['#aimom', '#aitools', '#toddlermom', '#momtech', '#aiforparents'], little_kid: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], school_age: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], teen: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], universal: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'] },
+  tech: { toddler: ['#momtech', '#techformoms', '#toddlermom', '#smartparenting', '#momlife'], little_kid: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#kidstech'], school_age: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#kidstech'], teen: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#teentech'], universal: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#motherhood'] },
+  health: { toddler: ['#momhealth', '#selfcare', '#toddlermom', '#momwellness', '#healthymom'], little_kid: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], school_age: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], teen: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], universal: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#motherhood'] },
+  trending: { toddler: ['#momlife', '#trending', '#toddlermom', '#momhacks', '#viral'], little_kid: ['#momlife', '#trending', '#momhacks', '#viral', '#kidslife'], school_age: ['#momlife', '#trending', '#momhacks', '#viral', '#raisingkids'], teen: ['#momlife', '#trending', '#momhacks', '#viral', '#raisingteens'], universal: ['#momlife', '#trending', '#momhacks', '#viral', '#motherhood'] },
+  financial: { toddler: ['#momlife', '#momsavings', '#parentingtips', '#momhacks', '#momfinance'], little_kid: ['#momlife', '#momsavings', '#parentingtips', '#momhacks', '#momfinance'], school_age: ['#momlife', '#momsavings', '#parentingtips', '#momhacks', '#momfinance'], teen: ['#momlife', '#momsavings', '#parentingtips', '#momhacks', '#momfinance'], universal: ['#momlife', '#momsavings', '#parentingtips', '#momhacks', '#motherhood'] },
+  uncategorized: { toddler: ['#momlife', '#parentingtips', '#momhacks', '#toddlermom', '#motherhood'], little_kid: ['#momlife', '#parentingtips', '#momhacks', '#kidslife', '#motherhood'], school_age: ['#momlife', '#parentingtips', '#momhacks', '#raisingkids', '#motherhood'], teen: ['#momlife', '#parentingtips', '#momhacks', '#raisingteens', '#motherhood'], universal: ['#momlife', '#parentingtips', '#momhacks', '#raisingkids', '#motherhood'] },
+};
+
+async function validateBatch(posts) {
   if (!Array.isArray(posts) || posts.length === 0) {
     throw new Error(`Expected 1+ posts, got ${Array.isArray(posts) ? posts.length : typeof posts}`);
   }
@@ -336,16 +351,34 @@ function validateBatch(posts) {
     try {
       if (!p.hook || p.hook.length < 10) throw new Error('missing/short hook');
       if (!p.caption || p.caption.length < 20) throw new Error('missing/short caption');
+
+      // Normalize pillar FIRST so every downstream step (hashtag
+      // fallback, validation, DB INSERT) sees V1.1 canonical values.
+      // Emit a pillar_remapped_legacy activity log if the LLM leaked
+      // a V1.0 long name so we can monitor and eventually remove the
+      // safety net.
+      const norm = normalizePillar(p.content_pillar);
+      if (norm.remapped) {
+        console.warn(`[Content] ${prefix}: pillar "${norm.legacy_value}" remapped to "${norm.pillar}"`);
+        await logActivity({
+          category: 'debug',
+          actor_type: 'agent',
+          actor_name: 'content-agent',
+          action: 'pillar_remapped_legacy',
+          description: `Pillar "${norm.legacy_value}" remapped to V1.1 "${norm.pillar}"`,
+          metadata: {
+            post_index: i,
+            legacy_value: norm.legacy_value,
+            canonical: norm.pillar,
+            hook: p.hook?.slice(0, 120) || null,
+          },
+        });
+      }
+      p.content_pillar = norm.pillar;
+
       if (!Array.isArray(p.hashtags) || p.hashtags.length < 3) {
-        const fallback = {
-          parenting_insights: { toddler: ['#momlife', '#toddlermom', '#parentingtips', '#momhacks', '#toddlerlife'], little_kid: ['#momlife', '#littlekidmom', '#parentingtips', '#momhacks', '#kidslife'], school_age: ['#momlife', '#schoolkidmom', '#parentingtips', '#momhacks', '#raisingkids'], teen: ['#momlife', '#teenmom', '#parentingtips', '#momhacks', '#raisingteens'], universal: ['#momlife', '#parentingtips', '#momhacks', '#raisingkids', '#motherhood'] },
-          ai_magic: { toddler: ['#aimom', '#aitools', '#toddlermom', '#momtech', '#aiforparents'], little_kid: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], school_age: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], teen: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'], universal: ['#aimom', '#aitools', '#momtech', '#aiforparents', '#smartmom'] },
-          tech_for_moms: { toddler: ['#momtech', '#techformoms', '#toddlermom', '#smartparenting', '#momlife'], little_kid: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#kidstech'], school_age: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#kidstech'], teen: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#teentech'], universal: ['#momtech', '#techformoms', '#smartparenting', '#momlife', '#motherhood'] },
-          mom_health: { toddler: ['#momhealth', '#selfcare', '#toddlermom', '#momwellness', '#healthymom'], little_kid: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], school_age: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], teen: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#momlife'], universal: ['#momhealth', '#selfcare', '#momwellness', '#healthymom', '#motherhood'] },
-          trending: { toddler: ['#momlife', '#trending', '#toddlermom', '#momhacks', '#viral'], little_kid: ['#momlife', '#trending', '#momhacks', '#viral', '#kidslife'], school_age: ['#momlife', '#trending', '#momhacks', '#viral', '#raisingkids'], teen: ['#momlife', '#trending', '#momhacks', '#viral', '#raisingteens'], universal: ['#momlife', '#trending', '#momhacks', '#viral', '#motherhood'] },
-        };
-        const pillar = fallback[p.content_pillar] || fallback.parenting_insights;
-        p.hashtags = pillar[p.age_range] || pillar.universal;
+        const pillarFallback = HASHTAG_FALLBACK_BY_PILLAR[p.content_pillar] || HASHTAG_FALLBACK_BY_PILLAR.parenting;
+        p.hashtags = pillarFallback[p.age_range] || pillarFallback.universal;
         console.warn(`[Content] ${prefix}: hashtags missing/insufficient, auto-generated defaults`);
       }
       if (!VALID_POST_FORMATS.includes(p.post_format)) throw new Error(`invalid post_format "${p.post_format}"`);
@@ -753,7 +786,7 @@ async function main() {
   const { posts: rawPosts, usage } = await generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights);
 
   // Validate (shape)
-  const posts = validateBatch(rawPosts);
+  const posts = await validateBatch(rawPosts);
 
   // Post-process: normalize image fields, resolve source_urls, enforce
   // format + diversity gates, revalidate URLs. Each step logs its own
