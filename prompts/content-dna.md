@@ -77,7 +77,7 @@ Design: Consistent template. Brand colors. Swipe indicator on slide 1.
 ### Instagram Static / Meme
 ```
 IMAGE: One powerful statement, large text
-CAPTION: The story behind it (100-180 words)
+CAPTION: The story behind it — length is set by the per-format char cap in the user prompt
 ```
 
 Style: Clean, warm, editorial. Text-heavy statics outperform image-heavy ones for this niche.
@@ -170,7 +170,7 @@ Max 3 lines. Max 40 words.
 
 [Hashtags: 5-8, mix of niche and medium]
 ```
-100-180 words. Use line breaks between sections.
+Caption length is set by the per-format char cap in the user prompt's "Caption length caps" table — use the full cap, never exceed it. Use line breaks between sections.
 
 ---
 
