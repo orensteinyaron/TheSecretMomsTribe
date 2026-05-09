@@ -1,5 +1,7 @@
 # Piece 3bcafc78 — Production-Showcase Backfill Spec V1
 
+> **POST-EXECUTION REVISION 2026-05-09 (cost-honesty pass):** After applying the V1 backfill migration (`20260509190000_backfill_3bcafc78_showcase.sql`), a second migration was added (`20260509200000_backfill_3bcafc78_cost_honesty.sql`) extending the same precedent that omitted the qa_avatar `overall_score` to also omit synthesized cost/token figures across the chain. Cost numbers that are derivable from real artifacts (TTS character counts, Whisper duration, Seedance job counts) stay with `_cost_derived_from` notes. Cost numbers that were pure synthesis (content_gen msg.usage; qa_avatar) move to `content_queue.generation_context._estimated_cost_breakdown` with `_cost_omitted_note` markers on the affected rows. `render_cost_usd` is now $1.56 (logged-only sum), not $2.10 (the original profile estimate). The full estimate ($1.56 logged + $0.59 estimated = $2.15 ≈ profile $2.10) is preserved in the breakdown for budgeting reference. See §6a below for the per-row audit table.
+
 **Date:** May 9, 2026
 **Target piece:** `3bcafc78-23f4-4c56-86aa-6221219dddbe` ("This one question gets my teen talking for 20 minutes…")
 **Execution model:** One idempotent SQL migration, applied via `mcp__supabase__apply_migration` after spec approval.
@@ -278,7 +280,30 @@ One aggregate row per phase, per §3.2's "don't surface parallel API calls as ve
 
 **latency_ms**: NULL across all rows (unrecoverable).
 
-**Chain total cost:** $0.04 + $0 + $0.05 + $0.01 + $1.50 + $0.55 + $0 + $0 = **$2.15** (rounds to ~$2.10 = profile cost_estimate).
+**Chain total cost (V1):** $0.04 + $0 + $0.05 + $0.01 + $1.50 + $0.55 + $0 + $0 = **$2.15** (rounds to ~$2.10 = profile cost_estimate).
+
+**Chain total cost (V2 cost-honesty pass):** synthesized cost figures zeroed out; only derivable-from-artifacts costs stay. New chain logged-cost sum = **$1.56**. The $0.59 difference moves to `generation_context._estimated_cost_breakdown` for budgeting reference.
+
+### 6a. Cost-honesty audit per row (post-V2 migration)
+
+Each row was audited against the test: "Are the cost/tokens **derivable from real artifacts**, or **synthesized**?" Synthesized values are not data; they're commentary. Commentary doesn't belong in a numeric column on the chain.
+
+| step | Agent ran? | Cost source | Disposition |
+|---|---|---|---|
+| content_gen | YES (content_queue row exists as proof) | $0.04 + 4200/1800 tokens **synthesized** (no real msg.usage) | **Zero out**; `_cost_omitted_note` added; estimate moves to breakdown |
+| avatar_script_prep | YES (deterministic — accurate) | $0 (free) | Keep, no note needed |
+| tts_generation | YES (6 scene_audio Drive files exist) | $0.05 **derivable** from script char counts × eleven_v3 rate | Keep + `_cost_derived_from` note |
+| whisper_transcription | YES (transcript Drive file exists, 100 words) | $0.01 **derivable** from 39.36s audio × Whisper $0.006/min ceiling | Keep + `_cost_derived_from` note |
+| seedance_render | YES (6 higgsfield_job_ids in scene_clip metadata) | $1.50 **derivable** from 6 confirmed jobs × ~$0.25/clip credit consumption | Keep + `_cost_derived_from` note |
+| qa_avatar | NO (skill post-dates this piece) | $0.55 + 8000/600 tokens **entirely synthesized** | **Zero out**; `_cost_omitted_note` added; estimate moves to breakdown |
+| hook_card_render | YES (thumbnail exists) | $0 (deterministic) | Keep, no note needed |
+| stitch | YES (final.mp4 exists with caption_phrase_count) | $0 (deterministic) | Keep, no note needed |
+
+**Logged-cost sum:** $0 + $0.05 + $0.01 + $1.50 + $0 + $0 = **$1.56** → `content_queue.render_cost_usd`
+**Estimated breakdown:** content_gen $0.04 + qa_avatar $0.55 = **$0.59** → `generation_context._estimated_cost_breakdown.total_estimated`
+**Total ≈ profile estimate:** $1.56 + $0.59 = $2.15 ≈ profile `cost_estimate_usd` $2.10 (within rounding)
+
+The Render Cost cell on the piece page will show $1.56, not $2.10. That's accurate — it's the cost we have evidence for. The full estimate is one click away in `generation_context._estimated_cost_breakdown.note`.
 
 ---
 

@@ -25,6 +25,26 @@
  * the canonical example. If you find yourself wanting to widen VALID_STATUS
  * to include 'reconstructed', stop — you're about to mark real-time data as
  * synthetic, which silently poisons whatever analytics later differentiate.
+ *
+ * --- Cost-data conventions: omit-and-surface, never synthesize ---
+ *
+ * When a real-time logged chain has missing or unrecoverable cost data
+ * (e.g. an upstream agent didn't return msg.usage, or a step ran but its
+ * billing wasn't captured), prefer omitting cost_usd on the row (NULL with
+ * a `_cost_omitted_note` key in output_json) and surfacing the estimate
+ * via `content_queue.generation_context._estimated_cost_breakdown` rather
+ * than synthesizing a chain row cost. The chain shows what we have
+ * evidence for; the breakdown shows what the full pipeline would have cost
+ * if every phase had been logged. They are two different things.
+ *
+ * Conversely, when a row's cost IS derivable from real artifacts (TTS
+ * character counts, Whisper audio duration, Seedance job IDs, etc.), keep
+ * the cost on the row and add a `_cost_derived_from` key in output_json
+ * documenting the derivation basis.
+ *
+ * Established by the 3bcafc78 showcase backfill (PR #21). The principle is
+ * "synthesized numbers are commentary, not data — keep them out of numeric
+ * columns on the chain."
  */
 
 import { supabase } from './supabase.js';
