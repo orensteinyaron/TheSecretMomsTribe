@@ -32,6 +32,10 @@ const STEP_ORDER_BY_NAME: Record<string, number> = {
   slide_parser: 2, media_query_gen: 3, media_screening: 4, tts_script_prep: 5,
   qa_evaluation: 6, qa_visual_review: 6, qa_audio_review: 6, qa_content_match: 6,
   image_prompt_gen: 2, avatar_script_prep: 2, interviewer_prompt_gen: 3, magic_prompt_extract: 2,
+  // Avatar Full pipeline phases — added so REGENABLE_STEPS accepts them.
+  // Sourced from the canonical chain in docs/specs/PIECE_3BCAFC78_BACKFILL_V1.md §6.
+  tts_generation: 3, whisper_transcription: 4, seedance_render: 5,
+  qa_avatar: 6, hook_card_render: 7, stitch: 8,
 };
 const REGENABLE_STEPS = new Set(Object.keys(STEP_ORDER_BY_NAME));
 
@@ -75,8 +79,31 @@ function engagementRate(snap: any): number | null {
   return Number((num / Number(denom)).toFixed(6));
 }
 
+// Drive URLs are the production storage contract for any content rendered via the
+// content-lifecycle persist pipeline (see skills/content-lifecycle/SKILL.md and
+// video/scripts/content-lifecycle.ts:305 — that script writes Drive webViewLink URLs
+// to content_queue.final_asset_url). Do NOT lock these out at write time. Drive
+// `/file/d/<id>/view` URLs are not embeddable as <img src> or <video src> directly,
+// so we rewrite them here for embed context: /preview for iframe video, lh3 for img.
+// The legacy orchestrator pipeline writes Supabase Storage URLs which embed natively
+// — that branch stays unchanged.
+//
+// content_assets-backed thumbnail rewriting (lh3) is deferred to YAR-111 (per-scene
+// expansion needs to read content_assets too; folding both at once). Today this
+// resolver only covers the video iframe rewrite — the comment above documents the
+// future thumbnail intent so the next reader knows lh3 is the canonical choice when
+// thumbnail support lands.
 function resolveOutputUrls(piece: any): { video?: string; carousel_slides?: string[]; static?: string } {
+  // Drive webViewLink (/file/d/<id>/view?usp=…) → /preview for iframe-embeddable video.
+  // Single regex capture covers both /view and /view?usp=drivesdk variants.
+  if (piece.final_asset_url?.includes("drive.google.com/file/d/")) {
+    const m = piece.final_asset_url.match(/\/file\/d\/([^/]+)/);
+    if (m) return { video: `https://drive.google.com/file/d/${m[1]}/preview` };
+  }
+  // Legacy orchestrator path: Supabase Storage MP4, embeds natively in <video>.
   if (piece.final_asset_url?.endsWith(".mp4")) return { video: piece.final_asset_url };
+  // Other final_asset_url (legacy / unknown) — fall through to <img> for backward compat.
+  // The piece-page UI's empty-state takes over if the URL turns out to be unembeddable.
   if (piece.final_asset_url) return { static: piece.final_asset_url };
   if (Array.isArray(piece.slide_images) && piece.slide_images.length > 0) {
     return { carousel_slides: piece.slide_images.map((s: any) => s.url ?? s.image_url ?? s).filter(Boolean) };
