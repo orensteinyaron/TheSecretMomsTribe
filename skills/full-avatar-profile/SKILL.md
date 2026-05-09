@@ -181,13 +181,49 @@ One row per uploaded asset, joined to `content_queue` by `content_id`. Schema (c
 | `width` | int | null where N/A |
 | `height` | int | null where N/A |
 | `metadata` | jsonb | render params, QA verdict, scene job IDs, cost breakdown |
+| `version` | int | starts at `1`; increments on each re-render |
+| `supersedes_id` | uuid | nullable, FK to `content_assets.id` of the row this replaces (`null` for v1) |
+| `is_current` | boolean | exactly one `true` per `(content_id, asset_type)` — enforced by partial unique index |
 | `created_at` | timestamptz | default `now()` |
 
 ### Storage rules
 - Drive folder is created lazily — first asset upload triggers folder creation.
-- Re-runs for the same `content_id` overwrite Drive files in-place (same name) and update existing `content_assets` rows by `(content_id, asset_type)`. They do NOT create duplicate rows.
-- A `content_assets` row is only written AFTER its corresponding Drive upload succeeds — never write a row pointing to a non-existent file.
-- If a downstream step (publishing, etc.) needs an asset and the row is missing, treat the piece as not-yet-rendered. Do not fall back to tmp paths.
+- **Re-renders are versioned, never destructive.** For each `(content_id, asset_type)`, when a new render is uploaded:
+  1. Find the existing current row by `(content_id, asset_type, is_current = true)`. If one exists:
+     a. **Rename** its Drive file by appending `.v{old_version}` to the basename: e.g. `final.mp4` → `final.v1.mp4`, `thumbnail.png` → `thumbnail.v1.png`. Use Drive's `files.update` endpoint to rename in-place — the file ID stays the same.
+     b. Update the old row: set `drive_path` to the new (suffixed) path, set `is_current = false`. Do NOT change its `drive_file_id`.
+  2. Upload the new render to the unsuffixed Drive path (e.g. `final.mp4`).
+  3. Insert a new row: `version = old.version + 1` (or `1` if no prior), `supersedes_id = old.id` (or `null`), `is_current = true`, with the new Drive file ID + path.
+- The unsuffixed Drive path always points to the **latest** version. Older versions are suffixed `.v{n}` and stay in Drive forever — full render audit trail, no auto-delete.
+- Database invariant: exactly one `is_current = true` row per `(content_id, asset_type)`, enforced by:
+  ```sql
+  CREATE UNIQUE INDEX content_assets_current_unique
+    ON content_assets (content_id, asset_type)
+    WHERE is_current = true;
+  ```
+- A row is only written AFTER its Drive upload (or rename, for the old row) succeeds. Never write a row pointing to a non-existent file.
+- If a downstream step (publishing, etc.) needs an asset and no `is_current = true` row exists for that `(content_id, asset_type)`, treat the piece as not-yet-rendered. Do not fall back to tmp paths.
+
+### Querying
+```sql
+-- Current asset for a piece
+SELECT * FROM content_assets
+WHERE content_id = $1 AND asset_type = 'final_mp4' AND is_current = true;
+
+-- Full version history (newest first)
+SELECT version, drive_path, created_at, metadata
+FROM content_assets
+WHERE content_id = $1 AND asset_type = 'final_mp4'
+ORDER BY version DESC;
+
+-- Walk the supersedes chain from any row back to v1
+WITH RECURSIVE chain AS (
+  SELECT * FROM content_assets WHERE id = $1
+  UNION ALL
+  SELECT a.* FROM content_assets a JOIN chain c ON a.id = c.supersedes_id
+)
+SELECT * FROM chain ORDER BY version;
+```
 
 ## Failure modes & escalation
 
@@ -201,6 +237,8 @@ One row per uploaded asset, joined to `content_queue` by `content_id`. Schema (c
 | Any prompt drift detected (e.g. feature instruction snuck in) | Hard fail, do not generate, surface to user |
 | Drive upload fails (network / quota / permission) | Retry once with backoff. On second failure, surface local paths + error and keep tmp intact so the run is recoverable |
 | `content_assets` write fails | Same — surface, keep tmp + completed Drive uploads intact. Never delete a Drive file because the DB write failed |
+| Drive rename of old version fails (during a versioned re-render) | Hard fail before uploading the new render. The old `is_current` row + file stay intact and unchanged. Surface + keep tmp |
+| Two re-renders for the same `(content_id, asset_type)` race | Second insert fails on `content_assets_current_unique`. Surface error; first run completes normally. Manual intervention needed only if the second run already uploaded its Drive file (orphaned blob — leave it, it'll be picked up on next render) |
 
 ## Files this skill calls
 
