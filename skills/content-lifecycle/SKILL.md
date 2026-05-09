@@ -5,6 +5,34 @@ description: Persists content artifacts produced by any SMT profile skill (full-
 
 # Content Lifecycle Skill
 
+## Implementation
+
+- CLI: `video/scripts/content-lifecycle.ts`
+- Drive helper: `video/lib/drive.ts`
+- Run: `npx tsx video/scripts/content-lifecycle.ts --mode persist --content-id <uuid> --manifest <path> --hook-overlay "<text>"`
+- v1 implements `mode=persist` only. `re_render` and `publish` are placeholders.
+
+### Drive auth (one-time)
+
+The skill manages its own OAuth flow and token cache. No `rclone`, no `gdrive`, no manual scripts.
+
+**One-time setup before the first run** (~3 min, then never again):
+1. Open https://console.cloud.google.com/apis/credentials and pick or create a Google Cloud project.
+2. Click **"Create Credentials" → "OAuth client ID"**. Application type **"Desktop app"**, name **"SMT content-lifecycle"**.
+3. Click **DOWNLOAD JSON**.
+4. `mkdir -p ~/.config/smt && mv ~/Downloads/client_secret_*.json ~/.config/smt/drive-credentials.json`
+5. Enable the Drive API in that project: https://console.cloud.google.com/apis/library/drive.googleapis.com
+
+**First skill run**: opens the browser to Google's consent screen. One click to grant access. The skill exchanges the auth code for a refresh token and caches it at `~/.config/smt/drive-token.json` (mode 0600).
+
+**Subsequent runs**: token loaded from disk; access tokens refreshed automatically. Zero user interaction.
+
+If credentials.json is missing on a run, the skill exits with the setup steps above instead of silently continuing.
+
+### Uploads
+
+Uploads go through googleapis with a readable stream — Drive's resumable upload protocol kicks in automatically for large files. Tested up to 45MB; the protocol supports up to 5TB. No request-body size limits to worry about.
+
 ## What this skill does
 
 Takes a manifest produced by a profile skill and:

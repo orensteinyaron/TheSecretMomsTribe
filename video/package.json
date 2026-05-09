@@ -13,6 +13,7 @@
     "@remotion/google-fonts": "^4.0.447",
     "@remotion/renderer": "^4.0.0",
     "@supabase/supabase-js": "^2.45.0",
+    "googleapis": "^171.4.0",
     "music-metadata": "^11.12.3",
     "openai": "^4.60.0",
     "react": "^18.3.0",
