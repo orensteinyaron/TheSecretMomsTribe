@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, X, RefreshCw, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Check, X, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { PillarBadge } from '../components/shared/PillarBadge';
 import { PlatformIcon } from '../components/shared/PlatformIcon';
@@ -7,6 +7,18 @@ import { EditableField } from '../components/shared/EditableField';
 import { useContentDetail, useContentUpdate } from '../hooks/useContent';
 import { contentApi } from '../api/content';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
+
+function humanizeFormatFlag(flag: string): string {
+  // caption_too_long:533>400:ig_carousel
+  const cap = flag.match(/^caption_too_long:(\d+)>(\d+):(.+)$/);
+  if (cap) return `Caption too long: ${cap[1]} chars (limit ${cap[2]}, ${cap[3]})`;
+  // ig_carousel_needs_3+_slides:have=2
+  const car = flag.match(/^ig_carousel_needs_(\d+)\+_slides:have=(\d+)$/);
+  if (car) return `Carousel needs at least ${car[1]} slides (has ${car[2]})`;
+  if (flag === 'ig_static_must_have_single_slide') return 'IG static must have a single slide';
+  if (flag === 'primary_source_stale') return 'Primary source URL is unreachable';
+  return flag;
+}
 
 export default function ContentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -95,6 +107,29 @@ export default function ContentDetailPage() {
           )}
         </div>
       </div>
+
+      {(() => {
+        const flags: string[] = Array.isArray(item.metadata?.format_flags) ? item.metadata.format_flags : [];
+        const reviewReason: string | null = item.generation_context?.needs_review_reason ?? null;
+        if (flags.length === 0 && !reviewReason) return null;
+        return (
+          <div
+            data-testid="needs-review-banner"
+            className="mb-6 flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 p-4 text-warning"
+          >
+            <AlertTriangle size={20} className="flex-shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold">Auto-repair didn't succeed</p>
+              <p className="mt-1 text-text-primary">
+                {flags.length > 0
+                  ? `This piece was flagged during generation: ${flags.map(humanizeFormatFlag).join('; ')}.`
+                  : reviewReason}
+                {' '}Review and edit, or reject.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-3 gap-6">
         {/* Left: Content */}

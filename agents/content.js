@@ -594,8 +594,9 @@ async function enforceBatchDiversity(posts) {
 }
 
 /**
- * Run deterministic format gates. On failure, mark the post for review (no
- * silent ship) and attach diagnostic metadata.
+ * Run deterministic format gates. On failure, attach diagnostic flags to
+ * post.format_flags so the piece page surfaces an inline review banner.
+ * The piece itself stays at status='draft'; the flags are metadata.
  */
 async function enforceFormatGates(posts) {
   let flagged = 0;
@@ -605,7 +606,6 @@ async function enforceFormatGates(posts) {
 
     flagged++;
     post.format_flags = errors;
-    post.status_hint = 'draft_needs_review';
 
     await logActivity({
       category: 'debug',
@@ -622,7 +622,7 @@ async function enforceFormatGates(posts) {
     });
   }
   if (flagged > 0) {
-    console.warn(`[Content] Format validation flagged ${flagged} post(s) as draft_needs_review`);
+    console.warn(`[Content] Format validation flagged ${flagged} post(s) for review (format_flags)`);
   }
   return { flagged };
 }
@@ -686,7 +686,8 @@ function resolveSourceUrls(post, briefingOpps) {
 /**
  * Revalidate every URL attached to posts right before writing. Any dead URL
  * is dropped from its post's source_urls and logged. If a post's only
- * primary_inspiration URL dies, the post is marked draft_needs_review.
+ * primary_inspiration URL dies, push 'primary_source_stale' onto
+ * post.format_flags so the piece page surfaces a review banner.
  */
 async function revalidatePostSourceUrls(posts) {
   let checked = 0;
@@ -728,7 +729,6 @@ async function revalidatePostSourceUrls(posts) {
 
       if (entry.relation === 'primary_inspiration') {
         staleBlocked++;
-        post.status_hint = 'draft_needs_review';
         post.format_flags = [...(post.format_flags || []), 'primary_source_stale'];
       }
     }
@@ -867,8 +867,8 @@ async function main() {
   // Caption length retry: one-shot regen for captions ≤5% over their
   // hard cap. Runs BEFORE format gates so a successful retry replaces
   // the caption and the gate sees the clean value. Posts that overshoot
-  // >5% (or whose retry fails) get status_hint='draft_needs_review' and
-  // a caption_length_overshoot debug event.
+  // >5% (or whose retry fails) get a caption_too_long entry pushed onto
+  // post.format_flags and a caption_length_overshoot debug event.
   await enforceCaptionLengthWithRetry(posts, { client: anthropic });
 
   await enforceFormatGates(posts);
@@ -892,7 +892,7 @@ async function main() {
       .from('content_queue')
       .select('id')
       .eq('briefing_id', briefing.id)
-      .in('status', ['draft', 'draft_needs_review'])
+      .eq('status', 'draft')
       .order('created_at', { ascending: false })
       .limit(posts.length);
 

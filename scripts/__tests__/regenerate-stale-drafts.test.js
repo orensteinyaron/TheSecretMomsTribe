@@ -277,7 +277,7 @@ test('runRegeneration: confirm run writes new row + marks superseded', async () 
   assert.match(supabase._updates[0].patch.metadata.superseded_by, /^new-/);
 });
 
-test('runRegeneration: 2-attempt cap → draft_needs_review when LLM keeps overshooting', async () => {
+test('runRegeneration: 2-attempt cap → status=draft + format_flags populated when LLM keeps overshooting', async () => {
   const candidate = draftRow({ id: 'orig-2', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'mom_health', hook: 'Locked', caption: 'x'.repeat(900) });
   const supabase = makeFakeSupabase({ candidates: [candidate] });
   const tooLong = 'y'.repeat(500); // way over ig_static 125 cap
@@ -290,7 +290,10 @@ test('runRegeneration: 2-attempt cap → draft_needs_review when LLM keeps overs
 
   await runRegeneration({ argv: ['--confirm'], supabase, anthropic, stdout });
   assert.equal(supabase._inserts.length, 1);
-  assert.equal(supabase._inserts[0].status, 'draft_needs_review');
+  // After the draft_needs_review collapse: status is always 'draft'; review
+  // context lives in metadata.format_flags so the piece page warning banner
+  // can surface it.
+  assert.equal(supabase._inserts[0].status, 'draft');
   assert.ok(supabase._inserts[0].metadata.format_flags.length > 0);
 });
 

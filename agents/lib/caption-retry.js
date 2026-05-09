@@ -10,8 +10,12 @@
  * Decision tree per post:
  *   caption ≤ cap                              → pass through
  *   cap < caption ≤ cap * (1 + RECOVERABLE)    → one-shot retry
- *   caption > cap * (1 + RECOVERABLE)          → no retry, flag for
- *                                                 draft review
+ *   caption > cap * (1 + RECOVERABLE)          → no retry, append
+ *                                                 caption_too_long flag
+ *
+ * Posts that exit unresolved get a caption_too_long entry pushed onto
+ * post.format_flags so the piece page can surface a review banner.
+ * The piece itself stays at status='draft' — the flag is metadata.
  *
  * Every overshoot (recoverable or not, successful retry or not)
  * emits a caption_length_overshoot debug event. Telemetry for
@@ -106,7 +110,8 @@ export async function enforceCaptionLengthWithRetry(posts, { client, log = logAc
     }
 
     if (!retrySuccess) {
-      post.status_hint = 'draft_needs_review';
+      const flag = `caption_too_long:${finalLength}>${cap}:${fmt}`;
+      post.format_flags = [...(post.format_flags || []), flag];
     }
 
     await log({
@@ -119,8 +124,8 @@ export async function enforceCaptionLengthWithRetry(posts, { client, log = logAc
         (retryFired
           ? (retrySuccess
               ? `Retry succeeded → ${finalLength} chars.`
-              : `Retry exhausted, flagged draft_needs_review (final ${finalLength} chars).`)
-          : `Overshoot >5%, no retry — flagged draft_needs_review.`),
+              : `Retry exhausted, flagged caption_too_long (final ${finalLength} chars).`)
+          : `Overshoot >5%, no retry — flagged caption_too_long.`),
       metadata: {
         format: fmt,
         target,

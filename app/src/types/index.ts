@@ -4,7 +4,7 @@ export interface ContentItem {
   briefing_id: string | null;
   platform: 'instagram' | 'tiktok';
   content_type: 'wow' | 'trust' | 'cta';
-  status: 'draft' | 'draft_needs_review' | 'pending_approval' | 'approved' | 'rejected';
+  status: 'draft' | 'pending_approval' | 'approved' | 'rejected';
   hook: string;
   caption: string;
   hashtags: string[];
@@ -19,6 +19,7 @@ export interface ContentItem {
   image_status: string | null;
   slide_images: any[] | null;
   metadata: Record<string, any>;
+  generation_context: Record<string, any> | null;
   render_profile_id: string | null;
   render_status: 'pending' | 'rendering' | 'blocked' | 'complete' | 'failed' | 'qa_failed' | null;
   render_started_at: string | null;

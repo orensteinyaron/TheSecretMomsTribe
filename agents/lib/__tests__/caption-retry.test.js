@@ -1,14 +1,18 @@
 /**
  * Tests for caption-length retry discipline.
  *
- * Per PR #13 plan:
+ * Contract:
  * - Overshoot ≤5% of cap  → one-shot retry with explicit feedback.
- * - Overshoot >5% of cap  → no retry, straight to draft_needs_review.
+ * - Overshoot >5% of cap  → no retry; push caption_too_long onto
+ *                           post.format_flags.
  * - Retry success         → replace caption, log caption_length_overshoot
- *                           with retry_success: true.
- * - Retry exhaustion      → keep the longer caption, set
- *                           status_hint='draft_needs_review', log with
+ *                           with retry_success: true. format_flags untouched.
+ * - Retry exhaustion      → keep the longer caption, push caption_too_long
+ *                           onto post.format_flags, log with
  *                           retry_success: false.
+ *
+ * The piece always lands at status='draft' regardless — review surfaces via
+ * the inline banner driven by format_flags on the piece page.
  */
 
 import test from 'node:test';
@@ -45,7 +49,7 @@ test('posts at or under cap pass through untouched, no client call, no log', asy
   assert.equal(called, 0);
   assert.equal(events.length, 0);
   assert.equal(out[0].caption.length, cap);
-  assert.equal(out[0].status_hint, undefined);
+  assert.equal(out[0].format_flags, undefined);
 });
 
 // --- Retry success path ------------------------------------------------------
@@ -74,7 +78,7 @@ test('overshoot ≤5% → retry fires once, succeeds, replaces caption, logs ret
 
   assert.equal(calls, 1, 'retry fires exactly once');
   assert.equal(out[0].caption.length, recoveredLen);
-  assert.equal(out[0].status_hint, undefined, 'successful retry must NOT flag');
+  assert.equal(out[0].format_flags, undefined, 'successful retry must NOT flag');
 
   const logged = events.find((e) => e.action === 'caption_length_overshoot');
   assert.ok(logged, 'must log caption_length_overshoot');
@@ -91,7 +95,7 @@ test('overshoot ≤5% → retry fires once, succeeds, replaces caption, logs ret
 
 // --- Retry exhaustion path ---------------------------------------------------
 
-test('overshoot ≤5% but retry returns still-over caption → draft_needs_review + retry_success=false', async () => {
+test('overshoot ≤5% but retry returns still-over caption → caption_too_long flag + retry_success=false', async () => {
   const posts = [makePost({ caption: 'x'.repeat(103) })]; // 3% over
 
   const client = {
@@ -106,7 +110,7 @@ test('overshoot ≤5% but retry returns still-over caption → draft_needs_revie
 
   const out = await enforceCaptionLengthWithRetry(posts, { client, log });
 
-  assert.equal(out[0].status_hint, 'draft_needs_review');
+  assert.deepEqual(out[0].format_flags, ['caption_too_long:110>100:tiktok_slideshow']);
   const logged = events.find((e) => e.action === 'caption_length_overshoot');
   assert.equal(logged.metadata.retry_fired, true);
   assert.equal(logged.metadata.retry_success, false);
@@ -115,7 +119,7 @@ test('overshoot ≤5% but retry returns still-over caption → draft_needs_revie
 
 // --- Structural miss (>5% over) — skip retry entirely ------------------------
 
-test('overshoot >5% → NO retry, flag immediately as draft_needs_review, retry_fired=false', async () => {
+test('overshoot >5% → NO retry, flag immediately with caption_too_long, retry_fired=false', async () => {
   const posts = [makePost({ caption: 'x'.repeat(120) })]; // 20% over cap of 100
   let called = 0;
   const client = { messages: { create: async () => { called++; throw new Error('should not call'); } } };
@@ -125,7 +129,7 @@ test('overshoot >5% → NO retry, flag immediately as draft_needs_review, retry_
 
   assert.equal(called, 0, 'retry must NOT fire when overshoot >5%');
   assert.equal(out[0].caption.length, 120, 'caption preserved verbatim for draft review');
-  assert.equal(out[0].status_hint, 'draft_needs_review');
+  assert.deepEqual(out[0].format_flags, ['caption_too_long:120>100:tiktok_slideshow']);
 
   const logged = events.find((e) => e.action === 'caption_length_overshoot');
   assert.equal(logged.metadata.retry_fired, false);
@@ -162,7 +166,7 @@ test('retry prompt includes previous length, cap, and ruthless-cut directive', a
 
 // --- Non-JSON retry response -------------------------------------------------
 
-test('retry returns malformed response → flag draft_needs_review, caption unchanged', async () => {
+test('retry returns malformed response → flag caption_too_long, caption unchanged', async () => {
   const posts = [makePost({ caption: 'x'.repeat(104) })];
   const client = {
     messages: {
@@ -176,7 +180,7 @@ test('retry returns malformed response → flag draft_needs_review, caption unch
 
   const out = await enforceCaptionLengthWithRetry(posts, { client, log });
 
-  assert.equal(out[0].status_hint, 'draft_needs_review');
+  assert.deepEqual(out[0].format_flags, ['caption_too_long:104>100:tiktok_slideshow']);
   assert.equal(out[0].caption.length, 104, 'unparseable retry leaves original caption in place');
   const logged = events.find((e) => e.action === 'caption_length_overshoot');
   assert.equal(logged.metadata.retry_success, false);
@@ -202,9 +206,9 @@ test('batch: one clean, one retry-success, one >5% flag — all handled correctl
 
   const out = await enforceCaptionLengthWithRetry(posts, { client, log });
 
-  assert.equal(out[0].status_hint, undefined);                      // clean
-  assert.equal(out[1].status_hint, undefined);                      // retry success
-  assert.equal(out[2].status_hint, 'draft_needs_review');           // structural miss
+  assert.equal(out[0].format_flags, undefined);                       // clean
+  assert.equal(out[1].format_flags, undefined);                       // retry success
+  assert.deepEqual(out[2].format_flags, ['caption_too_long:130>100:tiktok_slideshow']); // structural miss
   const logEvents = events.filter((e) => e.action === 'caption_length_overshoot');
   assert.equal(logEvents.length, 2);                                // clean one does not log
 });
