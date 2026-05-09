@@ -73,12 +73,15 @@ test('buildContentQueueRow: writes the expected whitelist columns', () => {
   }
 });
 
-test('buildContentQueueRow: status_hint=draft_needs_review maps status→draft_needs_review', () => {
+test('buildContentQueueRow: always writes status=draft (status_hint plumbing removed)', () => {
+  // Even if a piece carries the legacy status_hint field, the builder
+  // ignores it. Review state is now driven entirely by
+  // metadata.format_flags + generation_context.needs_review_reason.
   const row = buildContentQueueRow(samplePiece({ status_hint: 'draft_needs_review' }), OPTS);
-  assert.equal(row.status, 'draft_needs_review');
+  assert.equal(row.status, 'draft');
 });
 
-test('buildContentQueueRow: no status_hint defaults status to draft', () => {
+test('buildContentQueueRow: no status_hint still gives status=draft', () => {
   const row = buildContentQueueRow(samplePiece(), OPTS);
   assert.equal(row.status, 'draft');
 });

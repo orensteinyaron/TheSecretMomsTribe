@@ -322,7 +322,6 @@ export function normalizePost(row, gen, targetFormat, brief) {
 }
 
 async function writeRegenRow(supabase, originalRow, post, { attemptsUsed, needsReview }) {
-  const status = needsReview ? 'draft_needs_review' : 'draft';
   const metadata = {
     image_axes: post.image_axes,
     regenerated_from: originalRow.id,
@@ -334,7 +333,7 @@ async function writeRegenRow(supabase, originalRow, post, { attemptsUsed, needsR
     briefing_id: post.briefing_id,
     platform: post.platform,
     content_type: post.content_type,
-    status,
+    status: 'draft',
     hook: post.hook,
     caption: post.caption,
     hashtags: post.hashtags,
@@ -512,7 +511,7 @@ export async function runRegeneration({ argv = [], supabase, anthropic, stdout =
           actor_name: 'content-regen-agent',
           action: event,
           description: needsReview
-            ? `Regen ${row.id} → ${newId} (draft_needs_review after ${attemptsUsed} attempts): ${errors.join(', ')}`
+            ? `Regen ${row.id} → ${newId} (draft with format_flags after ${attemptsUsed} attempts): ${errors.join(', ')}`
             : `Regen ${row.id} → ${newId} (${post.post_format}, caption=${(post.caption || '').length})`,
           entity_type: 'content',
           entity_id: newId,
@@ -526,8 +525,8 @@ export async function runRegeneration({ argv = [], supabase, anthropic, stdout =
           },
         });
 
-        results.push({ original_id: row.id, new_id: newId, status: needsReview ? 'draft_needs_review' : 'draft', post_format: post.post_format });
-        stdout.log(`  ✓ ${row.id} → ${newId}  ${post.post_format}  (cap=${(post.caption || '').length}, status=${needsReview ? 'draft_needs_review' : 'draft'})`);
+        results.push({ original_id: row.id, new_id: newId, status: 'draft', needs_review: needsReview, post_format: post.post_format });
+        stdout.log(`  ✓ ${row.id} → ${newId}  ${post.post_format}  (cap=${(post.caption || '').length}, status=draft${needsReview ? ' [format_flags set]' : ''})`);
       } catch (err) {
         stdout.error(`[Regen] ${row.id} persist failed: ${err.message}`);
       }

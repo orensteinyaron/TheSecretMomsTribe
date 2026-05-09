@@ -5,7 +5,8 @@
  *
  *   ai_magic_opportunities (status='pending')
  *     → ai-magic-content-gen (this agent)
- *       → content_queue (content_pillar='ai_magic', status='draft_needs_review')
+ *       → content_queue (content_pillar='ai_magic', status='draft' +
+ *                        generation_context.needs_review_reason populated)
  *
  * For each pending opportunity (highest selected_score first, max 2/day):
  *   1. Hard-reject if original_prompt or original_output is empty.
@@ -360,7 +361,7 @@ async function writeContentQueueRow(piece, opp, renderProfileMap, genMeta) {
 
   const row = {
     content_type: 'wow',
-    status: 'draft_needs_review',
+    status: 'draft',
     hook: piece.hook,
     caption: piece.caption,
     hashtags: piece.hashtags,

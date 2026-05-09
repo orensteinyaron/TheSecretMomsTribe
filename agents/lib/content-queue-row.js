@@ -37,12 +37,10 @@
  *                         supabase.from('content_queue').insert(...).
  */
 export function buildContentQueueRow(piece, { briefingId, renderProfileId, density }) {
-  const status = piece.status_hint === 'draft_needs_review' ? 'draft_needs_review' : 'draft';
-
   return {
     briefing_id: briefingId,
     content_type: piece.content_type,
-    status,
+    status: 'draft',
     hook: piece.hook,
     caption: piece.caption,
     hashtags: piece.hashtags,
