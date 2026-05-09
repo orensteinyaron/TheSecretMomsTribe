@@ -42,7 +42,7 @@ function normalize(w: string): string {
  * Also: detect large gaps (>0.4s) between Whisper words as implicit sentence breaks,
  * since TTS naturally pauses between sentences even if text alignment fails.
  */
-function findSentenceEndings(ttsScript: string, whisperWords: WhisperWord[], originalEndTimes?: number[]): Set<number> {
+export function findSentenceEndings(ttsScript: string, whisperWords: WhisperWord[], originalEndTimes?: number[]): Set<number> {
   const endings = new Set<number>();
 
   // Method 1: Align TTS script sentences to Whisper words
@@ -109,7 +109,7 @@ function findSentenceEndings(ttsScript: string, whisperWords: WhisperWord[], ori
  * Build phrase groups from Whisper words, respecting sentence boundaries
  * derived from the TTS script.
  */
-function buildPhrasesFromWhisper(
+export function buildPhrasesFromWhisper(
   whisperWords: WhisperWord[],
   sentenceEndings: Set<number>,
   maxWordsPerPhrase: number = 4,

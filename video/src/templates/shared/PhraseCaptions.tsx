@@ -103,38 +103,8 @@ export const PhraseCaptions: React.FC<PhraseCaptionsProps> = ({
     }
   })();
 
-  // Gradient band position
-  const gradientStyles: React.CSSProperties = (() => {
-    switch (position) {
-      case "bottom":
-        return {
-          position: "absolute" as const,
-          left: 0, right: 0, bottom: 0, height: "25%",
-          background: "linear-gradient(to top, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.3) 60%, transparent 100%)",
-          pointerEvents: "none" as const,
-        };
-      case "middle":
-        return {
-          position: "absolute" as const,
-          left: 0, right: 0, top: "35%", height: "30%",
-          background: "linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 35%, rgba(0,0,0,0.3) 65%, transparent 100%)",
-          pointerEvents: "none" as const,
-        };
-      default:
-        return {
-          position: "absolute" as const,
-          left: 0, right: 0, top: "35%", height: "30%",
-          background: "linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.4) 35%, rgba(0,0,0,0.4) 65%, transparent 100%)",
-          pointerEvents: "none" as const,
-        };
-    }
-  })();
-
   return (
     <AbsoluteFill>
-      {/* Dark gradient band behind text */}
-      <div style={gradientStyles} />
-
       {/* Caption text */}
       <AbsoluteFill style={positionStyles}>
         <div
