@@ -25,6 +25,10 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label?: string }
   invalidated: { bg: 'bg-bg-elevated', text: 'text-text-tertiary', label: 'Invalidated' },
   executed: { bg: 'bg-[var(--success-muted)]', text: 'text-success', label: 'Executed' },
   expired: { bg: 'bg-bg-elevated', text: 'text-text-tertiary', label: 'Expired' },
+  // 'reconstructed' is a prompt_executions.status value reserved for backfilled rows
+  // (see agents/lib/prompt_logger.js JSDoc). Muted styling on purpose — visually
+  // signals "this row is synthetic, not a real-time logged execution."
+  reconstructed: { bg: 'bg-bg-elevated', text: 'text-text-tertiary', label: 'Reconstructed' },
 };
 
 interface Props { status: string | null | undefined; label?: string; size?: 'sm' | 'md'; }

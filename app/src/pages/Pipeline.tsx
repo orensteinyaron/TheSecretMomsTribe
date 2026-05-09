@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Check, X, Eye, Search, Link2 } from 'lucide-react';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { PillarBadge } from '../components/shared/PillarBadge';
-import { PlatformIcon } from '../components/shared/PlatformIcon';
 import { EmptyState } from '../components/shared/EmptyState';
 import { RejectModal } from '../components/shared/RejectModal';
 import { useContentList, useContentUpdate, useBulkApprove, useBulkReject } from '../hooks/useContent';
@@ -128,13 +127,16 @@ export default function Pipeline() {
         <EmptyState title="No content" description={`No ${tab === 'all' ? '' : tab} items found.`} />
       ) : (
         <div className="bg-bg-surface border border-border-default rounded-lg overflow-hidden">
-          {/* Header */}
-          <div className="grid grid-cols-[36px_1fr_80px_90px_90px_80px_80px] gap-2 px-4 py-2 border-b border-border-subtle" data-testid="pipeline-header">
+          {/* Header — Platform column removed (V1.1: channel is implicit; every piece
+              goes to both IG + TT by policy unless channel_override is set). Format
+              is now primary categorical via the Pillar column; channels are visible
+              on the piece page Scheduling section. */}
+          <div className="grid grid-cols-[36px_1fr_120px_90px_90px_80px_80px] gap-2 px-4 py-2 border-b border-border-subtle" data-testid="pipeline-header">
             <label className="flex items-center">
               <input type="checkbox" checked={selected.size === (displayItems || []).length && (displayItems || []).length > 0} onChange={toggleAll} className="accent-accent" />
             </label>
             <span className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary">Hook</span>
-            <span className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary">Platform</span>
+            <span className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary">Format</span>
             <span className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary">Pillar</span>
             <span className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary">Status</span>
             <span className="text-[11px] font-semibold tracking-wide uppercase text-text-secondary">Render</span>
@@ -145,7 +147,7 @@ export default function Pipeline() {
           {(displayItems || []).map((item: ContentItem) => (
             <div
               key={item.id}
-              className={`grid grid-cols-[36px_1fr_80px_90px_90px_80px_80px] gap-2 px-4 py-3 border-b border-border-subtle hover:bg-bg-hover transition-colors items-center ${
+              className={`grid grid-cols-[36px_1fr_120px_90px_90px_80px_80px] gap-2 px-4 py-3 border-b border-border-subtle hover:bg-bg-hover transition-colors items-center ${
                 selected.has(item.id) ? 'bg-bg-active' : ''
               }`}
             >
@@ -163,10 +165,9 @@ export default function Pipeline() {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1.5">
-                <PlatformIcon platform={item.platform} />
-                <span className="text-xs text-text-secondary capitalize">{item.platform}</span>
-              </div>
+              <span className="text-xs text-text-secondary truncate" title={item.post_format || ''}>
+                {item.post_format ? item.post_format.replace(/_/g, ' ') : '—'}
+              </span>
               <PillarBadge pillar={item.content_pillar} />
               <StatusBadge status={item.status} />
               {item.render_status && item.render_status !== 'pending' ? (
@@ -175,7 +176,7 @@ export default function Pipeline() {
                 <span className="text-xs text-text-tertiary">—</span>
               )}
               <div className="flex gap-1">
-                {(item.status === 'draft' || item.status === 'draft_needs_review' || item.status === 'pending_approval') && (
+                {(item.status === 'draft' || item.status === 'pending_approval') && (
                   <>
                     <button onClick={() => approve(item.id)} className="p-1 rounded hover:bg-success/20 text-text-tertiary hover:text-success" title="Approve">
                       <Check size={16} />
