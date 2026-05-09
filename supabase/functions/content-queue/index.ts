@@ -11,6 +11,12 @@
 //        PATCH  /pieces/:id/schedule                 → update scheduled_at_*
 //        PATCH  /pieces/:id/pillar                   → reassign pillar
 //        POST   /pieces/:id/regenerate-from-step     → mark + enqueue
+//        DELETE /pieces/:id                          → soft-delete (deleted_at = now)
+//
+// Soft-delete contract: legacy list endpoints filter `deleted_at IS NULL` unless
+// the caller passes ?include_deleted=1. Single-row reads (GET /pieces/:id) do
+// NOT filter — direct links to a deleted piece still resolve so a future
+// restore UI can surface them.
 //
 // JWT disabled — internal tool traffic, service role via secrets.
 
@@ -19,7 +25,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, PATCH, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, PATCH, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
 };
 
@@ -325,6 +331,11 @@ async function handleRegenerateFromStep(sb: Sb, id: string, body: any) {
 // ---------- Legacy query-param handlers ----------
 
 async function handleLegacyList(sb: Sb, params: URLSearchParams) {
+  // Soft-delete contract: list endpoints hide deleted_at IS NOT NULL rows
+  // unless the caller explicitly opts in via ?include_deleted=1. Single-row
+  // ?id=… reads bypass this — direct links to a deleted piece still resolve.
+  const includeDeleted = params.get("include_deleted") === "1";
+
   const id = params.get("id");
   if (id) {
     const { data, error } = await sb.from("content_queue")
@@ -338,21 +349,25 @@ async function handleLegacyList(sb: Sb, params: URLSearchParams) {
   const search = params.get("search");
   if (search && search.length >= 2) {
     const like = `%${search}%`;
-    const { data, error } = await sb.from("content_queue")
+    let q = sb.from("content_queue")
       .select("*, render_profiles:render_profile_id(id, name, slug, profile_type)")
       .or(`hook.ilike.${like},caption.ilike.${like},content_pillar.ilike.${like}`)
       .order("created_at", { ascending: false }).limit(200);
+    if (!includeDeleted) q = q.is("deleted_at", null);
+    const { data, error } = await q;
     if (error) return err(error.message, 500);
     return json(data || []);
   }
 
   const resource = params.get("resource");
   if (resource === "render_queue") {
-    const { data, error } = await sb.from("content_queue")
+    let q = sb.from("content_queue")
       .select("*, render_profiles:render_profile_id(id, name, slug, profile_type)")
       .eq("status", "approved")
       .in("render_status", ["pending", "rendering", "failed", "qa_failed", "blocked"])
       .order("created_at", { ascending: false }).limit(500);
+    if (!includeDeleted) q = q.is("deleted_at", null);
+    const { data, error } = await q;
     if (error) return err(error.message, 500);
     return json(data || []);
   }
@@ -371,10 +386,32 @@ async function handleLegacyList(sb: Sb, params: URLSearchParams) {
     const statuses = TAB_STATUS_MAP[tab] ?? [];
     if (statuses.length > 0) q = q.in("status", statuses);
   }
+  if (!includeDeleted) q = q.is("deleted_at", null);
 
   const { data, error } = await q;
   if (error) return err(error.message, 500);
   return json(data || []);
+}
+
+async function handleSoftDeletePiece(sb: Sb, id: string) {
+  // Soft delete: stamp deleted_at, leave the row intact. Reversible from DB
+  // via `UPDATE content_queue SET deleted_at = NULL WHERE id = …`.
+  const { data, error } = await sb.from("content_queue")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("id, deleted_at")
+    .maybeSingle();
+  if (error) return err(error.message, 500);
+  if (!data) return err("Piece not found", 404);
+  try {
+    await sb.from("activity_log").insert({
+      category: "pipeline", actor_type: "user", actor_name: "piece_page",
+      action: "soft_delete",
+      description: `Soft-deleted piece ${id}`,
+      entity_type: "content", entity_id: id,
+    });
+  } catch { /* non-fatal */ }
+  return json({ ok: true, id: data.id, deleted_at: data.deleted_at });
 }
 
 async function handleLegacyPatch(sb: Sb, body: any) {
@@ -459,6 +496,10 @@ Deno.serve(async (req: Request) => {
         const body = await req.json().catch(() => ({}));
         if (sub === "regenerate-from-step") return handleRegenerateFromStep(sb, pieceId, body);
         return err(`Unknown POST subroute: ${sub}`, 404);
+      }
+      if (req.method === "DELETE") {
+        if (sub) return err(`Unknown DELETE subroute: ${sub}`, 404);
+        return handleSoftDeletePiece(sb, pieceId);
       }
       return new Response("Method not allowed", { status: 405, headers: cors });
     }

@@ -1,22 +1,28 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, X, RefreshCw, ExternalLink, ChevronDown, ChevronRight, Camera, Music2, RotateCcw, Clock, Zap } from 'lucide-react';
+import { ArrowLeft, Check, X, RefreshCw, ExternalLink, ChevronDown, ChevronRight, Camera, Music2, RotateCcw, Clock, Zap, Trash2, Loader2 } from 'lucide-react';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { PillarBadge } from '../components/shared/PillarBadge';
 import { EditableField } from '../components/shared/EditableField';
+import { useToast } from '../components/shared/Toast';
 import { useContentUpdate } from '../hooks/useContent';
 import { contentApi } from '../api/content';
 import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query';
-import type { ContentPillar, PromptExecution, PiecePagePayload } from '../types';
+import type { ContentItem, ContentPillar, PromptExecution, PiecePagePayload } from '../types';
 
 const PILLAR_CHOICES: ContentPillar[] = [
   'parenting', 'health', 'ai_magic', 'tech', 'trending', 'financial', 'uncategorized',
 ];
 
+// Optimistic-update context returned from onMutate so onError can roll back to
+// the exact pre-click cache snapshot. react-query v5 typing pattern.
+type LifecycleContext = { previous: PiecePagePayload | undefined };
+
 export default function ContentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const toast = useToast();
   const updateMutation = useContentUpdate();
 
   // Single request loads the whole page (spec §6.2).
@@ -24,6 +30,55 @@ export default function ContentDetailPage() {
     queryKey: ['piece', id],
     queryFn: () => contentApi.getPiecePayload(id!),
     enabled: !!id,
+  });
+
+  // Lifecycle mutation (Approve / Reject / Back to Draft). Optimistic so the
+  // status badge + button set flip the moment the user clicks; if the server
+  // 500s the cache rolls back to the pre-click snapshot and a toast surfaces
+  // the error. The legacy PATCH endpoint returns ContentItem[] (single-row
+  // table update); we merge data[0] into the cached payload's piece field on
+  // success so any server-side cascades (e.g. status side effects) appear
+  // without a full refetch.
+  const lifecycleMutation = useMutation<ContentItem[], Error, { status: 'approved' | 'rejected' | 'draft'; rejection_reason?: null }, LifecycleContext>({
+    mutationFn: ({ status, rejection_reason }) =>
+      contentApi.update(id!, rejection_reason !== undefined ? { status, rejection_reason } : { status }),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ['piece', id] });
+      const previous = qc.getQueryData<PiecePagePayload>(['piece', id]);
+      if (previous) {
+        qc.setQueryData<PiecePagePayload>(['piece', id], {
+          ...previous,
+          piece: {
+            ...previous.piece,
+            status: vars.status,
+            ...(vars.rejection_reason !== undefined ? { rejection_reason: vars.rejection_reason } : {}),
+          },
+        });
+      }
+      return { previous };
+    },
+    onError: (error, vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['piece', id], ctx.previous);
+      const verb = vars.status === 'approved' ? 'approve' : vars.status === 'rejected' ? 'reject' : 'move to draft';
+      toast.push('error', `Couldn't ${verb} — ${error.message}`);
+    },
+    onSuccess: (data) => {
+      const serverRow = Array.isArray(data) ? data[0] : data;
+      if (serverRow) {
+        qc.setQueryData<PiecePagePayload>(['piece', id], (old) => old ? { ...old, piece: { ...old.piece, ...serverRow } } : old);
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['piece', id] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => contentApi.deletePiece(id!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['content'] });
+      toast.push('success', 'Piece deleted');
+      navigate('/pipeline');
+    },
+    onError: (error: Error) => toast.push('error', `Couldn't delete — ${error.message}`),
   });
 
   const renderMutation = useMutation({
@@ -59,10 +114,19 @@ export default function ContentDetailPage() {
 
   const { piece, generation_context, render, prompt_chain, metrics, schedule } = payload;
 
-  const approve = () => updateMutation.mutate({ id: piece.id, status: 'approved' });
-  const reject = () => updateMutation.mutate({ id: piece.id, status: 'rejected' });
-  const backToDraft = () => updateMutation.mutate({ id: piece.id, status: 'draft', rejection_reason: null });
+  const approve = () => lifecycleMutation.mutate({ status: 'approved' });
+  const reject = () => lifecycleMutation.mutate({ status: 'rejected' });
+  const backToDraft = () => lifecycleMutation.mutate({ status: 'draft', rejection_reason: null });
   const triggerRender = () => renderMutation.mutate(piece.id);
+  const onDelete = () => {
+    if (window.confirm('Delete this piece? It will be soft-deleted (recoverable from the database).')) {
+      deleteMutation.mutate();
+    }
+  };
+  // Disable lifecycle buttons while a lifecycle mutation is mid-flight so the
+  // user can't double-fire Approve→Reject before the optimistic state settles.
+  const lifecyclePending = lifecycleMutation.isPending;
+  const pendingStatus = lifecyclePending ? lifecycleMutation.variables?.status : undefined;
 
   const channelsLit = piece.channel_override === 'ig_only'
     ? { ig: true, tt: false }
@@ -108,22 +172,54 @@ export default function ContentDetailPage() {
             <span className="text-xs text-text-tertiary ml-2">{new Date(piece.created_at).toLocaleDateString()}</span>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           {(piece.status === 'approved' || piece.status === 'rejected') && (
-            <button onClick={backToDraft} className="flex items-center gap-1.5 bg-bg-elevated text-text-secondary text-sm font-medium px-4 py-2 rounded-md border border-border-default hover:bg-bg-hover">
-              <RefreshCw size={16} /> Back to Draft
+            <button
+              onClick={backToDraft}
+              disabled={lifecyclePending}
+              className="flex items-center gap-1.5 bg-bg-elevated text-text-secondary text-sm font-medium px-4 py-2 rounded-md border border-border-default hover:bg-bg-hover disabled:opacity-60 disabled:cursor-not-allowed"
+              data-testid="back-to-draft-button"
+            >
+              {pendingStatus === 'draft' ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+              {pendingStatus === 'draft' ? 'Moving…' : 'Back to Draft'}
             </button>
           )}
           {piece.status !== 'approved' && (
-            <button onClick={approve} className="flex items-center gap-1.5 bg-accent text-text-inverse text-sm font-medium px-4 py-2 rounded-md hover:bg-accent-hover" data-testid="approve-button">
-              <Check size={16} /> Approve
+            <button
+              onClick={approve}
+              disabled={lifecyclePending}
+              className="flex items-center gap-1.5 bg-accent text-text-inverse text-sm font-medium px-4 py-2 rounded-md hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed"
+              data-testid="approve-button"
+            >
+              {pendingStatus === 'approved' ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+              {pendingStatus === 'approved' ? 'Approving…' : 'Approve'}
             </button>
           )}
           {piece.status !== 'rejected' && (
-            <button onClick={reject} className="flex items-center gap-1.5 bg-bg-elevated text-error text-sm font-medium px-4 py-2 rounded-md border border-error/30 hover:bg-error/10">
-              <X size={16} /> Reject
+            <button
+              onClick={reject}
+              disabled={lifecyclePending}
+              className="flex items-center gap-1.5 bg-bg-elevated text-error text-sm font-medium px-4 py-2 rounded-md border border-error/30 hover:bg-error/10 disabled:opacity-60 disabled:cursor-not-allowed"
+              data-testid="reject-button"
+            >
+              {pendingStatus === 'rejected' ? <Loader2 size={16} className="animate-spin" /> : <X size={16} />}
+              {pendingStatus === 'rejected' ? 'Rejecting…' : 'Reject'}
             </button>
           )}
+          {/* Soft-delete affordance — subtle trash icon at the end of the
+              header row. Mauve-pink hover (#b74780) per design spec; resolves
+              to deleted_at via DELETE /pieces/:id, page navigates to /pipeline
+              on success. Confirm dialog is the safety net (no undo toast). */}
+          <button
+            onClick={onDelete}
+            disabled={deleteMutation.isPending}
+            title="Delete piece"
+            aria-label="Delete piece"
+            className="ml-1 p-2 rounded-md text-text-tertiary hover:text-[#b74780] hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            data-testid="delete-piece-button"
+          >
+            {deleteMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+          </button>
         </div>
       </div>
 
