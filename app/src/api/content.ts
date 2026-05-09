@@ -44,4 +44,8 @@ export const contentApi = {
       'POST',
       { step_name: stepName, edited_prompt: editedPrompt },
     ),
+  // Soft-delete: stamps content_queue.deleted_at; pipeline list queries filter
+  // it out unless ?include_deleted=1. Reversible at DB level.
+  deletePiece: (id: string) =>
+    piecePath<{ ok: true; id: string; deleted_at: string }>(`/pieces/${id}`, 'DELETE'),
 };
