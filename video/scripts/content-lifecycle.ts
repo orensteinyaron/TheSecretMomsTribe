@@ -301,18 +301,31 @@ async function runPersist(): Promise<void> {
   if (insertErr) throw new Error(`content_assets insert failed: ${insertErr.message}`);
   log(`[persist]   inserted ${insertedRows?.length ?? 0} rows`);
 
-  // Update content_queue
+  // Update content_queue. V2 §4.2: also write render_started_at / render_profile_id /
+  // render_cost_usd so the piece-page Render section's Profile / Duration / Cost
+  // stat cells populate. Profile skills (e.g. full-avatar-profile) must include
+  // produced_at + render_params.{cost_usd, render_profile_id} in their manifest.
+  // If the manifest omits any of these, we fall back to safe defaults: produced_at
+  // → 5 minutes ago (assume render started ~5min before persist; better than NULL),
+  // cost_usd / render_profile_id → null (UI shows "—", not blank).
   const finalAssetUrl = uploaded.find((u) => u.asset_type === "final_mp4")?.drive.webViewLink ?? null;
+  const renderStartedAt = manifest.produced_at ?? new Date(Date.now() - 5 * 60_000).toISOString();
+  const renderCostUsd = (manifest.render_params?.cost_usd as number | undefined) ?? null;
+  const renderProfileId = (manifest.render_params?.render_profile_id as string | undefined) ?? null;
+
   const { error: updateErr } = await sb
     .from("content_queue")
     .update({
       render_status: "complete",  // matches content_queue.render_status CHECK enum
+      render_started_at: renderStartedAt,
       render_completed_at: new Date().toISOString(),
+      render_profile_id: renderProfileId,
+      render_cost_usd: renderCostUsd,
       final_asset_url: finalAssetUrl,
     })
     .eq("id", args.contentId);
   if (updateErr) throw new Error(`content_queue update failed: ${updateErr.message}`);
-  log(`[persist] content_queue updated`);
+  log(`[persist] content_queue updated (render_started_at=${renderStartedAt}, render_profile_id=${renderProfileId ?? "null"}, render_cost_usd=${renderCostUsd ?? "null"})`);
 
   // Output
   const folderUrl = `https://drive.google.com/drive/folders/${slugFolderId}`;

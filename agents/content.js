@@ -45,6 +45,7 @@ import { generateBatch as generateBatchLib } from './lib/content-generate.js';
 import { buildContentQueueRow } from './lib/content-queue-row.js';
 import { VALID_PILLARS, normalizePillar } from './lib/pillars.js';
 import { enforceCaptionLengthWithRetry } from './lib/caption-retry.js';
+import { logPromptExecution } from './lib/prompt_logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -313,10 +314,13 @@ CRITICAL: Return ONLY valid JSON. No em dashes (\u2014), no special unicode. Use
 async function generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights) {
   const systemPrompt = buildSystemPrompt(dna);
   const userPrompt = buildUserPrompt({ briefing, coverageGaps, recentHooks, directives, insights });
-  return generateBatchLib(
+  const result = await generateBatchLib(
     { briefing, systemPrompt, userPrompt },
     { client: anthropic, log: logCost, db: supabase },
   );
+  // Return prompts alongside posts/usage so writeContentQueue can build
+  // per-piece generation_context + prompt_executions rows (V2 §4.1).
+  return { ...result, systemPrompt, userPrompt };
 }
 
 // --- Validation ---
@@ -737,16 +741,48 @@ async function revalidatePostSourceUrls(posts) {
 
 // --- Write to Supabase ---
 
-async function writeContentQueue(posts, briefingId, renderProfileMap) {
+async function writeContentQueue(posts, briefingId, renderProfileMap, batchCtx = null) {
+  // V2 §4.1: per-piece accounting of the batch generation cost. Anthropic Sonnet 4.6
+  // pricing: $3/MTok input, $15/MTok output. Split evenly across the batch since
+  // one LLM call produced N pieces.
+  const totalCostUsd = batchCtx?.usage
+    ? (batchCtx.usage.input_tokens * 3 + batchCtx.usage.output_tokens * 15) / 1_000_000
+    : null;
+  const costPerPiece = totalCostUsd != null ? totalCostUsd / Math.max(1, posts.length) : null;
+  const tokensInPerPiece = batchCtx?.usage ? Math.round(batchCtx.usage.input_tokens / Math.max(1, posts.length)) : null;
+  const tokensOutPerPiece = batchCtx?.usage ? Math.round(batchCtx.usage.output_tokens / Math.max(1, posts.length)) : null;
+
   const rows = posts.map((p) => {
     const recommendedSlug = p._recommendedSlug || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
     const profile = renderProfileMap[recommendedSlug];
     const renderProfileId = profile?.id || null;
     const density = classifyDensity(p);
-    return buildContentQueueRow(p, { briefingId, renderProfileId, density });
+    const row = buildContentQueueRow(p, { briefingId, renderProfileId, density });
+    if (batchCtx) {
+      // V2 §4.1: per-piece generation_context snapshot, frozen at insert time.
+      row.generation_context = {
+        model: CLAUDE_MODEL,
+        system_prompt: batchCtx.systemPrompt,
+        user_prompt: batchCtx.userPrompt,
+        tokens_in: tokensInPerPiece,
+        tokens_out: tokensOutPerPiece,
+        cost_usd: costPerPiece,
+        pillar_input: p.content_pillar,
+        format_input: p.post_format,
+        active_directives: (batchCtx.directives || []).map((d) => ({
+          directive_type: d.directive_type,
+          directive: d.directive,
+        })),
+        briefing_id: briefingId,
+      };
+    }
+    return row;
   });
 
-  const { error } = await supabase.from('content_queue').insert(rows);
+  const { data: inserted, error } = await supabase
+    .from('content_queue')
+    .insert(rows)
+    .select('id');
 
   if (error) {
     console.error('[Content] Failed to write content queue:', error);
@@ -754,6 +790,33 @@ async function writeContentQueue(posts, briefingId, renderProfileMap) {
   }
 
   console.log(`[Content] ${rows.length} posts written to content_queue`);
+
+  // V2 §4.1: log step-1 prompt_executions in parallel. logPromptExecution
+  // never throws — observability plumbing must not block the critical path.
+  if (batchCtx && inserted) {
+    await Promise.allSettled(
+      inserted.map((row, i) =>
+        logPromptExecution({
+          contentId: row.id,
+          agentName: 'content_gen',
+          stepName: 'content_gen',
+          stepOrder: 1,
+          model: CLAUDE_MODEL,
+          systemPrompt: batchCtx.systemPrompt,
+          userPrompt: batchCtx.userPrompt,
+          renderedOutput: JSON.stringify(posts[i]),
+          outputJson: posts[i],
+          tokensIn: tokensInPerPiece,
+          tokensOut: tokensOutPerPiece,
+          costUsd: costPerPiece,
+          status: 'ok',
+          latencyMs: batchCtx.latencyMs ?? null,
+        }),
+      ),
+    );
+  }
+
+  return inserted;
 }
 
 // --- Main ---
@@ -783,8 +846,10 @@ async function main() {
   ]);
   console.log(`[Content] Recent hooks: ${recentHooks.length}, Directives: ${directives.length}, Insights: ${insights.length}, Render profiles: ${Object.keys(renderProfileMap).length}`);
 
-  // Generate batch via Claude
-  const { posts: rawPosts, usage } = await generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights);
+  // Generate batch via Claude. Capture latency for prompt_executions logging (V2 §4.1).
+  const genStart = Date.now();
+  const { posts: rawPosts, usage, systemPrompt, userPrompt } = await generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights);
+  const genLatencyMs = Date.now() - genStart;
 
   // Validate (shape)
   const posts = await validateBatch(rawPosts);
@@ -810,8 +875,15 @@ async function main() {
   await enforceBatchDiversity(posts);
   await revalidatePostSourceUrls(posts);
 
-  // Write to Supabase
-  await writeContentQueue(posts, briefing.id, renderProfileMap);
+  // Write to Supabase. Pass batch context so writeContentQueue can build
+  // per-piece generation_context + prompt_executions rows (V2 §4.1).
+  await writeContentQueue(posts, briefing.id, renderProfileMap, {
+    systemPrompt,
+    userPrompt,
+    usage,
+    directives,
+    latencyMs: genLatencyMs,
+  });
 
   // Log per-post cost share (split generation cost evenly)
   if (usage && posts.length > 0) {

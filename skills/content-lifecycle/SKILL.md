@@ -76,7 +76,13 @@ The manifest itself comes from the profile skill. Required fields in any manifes
 {
   "status": "success",
   "work_dir": "/abs/path",
-  "render_params": { "character_id": "...", ... },
+  "produced_at": "2026-05-09T14:30:00Z",
+  "render_params": {
+    "character_id": "...",
+    "cost_usd": 2.07,
+    "render_profile_id": "d75fe12f-f606-431c-813f-3f63e955fa17",
+    ...
+  },
   "artifacts": [
     { "type": "final_mp4", "path": "final.mp4", ... },
     { "type": "thumbnail", "path": "thumbnail.png", ... },
@@ -84,6 +90,16 @@ The manifest itself comes from the profile skill. Required fields in any manifes
   ]
 }
 ```
+
+**Manifest fields used to populate `content_queue` render columns** (V2 §4.2 — added so the piece-page Render section's Profile / Duration / Cost cells render correctly):
+
+| Manifest field | content_queue column | Fallback if omitted |
+|---|---|---|
+| `produced_at` (ISO timestamp, when render started) | `render_started_at` | `now() - 5min` (better than NULL — Duration cell still computes) |
+| `render_params.cost_usd` (numeric, total piece variable cost) | `render_cost_usd` | `null` (Cost cell shows "—") |
+| `render_params.render_profile_id` (uuid) | `render_profile_id` | `null` (Profile cell shows "—") |
+
+Profile skills SHOULD include all three for full piece-page rendering. The skill never errors when they're missing, but the piece-page UI will show "—" in the corresponding stat cells.
 
 This skill also reads `script.hook_overlay` from the parent content row in Supabase to build the folder slug. The profile skill does not need to provide it.
 
