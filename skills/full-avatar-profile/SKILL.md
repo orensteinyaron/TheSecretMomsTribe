@@ -83,7 +83,9 @@ Each character record contains:
    - Hook card PNG as 2s held opening
    - PhraseCaptions style (no background band, white text + shadow)
    - BrandWatermark
-8. **Output** — print final mp4 path + thumbnail PNG path
+8. **Upload to Drive** — push final assets to `Yarono/SMT/content/{content_id}/` (folder created if missing). See [Storage](#storage).
+9. **Write `content_assets` rows** — one Supabase row per uploaded asset, joined to `content_queue` by `content_id`. See [Storage](#storage).
+10. **Output** — return local paths + Drive IDs + QA verdict + cost. See [Outputs](#outputs).
 
 ## Hard rules (do not violate)
 
@@ -119,16 +121,73 @@ If a run projects >$5, pause and surface to user.
 
 ## Outputs
 
+Local paths point to the tmp working directory and are valid for the duration of the run; durable references are the Drive IDs.
+
 ```json
 {
-  "final_mp4_path": "/path/to/final.mp4",
-  "thumbnail_png_path": "/path/to/thumbnail.png",
+  "content_id": "uuid",
+  "final_mp4": {
+    "local_path": "/tmp/avatar-stitch-<runId>/final.mp4",
+    "drive_file_id": "1abc...",
+    "drive_path": "Yarono/SMT/content/{content_id}/final.mp4"
+  },
+  "thumbnail_png": {
+    "local_path": "/tmp/hook-card-<runId>/option-a-bold-block.png",
+    "drive_file_id": "1xyz...",
+    "drive_path": "Yarono/SMT/content/{content_id}/thumbnail.png"
+  },
+  "qa_report": {
+    "verdict": "PASS|FAIL|REVIEW",
+    "drive_file_id": "1qa...",
+    "drive_path": "Yarono/SMT/content/{content_id}/qa-report.md",
+    "details": {...}
+  },
+  "transcript": {
+    "drive_file_id": "1tr...",
+    "drive_path": "Yarono/SMT/content/{content_id}/transcript.txt"
+  },
   "duration_s": 40.41,
-  "qa_report": { "verdict": "PASS|FAIL|REVIEW", "details": {...} },
   "cost": { "currency": "USD", "amount": 2.07 },
   "scenes": [{ "scene_id": "SCENE_1", "job_id": "...", "duration_s": 9 }]
 }
 ```
+
+## Storage
+
+After local stitch + thumbnail succeed, the skill uploads final assets to Google Drive and writes one metadata row per asset to Supabase `content_assets`. This is the durable boundary — anything downstream (publishing, analytics, audit) reads from `content_assets` + Drive, never from the tmp paths.
+
+### Google Drive
+- **Folder:** `Yarono/SMT/content/{content_id}/` (created if missing)
+- **Files uploaded:**
+  - `final.mp4` — stitched 9:16 video (the deliverable)
+  - `thumbnail.png` — hook card matching the video's 2s opening frame
+  - `qa-report.md` — full identity-marker QA output (per-clip + cross-clip + verdict)
+  - `transcript.txt` — Whisper transcript with word-level timing
+  - On `--keep-intermediates` (debugging only): `merged.mp4`, per-scene mp4s, per-scene mp3s
+
+### Supabase `content_assets`
+One row per uploaded asset, joined to `content_queue` by `content_id`. Schema (current minimum):
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid | primary key |
+| `content_id` | uuid | FK to `content_queue.id` |
+| `asset_type` | text | `final_mp4` \| `thumbnail_png` \| `qa_report` \| `transcript` |
+| `drive_file_id` | text | Google Drive file ID |
+| `drive_path` | text | e.g. `Yarono/SMT/content/{content_id}/final.mp4` |
+| `mime_type` | text | |
+| `size_bytes` | bigint | |
+| `duration_s` | numeric | null for non-video |
+| `width` | int | null where N/A |
+| `height` | int | null where N/A |
+| `metadata` | jsonb | render params, QA verdict, scene job IDs, cost breakdown |
+| `created_at` | timestamptz | default `now()` |
+
+### Storage rules
+- Drive folder is created lazily — first asset upload triggers folder creation.
+- Re-runs for the same `content_id` overwrite Drive files in-place (same name) and update existing `content_assets` rows by `(content_id, asset_type)`. They do NOT create duplicate rows.
+- A `content_assets` row is only written AFTER its corresponding Drive upload succeeds — never write a row pointing to a non-existent file.
+- If a downstream step (publishing, etc.) needs an asset and the row is missing, treat the piece as not-yet-rendered. Do not fall back to tmp paths.
 
 ## Failure modes & escalation
 
@@ -140,6 +199,8 @@ If a run projects >$5, pause and surface to user.
 | Character not in library | Surface available characters, ask user to pick |
 | Higgsfield balance insufficient | Pause, report current balance vs estimated cost |
 | Any prompt drift detected (e.g. feature instruction snuck in) | Hard fail, do not generate, surface to user |
+| Drive upload fails (network / quota / permission) | Retry once with backoff. On second failure, surface local paths + error and keep tmp intact so the run is recoverable |
+| `content_assets` write fails | Same — surface, keep tmp + completed Drive uploads intact. Never delete a Drive file because the DB write failed |
 
 ## Files this skill calls
 
