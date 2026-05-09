@@ -306,7 +306,7 @@ async function runPersist(): Promise<void> {
   const { error: updateErr } = await sb
     .from("content_queue")
     .update({
-      render_status: "ready",
+      render_status: "complete",  // matches content_queue.render_status CHECK enum
       render_completed_at: new Date().toISOString(),
       final_asset_url: finalAssetUrl,
     })
