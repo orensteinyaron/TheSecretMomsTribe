@@ -8,10 +8,28 @@
  * The function never throws. If Supabase insert fails, we log to stderr
  * and return { id: null } so the agent's flow is not disrupted by
  * observability plumbing.
+ *
+ * --- Status enum and the 'reconstructed' asymmetry (intentional) ---
+ *
+ * The DB CHECK constraint on prompt_executions.status accepts FIVE values:
+ *   'ok' | 'error' | 'retry' | 'skipped' | 'reconstructed'
+ *
+ * VALID_STATUS below deliberately accepts only the FIRST FOUR. Real-time
+ * logged executions must NEVER claim 'reconstructed' status — that value is
+ * reserved for backfilled rows that synthesize a prompt chain from indirect
+ * sources (e.g. a piece predating prompt_logger that has surviving
+ * content_assets but no original LLM-call records).
+ *
+ * Backfills bypass this logger by design: they direct-INSERT rows with
+ * status='reconstructed'. See docs/specs/PIECE_3BCAFC78_BACKFILL_V1.md for
+ * the canonical example. If you find yourself wanting to widen VALID_STATUS
+ * to include 'reconstructed', stop — you're about to mark real-time data as
+ * synthetic, which silently poisons whatever analytics later differentiate.
  */
 
 import { supabase } from './supabase.js';
 
+// 'reconstructed' is intentionally excluded — see file header for why.
 const VALID_STATUS = new Set(['ok', 'error', 'retry', 'skipped']);
 
 /**
