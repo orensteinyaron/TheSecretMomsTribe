@@ -1,10 +1,21 @@
-// Content
+// Content — V1.1 (PIECE_PAGE_LIFECYCLE_V1):
+// - `platform` dropped (content goes to both IG + TT by policy).
+// - Per-channel schedule/publish fields added.
+// - Pillar taxonomy expanded: parenting, health, ai_magic, tech, trending, financial, uncategorized.
+export type ContentPillar =
+  | 'parenting'
+  | 'health'
+  | 'ai_magic'
+  | 'tech'
+  | 'trending'
+  | 'financial'
+  | 'uncategorized';
+
 export interface ContentItem {
   id: string;
   briefing_id: string | null;
-  platform: 'instagram' | 'tiktok';
   content_type: 'wow' | 'trust' | 'cta';
-  status: 'draft' | 'draft_needs_review' | 'pending_approval' | 'approved' | 'rejected';
+  status: 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'draft_needs_review' | 'published' | 'superseded';
   hook: string;
   caption: string;
   hashtags: string[];
@@ -13,7 +24,7 @@ export interface ContentItem {
   audio_suggestion: string | null;
   slides: Slide[] | null;
   age_range: 'toddler' | 'little_kid' | 'school_age' | 'teen' | 'universal' | null;
-  content_pillar: 'ai_magic' | 'parenting_insights' | 'tech_for_moms' | 'mom_health' | 'trending' | null;
+  content_pillar: ContentPillar;
   post_format: string | null;
   image_url: string | null;
   image_status: string | null;
@@ -30,12 +41,153 @@ export interface ContentItem {
   created_at: string;
   updated_at: string;
   render_profiles?: RenderProfile;
-  source_urls: Array<{
-    url: string;
-    source: string;
-    signal_id?: string | null;
-    relation?: 'primary_inspiration' | 'supporting_context' | 'viral_reference';
-  }> | null;
+  source_urls: Array<{ url: string; source: string }> | null;
+  // Legacy single-channel schedule field. Still present on the row for
+  // back-compat with Planner.tsx; new piece-level scheduling should use
+  // scheduled_at_ig / scheduled_at_tt per PIECE_PAGE_LIFECYCLE_V1.
+  scheduled_for: string | null;
+  // Per-channel scheduling (added V1.1). Nullable until user sets them.
+  scheduled_at_ig: string | null;
+  scheduled_at_tt: string | null;
+  published_at_ig: string | null;
+  published_at_tt: string | null;
+  published_url_ig: string | null;
+  published_url_tt: string | null;
+  channel_override: 'ig_only' | 'tt_only' | null;
+  // Full generation prompt chain context (set by content_gen agent).
+  generation_context: GenerationContext | null;
+}
+
+export interface GenerationContext {
+  model: string;
+  system_prompt: string;
+  user_prompt: string;
+  briefing_id: string | null;
+  briefing_slice: BriefingOpportunity | null;
+  active_directives: Array<{ directive_type: string; directive: string; parameters?: any }>;
+  pillar_input: string;
+  format_input: string;
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number;
+  agent_run_id: string | null;
+  created_at: string;
+  needs_review_reason?: string | null;
+
+  // Reconstructed-data conventions — established by PR #21 backfill.
+  // Canonical reference: agents/lib/prompt_logger.js JSDoc.
+  // Spec: docs/specs/PIECE_3BCAFC78_BACKFILL_V1.md §5.
+  // Real-time-logged pieces have NONE of these keys set; only backfilled
+  // pieces carry them. UI consumes _reconstructed for the GenerationPanel
+  // banner (YAR-110) and _estimated_cost_breakdown for the Render Cost
+  // info-icon hover.
+  _reconstructed?: boolean;
+  _reconstructed_note?: string;
+  _estimated_cost_breakdown?: {
+    [stepName: string]: number | string;
+    total_estimated: number;
+    note: string;
+  };
+  _cost_honesty_pass_applied_at?: string;
+  _active_directives_note?: string;
+  _pillar_input_note?: string;
+  _format_input_note?: string;
+  _token_cost_note?: string;
+}
+
+export interface PromptExecution {
+  id: string;
+  content_id: string;
+  agent_name: string;
+  step_name: string;
+  step_order: number;
+  model: string;
+  system_prompt: string | null;
+  user_prompt: string;
+  rendered_output: string | null;
+  output_json: any | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  cost_usd: number | null;
+  // 'reconstructed' added by PR #21's cost-honesty pass (DB CHECK widened
+  // to allow the value). Reserved for backfilled rows that synthesize a
+  // prompt chain from indirect sources. See agents/lib/prompt_logger.js
+  // JSDoc — real-time-logged executions must NEVER claim 'reconstructed'.
+  status: 'ok' | 'error' | 'retry' | 'skipped' | 'reconstructed';
+  error_message: string | null;
+  latency_ms: number | null;
+  agent_run_id: string | null;
+  supersedes_id: string | null;
+  created_at: string;
+}
+
+export interface MetricSnapshot {
+  id: string;
+  content_id: string;
+  channel: 'instagram' | 'tiktok';
+  snapshot_at: string;
+  source: 'apify' | 'graph_api' | 'tiktok_api' | 'manual';
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  reach: number | null;
+  impressions: number | null;
+  profile_visits: number | null;
+  follows: number | null;
+  watch_time_seconds: number | null;
+  avg_watch_duration_seconds: number | null;
+  completion_rate: number | null;
+  raw_payload: any;
+  created_at: string;
+}
+
+export interface PiecePagePayload {
+  piece: ContentItem;
+  generation_context: GenerationContext | null;
+  render: {
+    queue_row: {
+      render_status: string | null;
+      render_started_at: string | null;
+      render_completed_at: string | null;
+      render_error: string | null;
+      render_cost_usd: number | null;
+      final_asset_url: string | null;
+      image_status: string | null;
+      image_url: string | null;
+      slide_images: any[] | null;
+    };
+    profile: RenderProfile | null;
+    output_urls: { video?: string; carousel_slides?: string[]; static?: string };
+    qa_score: number | null;
+    cost_usd: number | null;
+  };
+  prompt_chain: PromptExecution[];
+  metrics: {
+    ig: { latest: MetricSnapshot | null; series: MetricSnapshot[] };
+    tt: { latest: MetricSnapshot | null; series: MetricSnapshot[] };
+    derived: {
+      save_rate_ig: number | null;
+      share_rate_ig: number | null;
+      engagement_rate_ig: number | null;
+      save_rate_tt: number | null;
+      share_rate_tt: number | null;
+      engagement_rate_tt: number | null;
+    };
+    performance_vs_pillar: { ig: number | null; tt: number | null };
+  };
+  schedule: {
+    scheduled_at_ig: string | null;
+    scheduled_at_tt: string | null;
+    published_at_ig: string | null;
+    published_at_tt: string | null;
+    published_url_ig: string | null;
+    published_url_tt: string | null;
+    channel_override: 'ig_only' | 'tt_only' | null;
+    next_available_slot_ig: string;
+    next_available_slot_tt: string;
+  };
 }
 
 export interface Slide {
