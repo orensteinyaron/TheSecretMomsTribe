@@ -65,7 +65,7 @@ Each character record contains:
 
 ## Pipeline (in order)
 
-1. **Validate inputs** — script has all required fields, character exists in library, scene durations sum to ≤45s
+1. **Validate inputs** — script has all required fields, character exists in library, scene durations sum to ≤45s, **and every scene's estimated speech duration is ≥4.0s** (~11 words at Rachel's 2.6 wps). Run `video/scripts/validate-script.ts <script.json>` (exit 0 = pass, 1 = fail with per-scene report). On any `too_short` violation, escalate to user with the suggested merge — do **not** silently proceed.
 2. **Generate audio per scene** — ElevenLabs v3 with `eleven_v3` model, character's voice_id, emotion tags inline. Save each scene's mp3, measure actual duration
 3. **Adjust scene durations** — set Seedance duration per scene to ceiling of measured audio duration, capped at 15s
 4. **Generate avatar clips** — for each scene, call Seedance 2.0 via Higgsfield with:
@@ -75,7 +75,7 @@ Each character record contains:
    - `prompt`: character's prompt_template (verbatim — never inject feature descriptions)
    - `aspect_ratio: 9:16`, `resolution: 720p`, `mode: std`
    - Submit sequentially (proxy-friendly), poll until all complete
-5. **Run QA agent** — patched identity-markers QA on all clips. If any clip scores <3 on identity-markers OR shows hard-fail hallucinations (forehead wrinkles, dropped moles, missing markers), pause and surface to user before stitching
+5. **Run QA agent** — patched identity-markers QA on all clips. If any clip scores <3 on identity-markers OR shows hard-fail hallucinations (forehead wrinkles, dropped moles, missing markers) OR fails the silence check (`silence.status != "OK"` — lead >0.5s or tail >1.0s), pause and surface to user before stitching. The silence check is deterministic ffmpeg silencedetect, no LLM cost.
 6. **Generate hook card PNG** — call `generate-hook-card.ts` with character's soul_still_media_id as background and `script.hook_overlay` as text. Output: 1080×1920 PNG
 7. **Stitch clips** — call `stitch-avatar.ts` with:
    - Ordered scene list
@@ -83,6 +83,7 @@ Each character record contains:
    - Hook card PNG as 2s held opening
    - PhraseCaptions style (no background band, white text + shadow)
    - BrandWatermark
+   - Per-clip silence trim runs automatically (lead >0.5s → keep 0.15s; tail >1.0s → keep 0.4s). Disable with `--no-trim` only when debugging.
 8. **Upload to Drive** — push final assets to `Yarono/SMT/content/{content_id}/` (folder created if missing). See [Storage](#storage).
 9. **Write `content_assets` rows** — one Supabase row per uploaded asset, joined to `content_queue` by `content_id`. See [Storage](#storage).
 10. **Output** — return local paths + Drive IDs + QA verdict + cost. See [Outputs](#outputs).
@@ -95,6 +96,9 @@ Each character record contains:
 - **Hook overlay is mandatory** — every Full Avatar script must include `hook_overlay` (3-6 words, on-screen text version of the spoken opener). If missing, escalate to user. Do not generate one automatically.
 - **Token economy** — use Haiku for QA framing, Sonnet only for the per-frame identity-markers vision call. Never call an LLM where deterministic code (ffmpeg, sharp, regex) suffices.
 - **Single render file for cross-posting** — the same final mp4 ships to both Instagram and TikTok. Do not re-export per platform.
+- **Minimum 4-second scene** — no scene's spoken script may estimate below 4.0s of speech (~11 words at Rachel's 2.6 wps). Sub-4s scenes either get padded with dead air by Seedance (creates the "did the video freeze?" silence gap, see piece 5ffc20c1 SCENE_3 incident on 2026-05-09) or land as a 1.5s micro-clip that breaks the rhythm. Enforced upstream by `video/scripts/validate-script.ts` at pipeline step 1. To honour an emphatic short line, **merge it with an adjacent scene** rather than carve it out — the video grammar can hold a beat without needing a dedicated clip.
+- **Per-clip silence trim is mandatory** — `stitch-avatar.ts` automatically trims leading silence >0.5s (keeping 0.15s) and trailing silence >1.0s (keeping 0.4s) per clip. Thresholds are deliberately conservative: clips with intentional breath/beat pauses (under threshold) are left untouched. `--no-trim` is for debugging only — never ship a piece that bypassed it. The trim step is reported in the stitcher's stdout summary; record any `Trim:` line in the run notes.
+- **Silence has three lines of defence** — same bug surface (script too short → silent tail), three independent layers: (1) `validate-script.ts` rejects sub-4s scenes pre-TTS, (2) `trim-clip-silence.ts` clips dead air per-clip in the stitcher, (3) `qa-agent-avatar.ts` `silence_check` dimension hard-fails any clip with lead >0.5s or tail >1.0s. The QA layer catches `--no-trim` debug runs, threshold edge cases, and any future silence failure mode that bypasses layers 1+2. Never disable any of the three.
 
 ## Cost budget per piece
 
@@ -242,9 +246,11 @@ SELECT * FROM chain ORDER BY version;
 
 ## Files this skill calls
 
+- `video/scripts/validate-script.ts` — script validator (4s minimum, 15s ceiling per scene)
 - `video/scripts/elevenlabs-tts.ts` — audio generation
 - `video/scripts/generate-hook-card.ts` — thumbnail PNG
-- `video/scripts/stitch-avatar.ts` — clip stitching
+- `video/scripts/stitch-avatar.ts` — clip stitching (calls `trim-clip-silence` internally)
+- `video/scripts/trim-clip-silence.ts` — per-clip head/tail silence trim
 - `video/scripts/qa-agent-avatar.ts` — QA pass
 - Higgsfield MCP — Seedance generation, media upload
 

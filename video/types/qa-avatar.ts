@@ -53,6 +53,22 @@ export type AudioPacing = {
   transcript: string;
 };
 
+export type SilenceCheckStatus = "OK" | "LEAD_TOO_LONG" | "TAIL_TOO_LONG" | "BOTH_TOO_LONG";
+
+export type SilenceCheck = {
+  /** Detected leading silence in seconds (run starting at clip t=0). */
+  lead_silence_s: number;
+  /** Detected trailing silence in seconds (run ending at clip end). */
+  tail_silence_s: number;
+  /** Threshold above which lead silence is a hard_fail. Mirrors stitcher trim trigger. */
+  lead_threshold_s: number;
+  /** Threshold above which tail silence is a hard_fail. Mirrors stitcher trim trigger. */
+  tail_threshold_s: number;
+  /** OK = both within threshold. *_TOO_LONG = hard_fail. */
+  status: SilenceCheckStatus;
+  notes: string;
+};
+
 export type ClipResult = {
   id: string;
   url: string;
@@ -60,6 +76,7 @@ export type ClipResult = {
   vision: ClipVisionResult | { error: string };
   markers: IdentityMarkerResult | { error: string };
   audio: AudioPacing | { error: string };
+  silence: SilenceCheck | { error: string };
   error?: string;
   frame_paths: string[];
 };

@@ -40,7 +40,9 @@ import type {
   IdentityMarkerEntry,
   IdentityMarkerFrame,
   IdentityMarkerResult,
+  SilenceCheck,
 } from "../types/qa-avatar.js";
+import { spawnSync } from "child_process";
 
 // ---- Args ----
 
@@ -224,6 +226,77 @@ function classifyAudio(whisper: WhisperResult, clipDuration: number): AudioPacin
 
 function round(n: number, digits = 2): number { return Math.round(n * 10 ** digits) / 10 ** digits; }
 
+// ---- Silence check (deterministic, post-render safety net) ----
+//
+// Mirrors the trim trigger thresholds in video/scripts/trim-clip-silence.ts:
+// lead silence > 0.5s or tail silence > 1.0s = hard_fail. Three layers cover
+// the same bug surface — script-too-short → silent tail:
+//   1. validate-script.ts (pre-TTS): rejects sub-4s scenes before any spend
+//   2. trim-clip-silence.ts (in stitcher): clips dead air per-clip
+//   3. silence_check (here): post-render catches anything that slipped through
+//      (e.g. --no-trim debug runs, threshold edge cases, novel failure modes)
+//
+// Runs on the clip's extracted audio (already on disk for Whisper). No extra
+// download, no extra LLM call, runs in milliseconds.
+
+const LEAD_SILENCE_HARD_FAIL_S = 0.5;
+const TAIL_SILENCE_HARD_FAIL_S = 1.0;
+
+function checkSilence(audioPath: string, clipDuration: number): SilenceCheck {
+  const r = spawnSync(
+    "ffmpeg",
+    [
+      "-hide_banner", "-nostats",
+      "-i", audioPath,
+      "-af", "silencedetect=noise=-40dB:d=0.3",
+      "-f", "null", "-",
+    ],
+    { encoding: "utf-8" },
+  );
+  const text: string = r.stderr || "";
+
+  const runs: { startSec: number; endSec: number }[] = [];
+  let openStart: number | null = null;
+  for (const line of text.split("\n")) {
+    const ms = line.match(/silence_start:\s*(-?[\d.]+)/);
+    const me = line.match(/silence_end:\s*(-?[\d.]+)/);
+    if (ms) openStart = parseFloat(ms[1]);
+    if (me && openStart !== null) {
+      runs.push({ startSec: openStart, endSec: parseFloat(me[1]) });
+      openStart = null;
+    }
+  }
+  if (openStart !== null) runs.push({ startSec: openStart, endSec: clipDuration });
+
+  const leadRun = runs.find((r) => r.startSec < 0.05);
+  const tailRun = [...runs].reverse().find((r) => r.endSec >= clipDuration - 0.05);
+  const lead = leadRun ? leadRun.endSec - leadRun.startSec : 0;
+  const tail = tailRun ? tailRun.endSec - tailRun.startSec : 0;
+
+  const leadFail = lead > LEAD_SILENCE_HARD_FAIL_S;
+  const tailFail = tail > TAIL_SILENCE_HARD_FAIL_S;
+  let status: SilenceCheck["status"] = "OK";
+  if (leadFail && tailFail) status = "BOTH_TOO_LONG";
+  else if (leadFail) status = "LEAD_TOO_LONG";
+  else if (tailFail) status = "TAIL_TOO_LONG";
+
+  const notes = status === "OK"
+    ? `lead ${lead.toFixed(2)}s ≤ ${LEAD_SILENCE_HARD_FAIL_S}s; tail ${tail.toFixed(2)}s ≤ ${TAIL_SILENCE_HARD_FAIL_S}s`
+    : [
+        leadFail ? `lead ${lead.toFixed(2)}s > ${LEAD_SILENCE_HARD_FAIL_S}s (HARD FAIL)` : `lead ${lead.toFixed(2)}s OK`,
+        tailFail ? `tail ${tail.toFixed(2)}s > ${TAIL_SILENCE_HARD_FAIL_S}s (HARD FAIL)` : `tail ${tail.toFixed(2)}s OK`,
+      ].join("; ");
+
+  return {
+    lead_silence_s: round(lead, 3),
+    tail_silence_s: round(tail, 3),
+    lead_threshold_s: LEAD_SILENCE_HARD_FAIL_S,
+    tail_threshold_s: TAIL_SILENCE_HARD_FAIL_S,
+    status,
+    notes,
+  };
+}
+
 // ---- Identity-marker aggregation ----
 
 function aggregateFrameMarkers(
@@ -304,13 +377,18 @@ async function processClip(clip: ClipInput, refImage: ImagePart): Promise<ClipRe
       ? classifyAudio(whisper.w, duration)
       : { error: whisper.error };
 
+    const silence: ClipResult["silence"] = (() => {
+      try { return checkSilence(audioPath, duration); }
+      catch (e: any) { return { error: `silence: ${e.message}` }; }
+    })();
+
     const visionResult: ClipResult["vision"] =
       "error" in (vision as any) ? (vision as { error: string }) : (vision as ClipVisionResult);
 
     const markers = aggregateFrameMarkers(frameAudits);
 
     log(`[${clip.id}] done`);
-    return { id: clip.id, url: clip.url, duration_s: round(duration, 2), vision: visionResult, markers, audio, frame_paths: framePaths };
+    return { id: clip.id, url: clip.url, duration_s: round(duration, 2), vision: visionResult, markers, audio, silence, frame_paths: framePaths };
   } catch (e: any) {
     log(`[${clip.id}] ERROR ${e.message}`);
     return {
@@ -320,6 +398,7 @@ async function processClip(clip: ClipInput, refImage: ImagePart): Promise<ClipRe
       vision: { error: e.message },
       markers: { error: e.message },
       audio: { error: e.message },
+      silence: { error: e.message },
       error: e.message,
       frame_paths: framePaths.filter(p => fs.existsSync(p)),
     };
@@ -359,14 +438,14 @@ function renderReport(opts: {
   const visionDims = ["identity", "hair", "framing", "background_consistency", "lighting"] as const;
   const colHeader = ["Identity", "Markers", "Hair", "Framing", "Bg", "Lighting"];
 
-  const headerLine = `| Clip | ${colHeader.join(" | ")} | Audio Pacing | Hard Fails |`;
-  const sepLine = `|------|${colHeader.map(() => "----").join("|")}|----|----|`;
+  const headerLine = `| Clip | ${colHeader.join(" | ")} | Audio Pacing | Silence | Hard Fails |`;
+  const sepLine = `|------|${colHeader.map(() => "----").join("|")}|----|----|----|`;
 
   const rows = results.map(r => {
     const visionErr = "error" in r.vision;
     const markersErr = "error" in r.markers;
     if (visionErr && markersErr) {
-      return `| ${r.id} | ${colHeader.map(() => "ERR").join(" | ")} | ${audioCell(r)} | ${visionErrCell(r)} |`;
+      return `| ${r.id} | ${colHeader.map(() => "ERR").join(" | ")} | ${audioCell(r)} | ${silenceCell(r)} | ${visionErrCell(r)} |`;
     }
     const cells: string[] = [];
     cells.push(visionErr ? "ERR" : `${(r.vision as ClipVisionResult).identity.score}/5`);
@@ -375,8 +454,11 @@ function renderReport(opts: {
     cells.push(visionErr ? "ERR" : `${(r.vision as ClipVisionResult).framing.score}/5`);
     cells.push(visionErr ? "ERR" : `${(r.vision as ClipVisionResult).background_consistency.score}/5`);
     cells.push(visionErr ? "ERR" : `${(r.vision as ClipVisionResult).lighting.score}/5`);
-    const hf = visionErr ? "—" : ((r.vision as ClipVisionResult).hard_fails.length === 0 ? "none" : (r.vision as ClipVisionResult).hard_fails.join("; "));
-    return `| ${r.id} | ${cells.join(" | ")} | ${audioCell(r)} | ${escapeCell(hf)} |`;
+    const visionHf = visionErr ? [] : (r.vision as ClipVisionResult).hard_fails;
+    const silenceHf = !("error" in r.silence) && r.silence.status !== "OK" ? [`silence: ${r.silence.status}`] : [];
+    const allHf = [...visionHf, ...silenceHf];
+    const hf = visionErr ? "—" : (allHf.length === 0 ? "none" : allHf.join("; "));
+    return `| ${r.id} | ${cells.join(" | ")} | ${audioCell(r)} | ${silenceCell(r)} | ${escapeCell(hf)} |`;
   });
 
   // Averages over numeric results
@@ -435,6 +517,14 @@ function audioCell(r: ClipResult): string {
   return `${tag} (${r.audio.wps.toFixed(2)} wps)`;
 }
 
+function silenceCell(r: ClipResult): string {
+  if ("error" in r.silence) return `ERR`;
+  const lead = r.silence.lead_silence_s.toFixed(2);
+  const tail = r.silence.tail_silence_s.toFixed(2);
+  if (r.silence.status === "OK") return `OK (lead ${lead}s · tail ${tail}s)`;
+  return `**${r.silence.status}** (lead ${lead}s · tail ${tail}s)`;
+}
+
 function visionErrCell(r: ClipResult): string {
   if ("error" in r.vision) return `vision ERR: ${escapeCell(r.vision.error)}`;
   return "—";
@@ -464,7 +554,11 @@ function renderClipDetail(r: ClipResult): string {
     ? `- **Audio (proxy for sync issues):** ERROR — ${r.audio.error}`
     : `- **Audio (proxy for sync issues):** ${r.audio.word_count} words / ${r.audio.clip_duration_s}s = ${r.audio.wps.toFixed(2)} wps — ${r.audio.status}. Speech covers ${(r.audio.speech_coverage * 100).toFixed(0)}% of clip.${r.audio.transcript ? `\n  - Transcript: "${r.audio.transcript}"` : ""}`;
 
-  return `${head}\n${visionLines}\n${markerLines}\n${audioLines}`;
+  const silenceLines = "error" in r.silence
+    ? `- **Silence check:** ERROR — ${r.silence.error}`
+    : `- **Silence check:** ${r.silence.status === "OK" ? "OK" : `**${r.silence.status}**`} — ${r.silence.notes}`;
+
+  return `${head}\n${visionLines}\n${markerLines}\n${audioLines}\n${silenceLines}`;
 }
 
 function renderMarkerBlock(m: ClipResult["markers"]): string {

@@ -38,6 +38,7 @@ import {
   buildPhrasesFromWhisper,
   type WhisperWord,
 } from "./audio-pipeline.js";
+import { trimClipSilence, type TrimResult } from "./trim-clip-silence.js";
 import type {
   AvatarCompositionProps,
   ResolvedClip,
@@ -71,10 +72,11 @@ interface Args {
   pillar: string;
   hookCardPath?: string;
   hookCardHoldSec: number;
+  noTrim: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const out: Args = { clips: "", keepPublic: false, pillar: "parenting_insights", hookCardHoldSec: 2 };
+  const out: Args = { clips: "", keepPublic: false, pillar: "parenting_insights", hookCardHoldSec: 2, noTrim: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--clips") out.clips = argv[++i];
@@ -84,6 +86,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--keep-public") out.keepPublic = true;
     else if (a === "--hook-card") out.hookCardPath = argv[++i];
     else if (a === "--hook-card-hold-sec") out.hookCardHoldSec = parseFloat(argv[++i]);
+    else if (a === "--no-trim") out.noTrim = true;
     else if (a === "--help" || a === "-h") { printUsage(); process.exit(0); }
   }
   return out;
@@ -97,11 +100,14 @@ function printUsage() {
   [--pillar parenting_insights|ai_magic|mom_health] \\
   [--hook-card <path-to-png>] \\
   [--hook-card-hold-sec 2] \\
+  [--no-trim] \\
   [--keep-public]
 
 clips.json schema: [{ "id": "SCENE_1", "url": "https://..." }, ...]
 --hook-card prepends a held opening frame from a 1080x1920 PNG. Hard cut
 to the first scene; rest of scenes still crossfade with each other.
+--no-trim disables per-clip silence trimming (default trims lead >0.5s and
+tail >1.0s, preserving 0.15s lead / 0.4s tail).
 Requires: ffmpeg, ffprobe, OPENAI_API_KEY (Whisper)`);
 }
 
@@ -325,17 +331,44 @@ function cleanup() {
 
 async function main() {
   // Step 1: Download mp4s in parallel into public/<runDir>/
-  log(`[step 1/6] downloading ${clips.length} clip(s) ...`);
-  const localPaths = await Promise.all(
+  log(`[step 1/8] downloading ${clips.length} clip(s) ...`);
+  const downloaded = await Promise.all(
     clips.map(async (c) => {
-      const dest = path.join(publicDir, `${c.id}.mp4`);
+      const dest = path.join(publicDir, `${c.id}.raw.mp4`);
       await downloadFile(c.url, dest);
-      return { id: c.id, mp4Path: dest, publicRel: path.posix.join(publicSubdir, `${c.id}.mp4`) };
+      return { id: c.id, rawPath: dest };
     }),
   );
 
-  // Step 2: Probe durations
-  log(`[step 2/6] probing durations ...`);
+  // Step 2: Trim per-clip head/tail silence (sensitivity-floored — see
+  // trim-clip-silence.ts). Only trims gaps clearly above breath/beat
+  // duration, so intentional emphatic pauses survive. Skipped via --no-trim.
+  log(`[step 2/8] trimming silence (lead>0.5s, tail>1.0s) ...`);
+  const localPaths: Array<{ id: string; mp4Path: string; publicRel: string }> = [];
+  const trimReports: TrimResult[] = [];
+  for (const d of downloaded) {
+    const finalPath = path.join(publicDir, `${d.id}.mp4`);
+    if (args.noTrim) {
+      fs.renameSync(d.rawPath, finalPath);
+      log(`  ${d.id}: trim disabled (--no-trim)`);
+    } else {
+      const r = await trimClipSilence(d.rawPath, finalPath);
+      trimReports.push(r);
+      if (r.applied) {
+        log(`  ${d.id}: TRIMMED ${r.origDurationSec.toFixed(2)}s → ${r.newDurationSec.toFixed(2)}s (${r.reason})`);
+      } else {
+        log(`  ${d.id}: kept (${r.reason})`);
+      }
+      // raw kept on disk only when --keep-public; otherwise drop now.
+      if (!args.keepPublic) {
+        try { fs.unlinkSync(d.rawPath); } catch { /* ignore */ }
+      }
+    }
+    localPaths.push({ id: d.id, mp4Path: finalPath, publicRel: path.posix.join(publicSubdir, `${d.id}.mp4`) });
+  }
+
+  // Step 3: Probe durations
+  log(`[step 3/8] probing durations ...`);
   const durations = localPaths.map(p => probeDurationSeconds(p.mp4Path));
   const totalDurationSec = durations.reduce((a, b) => a + b, 0);
   for (let i = 0; i < clips.length; i++) {
@@ -350,7 +383,7 @@ async function main() {
   const mergedRel = path.posix.join(publicSubdir, "merged.mp4");
   const mergedPath = path.join(publicDir, "merged.mp4");
 
-  log(`[step 3/7] crossfade-concat ${clips.length} body clips (xfade ${xfadeSec}s) ...`);
+  log(`[step 4/8] crossfade-concat ${clips.length} body clips (xfade ${xfadeSec}s) ...`);
   const bodyPath = path.join(publicDir, "body.mp4");
   const bodyDuration = concatWithCrossfade(localPaths.map(p => p.mp4Path), durations, xfadeSec, bodyPath);
   const xfadeSavings = (clips.length - 1) * xfadeSec;
@@ -379,17 +412,17 @@ async function main() {
   // Step 4: Extract audio for Whisper from the MERGED video so word
   // timestamps line up with the final timeline (NOT the pre-crossfade timeline).
   const audioPath = path.join(tmpDir, "audio.mp3");
-  log(`[step 4/7] extracting audio for Whisper -> ${audioPath} ...`);
+  log(`[step 5/8] extracting audio for Whisper -> ${audioPath} ...`);
   extractAudioMp3(mergedPath, audioPath);
 
   // Step 5: Whisper for word-level timestamps
-  log(`[step 5/7] running Whisper ...`);
+  log(`[step 6/8] running Whisper ...`);
   const whisper = await runWhisper(audioPath, `avatar-stitch-${runId}`, tmpDir);
   let words: WhisperWord[] = whisper.words;
   log(`  ${words.length} words, audio ${whisper.durationSec.toFixed(2)}s, cost $${whisper.cost.toFixed(4)}`);
 
   // Step 6: Build phrase groups (reuse audio-pipeline helpers)
-  log(`[step 6/7] grouping phrases ...`);
+  log(`[step 7/8] grouping phrases ...`);
   const originalEnds = words.map(w => w.end);
   for (const w of words) { if (w.end <= w.start) w.end = w.start + 0.3; }
   const sentenceEndings = findSentenceEndings(script, words, originalEnds);
@@ -424,7 +457,7 @@ async function main() {
   const propsPath = path.join(tmpDir, "props.json");
   fs.writeFileSync(propsPath, JSON.stringify(inputProps, null, 2));
 
-  log(`[step 7/7] bundling Remotion + rendering ...`);
+  log(`[step 8/8] bundling Remotion + rendering ...`);
   const t0 = Date.now();
   const bundleLocation = await bundle({
     entryPoint: REMOTION_ENTRY,
@@ -464,6 +497,16 @@ async function main() {
   process.stdout.write(`Filesize: ${fmtBytes(finalSize)}\n`);
   process.stdout.write(`Phrases:  ${phraseTimings.length} caption phrases burned in\n`);
   process.stdout.write(`Render:   ${elapsedTotal}s wall clock\n`);
+  if (trimReports.length > 0) {
+    const applied = trimReports.filter((r) => r.applied);
+    if (applied.length === 0) {
+      process.stdout.write(`Trim:     no clips trimmed (${trimReports.length} checked, all under thresholds)\n`);
+    } else {
+      const totalCut = applied.reduce((a, r) => a + (r.origDurationSec - r.newDurationSec), 0);
+      const ids = applied.map((r, i) => `${clips[trimReports.indexOf(r)].id} (-${(r.origDurationSec - r.newDurationSec).toFixed(2)}s)`).join(", ");
+      process.stdout.write(`Trim:     ${applied.length}/${trimReports.length} clip(s) trimmed, total -${totalCut.toFixed(2)}s [${ids}]\n`);
+    }
+  }
 
   cleanup();
 }
