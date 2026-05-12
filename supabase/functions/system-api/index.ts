@@ -261,6 +261,31 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      if (resource === "pipeline_runs") {
+        const limit = parseInt(url.searchParams.get("limit") || "50");
+        const id = url.searchParams.get("id");
+        let query = sb
+          .from("pipeline_runs")
+          .select("*")
+          .order("started_at", { ascending: false })
+          .limit(limit);
+        if (id) query = sb.from("pipeline_runs").select("*").eq("id", id).limit(1);
+        const { data, error } = await query;
+        if (error) throw error;
+        return json(data || []);
+      }
+
+      if (resource === "content_queue_rejected") {
+        const limit = parseInt(url.searchParams.get("limit") || "50");
+        const { data, error } = await sb
+          .from("content_queue_rejected")
+          .select("*")
+          .order("rejected_at", { ascending: false })
+          .limit(limit);
+        if (error) throw error;
+        return json(data || []);
+      }
+
       return json({ error: "Unknown resource" }, 400);
     }
 
