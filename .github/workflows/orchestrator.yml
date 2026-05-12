@@ -1,31 +1,9 @@
-name: System Orchestrator (manual)
-
-# Scheduled cron removed in Agent Skills v1.0.0 (2026-05-11). The daily
-# pipeline now runs via the Claude Code Routine `smt-daily-pipeline` (see
-# agents/routines/README.md). `workflow_dispatch` is kept so the
-# orchestrator can be re-run manually for debugging via the GitHub UI.
+name: System Orchestrator
 
 on:
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Orchestrator mode'
-        required: true
-        default: 'daily'
-        type: choice
-        options:
-          - daily
-          - hot_signal
-          - resume_from_stage
-          - dry_run
-      signal_id:
-        description: 'Signal ID (hot_signal mode only)'
-        required: false
-        type: string
-      stage:
-        description: 'Stage to resume from (resume_from_stage mode only)'
-        required: false
-        type: string
 
 jobs:
   orchestrate:
@@ -47,8 +25,4 @@ jobs:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          node agents/orchestrator.js \
-            --mode="${{ github.event.inputs.mode }}" \
-            ${{ github.event.inputs.signal_id && format('--signal_id="{0}"', github.event.inputs.signal_id) || '' }} \
-            ${{ github.event.inputs.stage && format('--stage="{0}"', github.event.inputs.stage) || '' }}
+        run: node agents/orchestrator.js
