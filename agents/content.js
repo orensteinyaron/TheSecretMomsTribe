@@ -18,11 +18,12 @@
 
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { logCost, printCostSummary } from '../scripts/utils/cost-logger.js';
 import { logActivity } from './lib/activity.js';
+import { loadSkill } from './lib/skill_loader.js';
+import { validateContentQueueRow } from './lib/gate_validators.js';
 import {
   AXES,
   pickRachelMode,
@@ -62,17 +63,6 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !ANTHROPIC_API_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-
-// --- Load DNA docs ---
-
-function loadDNA() {
-  const promptsDir = resolve(__dirname, '../prompts');
-  const brandVoice = readFileSync(resolve(promptsDir, 'brand-voice.md'), 'utf-8');
-  const contentDNA = readFileSync(resolve(promptsDir, 'content-dna.md'), 'utf-8');
-  const visualDesign = readFileSync(resolve(promptsDir, 'visual-design.md'), 'utf-8');
-  console.log(`[Content] Loaded DNA docs: brand-voice (${brandVoice.length}), content-dna (${contentDNA.length}), visual-design (${visualDesign.length})`);
-  return { brandVoice, contentDNA, visualDesign };
-}
 
 // --- Briefing ---
 
@@ -234,21 +224,14 @@ async function getRecentHooks() {
   }
 }
 
-// --- Build system prompt from DNA ---
+// --- Output schema / avatar instructions ---
+//
+// The system prompt body (brand voice, content DNA, visual design, contract,
+// SKILL) is loaded at runtime via loadSkill('smt_content_text_gen'). The
+// in-code shim below is everything this script's JSON parser depends on:
+// the avatar config schema and the strict JSON output contract.
 
-function buildSystemPrompt(dna) {
-  return `You are the content generation engine for Secret Moms Tribe (SMT).
-
-THE FOLLOWING BRAND DOCUMENTS ARE THE LAW. Follow them exactly.
-
-=== BRAND VOICE BIBLE ===
-${dna.brandVoice}
-
-=== CONTENT DNA FRAMEWORK ===
-${dna.contentDNA}
-
-=== VISUAL DESIGN GUIDE ===
-${dna.visualDesign}
+const OUTPUT_SCHEMA_INSTRUCTIONS = `
 
 ## AVATAR VIDEO FORMAT (tiktok_avatar / tiktok_avatar_visual)
 
@@ -307,12 +290,11 @@ CRITICAL RULES:
 
 CRITICAL: Return ONLY valid JSON. No em dashes (\u2014), no special unicode. Use plain hyphens (-) only. Ensure all strings are properly escaped.
 - Return ONLY valid JSON. No markdown fences, no explanation.`;
-}
 
 // --- Generate batch ---
 
-async function generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights) {
-  const systemPrompt = buildSystemPrompt(dna);
+async function generateBatch(briefing, skillSystemPrompt, coverageGaps, recentHooks, directives, insights) {
+  const systemPrompt = skillSystemPrompt + OUTPUT_SCHEMA_INSTRUCTIONS;
   const userPrompt = buildUserPrompt({ briefing, coverageGaps, recentHooks, directives, insights });
   const result = await generateBatchLib(
     { briefing, systemPrompt, userPrompt },
@@ -739,6 +721,105 @@ async function revalidatePostSourceUrls(posts) {
   return { checked, dropped, staleBlocked };
 }
 
+/**
+ * Defensive AI Magic gate (last line of defense before insert).
+ *
+ * For every post the LLM emitted with content_pillar='ai_magic', re-run
+ * `validateContentQueueRow` against the matching briefing opportunity.
+ * The contract requires that `ai_magic_output` quote the briefing's
+ * `original_prompt` and `original_output` verbatim — if either is
+ * missing or the verbatim substring is not present, the row is moved to
+ * `content_queue_rejected` and excluded from the batch.
+ *
+ * Returns `{ kept, rejected }`. Rejected rows are persisted as a side
+ * effect (best-effort; failure to persist is logged but does not break
+ * the run, because the goal is preventing bad inserts, not bookkeeping).
+ *
+ * Anchor: May 11 fabricated AI Magic incident.
+ */
+async function enforceAiMagicDefensiveGate(posts, briefing) {
+  const kept = [];
+  const rejected = [];
+  const opps = briefing?.opportunities || [];
+  const oppsBySignal = new Map();
+  for (const opp of opps) {
+    if (opp.signal_id) oppsBySignal.set(opp.signal_id, opp);
+  }
+
+  for (const post of posts) {
+    if (post.content_pillar !== 'ai_magic') {
+      kept.push(post);
+      continue;
+    }
+    const signalId = Array.isArray(post.source_signal_ids) ? post.source_signal_ids[0] : null;
+    const briefingOpp = signalId ? oppsBySignal.get(signalId) : null;
+    const verdict = validateContentQueueRow(post, briefingOpp);
+    if (verdict.ok) {
+      kept.push(post);
+      continue;
+    }
+    rejected.push({ post, reason: verdict.reason, field: verdict.field, briefingOpp });
+  }
+
+  if (rejected.length === 0) return { kept, rejected: [] };
+
+  console.warn(`[Content] AI Magic defensive gate REJECTED ${rejected.length} post(s).`);
+
+  let agentId = null;
+  try {
+    const { data: agentRow } = await supabase
+      .from('agents')
+      .select('id')
+      .eq('slug', 'content-text-gen')
+      .maybeSingle();
+    agentId = agentRow?.id || null;
+  } catch {
+    /* fall through with null agentId */
+  }
+
+  const pipelineRunId = process.env.PIPELINE_RUN_ID || null;
+  const rows = rejected.map((r) => ({
+    pipeline_run_id: pipelineRunId,
+    briefing_id: briefing?.id || null,
+    signal_id: Array.isArray(r.post.source_signal_ids) ? r.post.source_signal_ids[0] : null,
+    agent_id: agentId,
+    reason: r.reason,
+    field: r.field || null,
+    evidence: typeof r.post.ai_magic_output === 'string'
+      ? r.post.ai_magic_output.slice(0, 1000)
+      : null,
+    raw_llm_output: r.post,
+    raw_briefing_row: r.briefingOpp || null,
+  }));
+
+  try {
+    const { error } = await supabase.from('content_queue_rejected').insert(rows);
+    if (error) {
+      console.warn(`[Content] Failed to persist content_queue_rejected rows: ${error.message}`);
+    }
+  } catch (err) {
+    console.warn(`[Content] Exception persisting content_queue_rejected: ${err.message}`);
+  }
+
+  for (const r of rejected) {
+    await logActivity({
+      category: 'alert',
+      actor_type: 'agent',
+      actor_name: 'content-agent',
+      action: 'ai_magic_defensive_gate_rejected',
+      description: `Rejected ai_magic post: ${r.reason}`,
+      metadata: {
+        field: r.field || null,
+        signal_id: Array.isArray(r.post.source_signal_ids) ? r.post.source_signal_ids[0] : null,
+        briefing_id: briefing?.id || null,
+        pipeline_run_id: pipelineRunId,
+      },
+    });
+  }
+
+  return { kept, rejected };
+}
+
 // --- Write to Supabase ---
 
 async function writeContentQueue(posts, briefingId, renderProfileMap, batchCtx = null) {
@@ -774,6 +855,10 @@ async function writeContentQueue(posts, briefingId, renderProfileMap, batchCtx =
           directive: d.directive,
         })),
         briefing_id: briefingId,
+        // Agent Skills v1.0.0 — pinpoint which skill produced this row.
+        agent_slug: 'smt_content_text_gen',
+        skill_version: batchCtx.skillVersion || null,
+        contract_version: batchCtx.contractVersion || null,
       };
     }
     return row;
@@ -826,8 +911,10 @@ async function main() {
   console.log('[Content Agent] Greedy mode: generating for ALL good opportunities');
   const startTime = Date.now();
 
-  // Load DNA docs
-  const dna = loadDNA();
+  // Load runtime skill (brand voice + DNA + visual + face + contract are
+  // bundled by the loader's companion_files mechanism).
+  const skill = await loadSkill('smt_content_text_gen');
+  console.log(`[Content Agent] Loaded skill smt_content_text_gen v${skill.skillVersion} (contract v${skill.contractVersion})`);
 
   // Get briefing
   const briefing = await getLatestBriefing();
@@ -848,7 +935,7 @@ async function main() {
 
   // Generate batch via Claude. Capture latency for prompt_executions logging (V2 §4.1).
   const genStart = Date.now();
-  const { posts: rawPosts, usage, systemPrompt, userPrompt } = await generateBatch(briefing, dna, coverageGaps, recentHooks, directives, insights);
+  const { posts: rawPosts, usage, systemPrompt, userPrompt } = await generateBatch(briefing, skill.systemPrompt, coverageGaps, recentHooks, directives, insights);
   const genLatencyMs = Date.now() - genStart;
 
   // Validate (shape)
@@ -875,6 +962,22 @@ async function main() {
   await enforceBatchDiversity(posts);
   await revalidatePostSourceUrls(posts);
 
+  // Defensive AI Magic gate — last line of defense before insert. Any post
+  // whose ai_magic_output doesn't verbatim quote the briefing's prompt +
+  // output gets diverted to content_queue_rejected and removed from the
+  // insert batch. (May 11 incident anchor.)
+  const { kept, rejected } = await enforceAiMagicDefensiveGate(posts, briefing);
+  posts.length = 0;
+  posts.push(...kept);
+  if (rejected.length > 0) {
+    console.warn(`[Content Agent] ${rejected.length} post(s) diverted to content_queue_rejected by defensive gate`);
+  }
+
+  if (posts.length === 0) {
+    console.error('[Content Agent] All posts rejected by gate — nothing to write.');
+    process.exit(1);
+  }
+
   // Write to Supabase. Pass batch context so writeContentQueue can build
   // per-piece generation_context + prompt_executions rows (V2 §4.1).
   await writeContentQueue(posts, briefing.id, renderProfileMap, {
@@ -883,6 +986,8 @@ async function main() {
     usage,
     directives,
     latencyMs: genLatencyMs,
+    skillVersion: skill.skillVersion,
+    contractVersion: skill.contractVersion,
   });
 
   // Log per-post cost share (split generation cost evenly)
@@ -910,9 +1015,37 @@ async function main() {
     }
   }
 
+  // Stamp skill_version + contract_version onto the latest agent_runs row
+  // (best-effort).
+  try {
+    const { data: agentRow } = await supabase
+      .from('agents')
+      .select('id')
+      .eq('slug', 'content-text-gen')
+      .maybeSingle();
+    if (agentRow?.id) {
+      const { data: latestRun } = await supabase
+        .from('agent_runs')
+        .select('id')
+        .eq('agent_id', agentRow.id)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestRun?.id) {
+        await supabase
+          .from('agent_runs')
+          .update({ skill_version: skill.skillVersion, contract_version: skill.contractVersion })
+          .eq('id', latestRun.id);
+      }
+    }
+  } catch (err) {
+    console.warn(`[Content Agent] Failed to stamp skill_version on agent_runs (non-fatal): ${err.message}`);
+  }
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n[Content Agent] Done in ${elapsed}s.`);
   console.log(`[Content Agent] ${posts.length} posts written to content_queue.`);
+  console.log(`[Content Agent] Skill: smt_content_text_gen v${skill.skillVersion} (contract v${skill.contractVersion})`);
 
   // Summary
   console.log('\n=== GENERATED BATCH ===');
