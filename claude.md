@@ -20,6 +20,67 @@ Yaron approves. Claude executes. See `docs/chat-decisions.md` for context.
 
 ---
 
+## Agent Skills v1.0.0 (lives under `/agents/skills/`)
+
+The four content-pipeline agents load their behavior from versioned
+`SKILL.md` files at runtime, not from hardcoded SYSTEM_PROMPT constants.
+Updating any skill file updates the agent — no code change required.
+
+| Canonical slug          | Path                                  |
+|-------------------------|---------------------------------------|
+| `smt_orchestrator`      | `agents/skills/smt_orchestrator/`     |
+| `smt_research`          | `agents/skills/smt_research/`         |
+| `smt_strategist_daily`  | `agents/skills/smt_strategist_daily/` |
+| `smt_content_text_gen`  | `agents/skills/smt_content_text_gen/` |
+
+The cross-agent contract at `agents/skills/SMT_PIPELINE_CONTRACT.md` is
+prepended to every skill. **Contract wins:** if a SKILL appears to
+override the contract, that is a SKILL bug.
+
+### Load order
+
+`loadSkill(slug)` (in `agents/lib/skill_loader.js`) assembles the system
+prompt as:
+
+1. `SMT_PIPELINE_CONTRACT.md` body
+2. `<slug>/SKILL.md` body
+3. (`smt_content_text_gen` only) companion files: brand-voice, content-dna,
+   visual-design, FACE_OF_SMT_V1 — translated by the loader from their
+   on-disk paths to the canonical names referenced in the SKILL frontmatter.
+
+### Pillar translation boundary
+
+SKILL files speak canonical pillars: `ai_magic`, `parenting_insights`,
+`mom_health`, `tech_for_moms`, `trending`, `financial`.
+
+The `content_queue.content_pillar` column speaks DB pillars: `ai_magic`,
+`parenting`, `health`, `tech`, `trending`, `financial`.
+
+The single boundary is `agents/lib/pillar_translation.js`. Applied by the
+orchestrator at insert time. When the DB constraint is migrated to
+canonical names, the entire intended diff is "delete that file."
+
+### Gate validators
+
+`agents/lib/gate_validators.js` is the deterministic safety net under the
+LLM. Every rule the SKILL files describe (AI Magic four-field gate, base
+schema, pillar routing, defensive verbatim-quote check, strategist
+invention detection) is mirrored as a pure-function check the agents call
+on every LLM output. Failures route to `content_queue_rejected` with the
+raw LLM output preserved.
+
+### Routine triggers (replace GitHub Actions cron)
+
+The orchestrator runs via two Claude Code Routines:
+
+- `smt-daily-pipeline` — scheduled daily at 03:00 UTC → `node agents/orchestrator.js --mode=daily`
+- `smt-hot-signal-pipeline` — API only, called by `supabase/functions/trigger-hot-signal/` when a signal with `signal_strength >= 9` is captured within the last 24h.
+
+Setup commands: `agents/routines/README.md`. Yaron creates the routines
+after PR review; do not create them from an agent session.
+
+---
+
 ## Project Map
 | Area | Location |
 |---|---|
