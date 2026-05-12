@@ -1,0 +1,53 @@
+{
+  "incident": "May 11 fabricated AI Magic",
+  "signal_id": "6d65fbae-f0fb-4000-96b2-b4fc8144ab81",
+  "briefing_id": "c226d6f3-f678-4847-b4be-e6a12c4d20cb",
+  "description": "A Reddit signal from r/Parenting about a mom asking 'how do I tell my 4yo about her absent dad?' was incorrectly routed to ai_magic by the Strategist. The Strategist's notes_for_content_gen contained 'Show the prompt e.g., \"how do I tell...\"', which the Content Agent then treated as a real AI artifact. The resulting content_queue row had a fabricated original_prompt and original_output that did not exist anywhere in the source.",
+  "research_briefing_opp": {
+    "signal_id": "6d65fbae-f0fb-4000-96b2-b4fc8144ab81",
+    "topic": "Telling young kids about absent parent",
+    "category": "parenting_insights",
+    "age_range": "little_kid",
+    "angle": "Mom asks the group how to explain dad's absence to her 4yo. Painful, raw — perfect parenting_insights trust content.",
+    "source": "reddit",
+    "signal_source": "apify_reddit",
+    "source_url": "https://www.reddit.com/r/Parenting/comments/EXAMPLE/",
+    "reasoning": "High emotional resonance, broad audience, no preachy reframe needed.",
+    "content_type": "trust",
+    "platform_fit": "both",
+    "priority": 1,
+    "suggested_hook": "When your kid asks where their dad is and you have no good answer.",
+    "recommended_format": "static-image",
+    "signal_strength": 8
+  },
+  "strategist_invented_briefing_opp": {
+    "signal_id": "6d65fbae-f0fb-4000-96b2-b4fc8144ab81",
+    "topic": "AI helps mom explain absent dad",
+    "category": "ai_magic",
+    "age_range": "little_kid",
+    "angle": "Show ChatGPT writing a script for telling a 4yo about her absent dad.",
+    "source": "reddit",
+    "signal_source": "apify_reddit",
+    "source_url": "https://www.reddit.com/r/Parenting/comments/EXAMPLE/",
+    "content_type": "wow",
+    "platform_fit": "both",
+    "priority": 1,
+    "suggested_hook": "I asked AI the impossible mom question and it actually helped.",
+    "recommended_format": "static-image",
+    "signal_strength": 8,
+    "ai_tool_name": "ChatGPT",
+    "original_prompt": null,
+    "original_output": null
+  },
+  "strategist_notes_fabrication": "For row 6d65fbae, show the prompt e.g., 'how do I tell my 4yo about her absent dad?' as the AI input. Sample output: a gentle, age-appropriate script the mom can read. This will land as wow content.",
+  "contentgen_fabricated_post": {
+    "content_pillar": "ai_magic",
+    "source_signal_ids": ["6d65fbae-f0fb-4000-96b2-b4fc8144ab81"],
+    "ai_magic_output": "PROMPT: how do I tell my 4yo about her absent dad?\nOUTPUT: Hi sweetie, Dad isn't here right now. He loves you very much...",
+    "hook": "I asked AI the impossible mom question",
+    "caption": "When you don't have the words, AI does.",
+    "post_format": "ig_static",
+    "age_range": "little_kid",
+    "content_type": "wow"
+  }
+}
