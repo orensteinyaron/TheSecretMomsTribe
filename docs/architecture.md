@@ -13,11 +13,10 @@ Five autonomous agents connected through Supabase as shared memory.
 > `agents/lib/pillar_translation.js`. Orchestrator invocations land in
 > the new `pipeline_runs` table; LLM outputs rejected by the gates land
 > in `content_queue_rejected`; warn/error/critical events land in
-> `escalations`. The GitHub Actions cron that previously fired the
-> orchestrator every 15 minutes has been removed; daily and hot-signal
-> runs are triggered by two Claude Code Routines (`smt-daily-pipeline`
-> and `smt-hot-signal-pipeline`, see [agents/routines/README.md](../agents/routines/README.md)).
-> See [agents/skills/README.md](../agents/skills/README.md) for the
+> `escalations`. The trigger story is unchanged — the existing GitHub
+> Actions cron (`.github/workflows/orchestrator.yml`) continues to fire
+> the orchestrator, which now defaults to `--mode=daily`. See
+> [agents/skills/README.md](../agents/skills/README.md) for the
 > contract-wins precedence rule and load order.
 
 ---

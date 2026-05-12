@@ -69,15 +69,13 @@ invention detection) is mirrored as a pure-function check the agents call
 on every LLM output. Failures route to `content_queue_rejected` with the
 raw LLM output preserved.
 
-### Routine triggers (replace GitHub Actions cron)
+### Trigger
 
-The orchestrator runs via two Claude Code Routines:
-
-- `smt-daily-pipeline` — scheduled daily at 03:00 UTC → `node agents/orchestrator.js --mode=daily`
-- `smt-hot-signal-pipeline` — API only, called by `supabase/functions/trigger-hot-signal/` when a signal with `signal_strength >= 9` is captured within the last 24h.
-
-Setup commands: `agents/routines/README.md`. Yaron creates the routines
-after PR review; do not create them from an agent session.
+The pipeline is triggered by the existing GitHub Actions cron workflow
+(`.github/workflows/orchestrator.yml`, unchanged); the orchestrator's
+mode-based CLI is invoked directly from the workflow as before. The
+orchestrator defaults to `--mode=daily` when no mode flag is passed, so
+the existing `node agents/orchestrator.js` invocation continues to work.
 
 ---
 

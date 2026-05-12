@@ -18,3 +18,5 @@ Initial extraction of orchestrator + agent system prompts into SKILL.md files un
   hard safety net beneath the LLM agents.
 - Regression test for the May 11 fabricated `ai_magic` incident locked in at
   `agents/skills/regression_tests/may_11_fabricated_ai_magic.json`.
+- Trigger layer kept as GitHub Actions cron. Claude Code Routines deferred
+  to a later phase.

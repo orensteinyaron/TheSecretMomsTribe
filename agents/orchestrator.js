@@ -439,6 +439,7 @@ async function runDaily({ pipelineRun, dryRun }) {
 }
 
 // ── Mode: hot_signal ────────────────────────────────────────────────
+// Reserved for future use — currently no caller, triggered manually only via CLI.
 
 async function runHotSignal({ pipelineRun, signalId }) {
   if (!signalId) {
