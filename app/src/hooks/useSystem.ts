@@ -46,3 +46,11 @@ export function usePipelineStats() {
 export function useCostSummary(period = 'week') {
   return useQuery({ queryKey: ['analytics', 'cost', period], queryFn: () => analyticsApi.costSummary(period) });
 }
+
+export function usePipelineRuns(limit = 50) {
+  return useQuery({ queryKey: ['system', 'pipeline_runs', limit], queryFn: () => systemApi.pipelineRuns(limit) });
+}
+
+export function useContentQueueRejected(limit = 50) {
+  return useQuery({ queryKey: ['system', 'content_queue_rejected', limit], queryFn: () => systemApi.contentQueueRejected(limit) });
+}

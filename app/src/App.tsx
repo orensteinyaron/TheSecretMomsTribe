@@ -16,6 +16,8 @@ import Directives from './pages/Directives';
 import Costs from './pages/Costs';
 import Notifications from './pages/Notifications';
 import Settings from './pages/Settings';
+import PipelineRuns from './pages/PipelineRuns';
+import Rejected from './pages/Rejected';
 
 export default function App() {
   return (
@@ -35,6 +37,8 @@ export default function App() {
         <Route path="system/profiles" element={<RenderProfiles />} />
         <Route path="system/directives" element={<Directives />} />
         <Route path="system/costs" element={<Costs />} />
+        <Route path="pipeline-runs" element={<PipelineRuns />} />
+        <Route path="rejected" element={<Rejected />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<Settings />} />
       </Route>
