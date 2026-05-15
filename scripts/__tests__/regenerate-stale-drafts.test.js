@@ -146,7 +146,7 @@ test('normalizePost: preserves hook, briefing_id, age_range, content_pillar', ()
     hook: "You're not behind, you're human.",
     briefing_id: 'briefing-uuid',
     age_range: 'universal',
-    content_pillar: 'mom_health',
+    content_pillar: 'health',
     source_urls: [{ url: 'https://example.com', signal_id: 'sig-1', relation: 'primary_inspiration', source: 'reddit' }],
   };
   const gen = {
@@ -235,7 +235,7 @@ function makeFakeAnthropic(responses) {
 }
 
 test('runRegeneration: dry-run returns plan without any DB writes', async () => {
-  const candidate = draftRow({ id: 'pre-fix', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'mom_health', hook: 'H', caption: 'x'.repeat(900), slides: [] });
+  const candidate = draftRow({ id: 'pre-fix', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'health', hook: 'H', caption: 'x'.repeat(900), slides: [] });
   const supabase = makeFakeSupabase({ candidates: [candidate] });
   const anthropic = makeFakeAnthropic([
     { text: JSON.stringify({ topic_summary: 'topic', core_insight: 'insight', emotional_register: 'tender' }) },
@@ -251,7 +251,7 @@ test('runRegeneration: dry-run returns plan without any DB writes', async () => 
 });
 
 test('runRegeneration: confirm run writes new row + marks superseded', async () => {
-  const candidate = draftRow({ id: 'orig-1', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'mom_health', hook: 'Locked hook', caption: 'x'.repeat(900), slides: [], metadata: {} });
+  const candidate = draftRow({ id: 'orig-1', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'health', hook: 'Locked hook', caption: 'x'.repeat(900), slides: [], metadata: {} });
   const supabase = makeFakeSupabase({ candidates: [candidate] });
   const anthropic = makeFakeAnthropic([
     { text: JSON.stringify({ topic_summary: 't', core_insight: 'c', emotional_register: 'tender' }) },
@@ -278,7 +278,7 @@ test('runRegeneration: confirm run writes new row + marks superseded', async () 
 });
 
 test('runRegeneration: 2-attempt cap → draft_needs_review when LLM keeps overshooting', async () => {
-  const candidate = draftRow({ id: 'orig-2', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'mom_health', hook: 'Locked', caption: 'x'.repeat(900) });
+  const candidate = draftRow({ id: 'orig-2', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'health', hook: 'Locked', caption: 'x'.repeat(900) });
   const supabase = makeFakeSupabase({ candidates: [candidate] });
   const tooLong = 'y'.repeat(500); // way over ig_static 125 cap
   const anthropic = makeFakeAnthropic([

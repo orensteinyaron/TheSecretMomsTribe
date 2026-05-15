@@ -39,7 +39,7 @@ Each video has a consistent "visual world" — setting, lighting, color palette,
 ## Brand Colors (per pillar)
 - parenting_insights: purple/pink
 - ai_magic: dark navy/pink
-- mom_health: purple/soft pink
+- health: purple/soft pink
 
 ## Watermark
 - "smt" text bottom-right corner

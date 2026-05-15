@@ -12,7 +12,7 @@ const PILLAR_MIX = {
   ai_magic: 30,
   parenting_insights: 25,
   tech_for_moms: 20,
-  mom_health: 15,
+  health: 15,
   trending: 10,
 };
 

@@ -33,7 +33,7 @@ const BRAND = {
 const PILLAR_COLORS: Record<string, { bg: string; accent: string; warm: string }> = {
   parenting_insights: { bg: BRAND.deepPurple, accent: BRAND.mauvePink, warm: "#8b3a6b" },
   ai_magic: { bg: "#1a1a2e", accent: BRAND.mauvePink, warm: "#2a1a3e" },
-  mom_health: { bg: BRAND.deepPurple, accent: "#e8a0bf", warm: "#7a3a6b" },
+  health: { bg: BRAND.deepPurple, accent: "#e8a0bf", warm: "#7a3a6b" },
   default: { bg: BRAND.deepPurple, accent: BRAND.mauvePink, warm: "#8b3a6b" },
 };
 

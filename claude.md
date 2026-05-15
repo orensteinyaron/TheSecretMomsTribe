@@ -51,7 +51,7 @@ prompt as:
 ### Pillar translation boundary
 
 SKILL files speak canonical pillars: `ai_magic`, `parenting_insights`,
-`mom_health`, `tech_for_moms`, `trending`, `financial`.
+`health`, `tech_for_moms`, `trending`, `financial`.
 
 The `content_queue.content_pillar` column speaks DB pillars: `ai_magic`,
 `parenting`, `health`, `tech`, `trending`, `financial`.
@@ -169,7 +169,7 @@ npm run studio
 ### Pillar Color Mapping
 - parenting_insights: purple/pink
 - ai_magic: dark navy/pink
-- mom_health: purple/soft pink
+- health: purple/soft pink
 
 ### Key Decisions
 - TTS voice: "nova" (warm female, matches SMT brand)

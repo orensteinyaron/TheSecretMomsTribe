@@ -74,8 +74,8 @@ A candidate is `parenting_insights` if:
 
 Default for most r/Parenting and mom-TikTok signals.
 
-### Check 3 — Does this qualify as `mom_health`?
-A candidate is `mom_health` if it focuses on the **mother's** mental load, burnout, nervous system, sleep, identity, marriage stress, postpartum recovery, or general wellbeing. Distinct from `parenting_insights`, which focuses on the child or the parent-child dynamic.
+### Check 3 — Does this qualify as `health`?
+A candidate is `health` if it focuses on the **mother's** mental load, burnout, nervous system, sleep, identity, marriage stress, postpartum recovery, or general wellbeing. Distinct from `parenting_insights`, which focuses on the child or the parent-child dynamic.
 
 ### Check 4 — Does this qualify as `tech_for_moms`?
 A candidate is `tech_for_moms` if it features:
@@ -109,7 +109,7 @@ If the gate fails → move the row to `rejected[]` with a structured reason. Do 
   "opportunities": [
     {
       "signal_id": "<uuid>",
-      "content_pillar": "ai_magic | parenting_insights | mom_health | tech_for_moms | trending | financial",
+      "content_pillar": "ai_magic | parenting_insights | health | tech_for_moms | trending | financial",
       "source_url": "<https://...>",
       "source_platform": "reddit | tiktok | instagram | hacker_news | web",
       "source_creator": "<username or null>",

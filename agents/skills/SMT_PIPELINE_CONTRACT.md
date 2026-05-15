@@ -58,7 +58,7 @@ A mom *asking* a question (e.g. "how do I tell my 4yo about her absent dad?") is
 ### `parenting_insights`
 Signals about parenting situations, emotional dynamics, child development, family communication. Mom-to-mom conversations on Reddit/IG/TikTok asking for advice or describing a moment with their kid land here by default. No verbatim AI artifact required.
 
-### `mom_health`
+### `health`
 Signals about maternal mental load, burnout, nervous system, postpartum recovery, identity, marriage stress. Trust-builder content.
 
 ### `tech_for_moms`

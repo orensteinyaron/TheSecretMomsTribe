@@ -13,7 +13,7 @@ export const TEXT_SHADOW = "0 2px 8px rgba(0,0,0,0.8), 0 0 30px rgba(0,0,0,0.4)"
 export const PILLAR_COLORS: Record<string, { bg: string; accent: string; warm: string }> = {
   parenting_insights: { bg: "#63246a", accent: "#b74780", warm: "#8b3a6b" },
   ai_magic: { bg: "#1a1a2e", accent: "#b74780", warm: "#2a1a3e" },
-  mom_health: { bg: "#63246a", accent: "#e8a0bf", warm: "#7a3a6b" },
+  health: { bg: "#63246a", accent: "#e8a0bf", warm: "#7a3a6b" },
   default: { bg: "#63246a", accent: "#b74780", warm: "#8b3a6b" },
 };
 

@@ -9,7 +9,7 @@ const PILLAR_COLORS: Record<string, string> = {
   ai_magic: '#818cf8',
   parenting_insights: '#b74780',
   tech_for_moms: '#22d3ee',
-  mom_health: '#f472b6',
+  health: '#f472b6',
   trending: '#fbbf24',
 };
 

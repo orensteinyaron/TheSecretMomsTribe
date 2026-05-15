@@ -94,7 +94,7 @@ function printUsage() {
   --clips <path-to-clips.json> \\
   [--label "Display label"] \\
   [--script <path-to-script.txt>] \\
-  [--pillar parenting_insights|ai_magic|mom_health] \\
+  [--pillar parenting_insights|ai_magic|health] \\
   [--hook-card <path-to-png>] \\
   [--hook-card-hold-sec 2] \\
   [--keep-public]

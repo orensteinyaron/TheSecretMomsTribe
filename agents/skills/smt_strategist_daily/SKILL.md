@@ -92,7 +92,7 @@ You receive a list of hooks used in the last 14 days. If an opportunity's `angle
   "coverage_targets": {
     "ai_magic": int,
     "parenting_insights": int,
-    "mom_health": int,
+    "health": int,
     "tech_for_moms": int,
     "trending": int,
     "financial": int

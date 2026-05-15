@@ -49,7 +49,7 @@ that as a bug in the SKILL and file a v-bump request.
 The SKILL.md files speak the **canonical** pillar vocabulary, which uses
 the long, editorial names:
 
-- `ai_magic`, `parenting_insights`, `mom_health`, `tech_for_moms`,
+- `ai_magic`, `parenting_insights`, `health`, `tech_for_moms`,
   `trending`, `financial`
 
 The `content_queue.content_pillar` column uses the **DB** vocabulary, which

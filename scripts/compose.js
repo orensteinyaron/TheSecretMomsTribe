@@ -59,7 +59,7 @@ const PILLAR_COLOR = {
   ai_magic: BRAND.purple,
   parenting_insights: BRAND.pink,
   tech_for_moms: BRAND.purple,
-  mom_health: BRAND.purpleLight,
+  health: BRAND.purpleLight,
   trending: BRAND.pink,
 };
 
@@ -67,13 +67,13 @@ const PILLAR_LABEL = {
   ai_magic: 'AI MAGIC',
   parenting_insights: 'PARENTING',
   tech_for_moms: 'TECH FOR MOMS',
-  mom_health: 'MOM HEALTH',
+  health: 'MOM HEALTH',
   trending: 'TRENDING',
 };
 
-// Dark template: ai_magic, mom_health, trending
+// Dark template: ai_magic, health, trending
 // Light template: parenting_insights, tech_for_moms
-const DARK_PILLARS = new Set(['ai_magic', 'mom_health', 'trending']);
+const DARK_PILLARS = new Set(['ai_magic', 'health', 'trending']);
 
 const DIMS = {
   tiktok_slideshow: { w: 1080, h: 1920 },
