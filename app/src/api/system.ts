@@ -1,5 +1,12 @@
 import { apiFetch, apiPatch } from './client';
-import type { Service, RenderProfile, SystemHealth, PipelineHealth } from '../types';
+import type {
+  Service,
+  RenderProfile,
+  SystemHealth,
+  PipelineHealth,
+  PipelineRun,
+  ContentQueueRejected,
+} from '../types';
 
 export const systemApi = {
   services: () => apiFetch<Service[]>('system-api', { resource: 'services' }),
@@ -12,4 +19,7 @@ export const systemApi = {
     ...(date ? { date } : {}),
     ...(includeDebug ? { include_debug: '1' } : {}),
   }),
+  pipelineRuns: (limit = 50) => apiFetch<PipelineRun[]>('system-api', { resource: 'pipeline_runs', limit: String(limit) }),
+  pipelineRun: (id: string) => apiFetch<PipelineRun[]>('system-api', { resource: 'pipeline_runs', id }),
+  contentQueueRejected: (limit = 50) => apiFetch<ContentQueueRejected[]>('system-api', { resource: 'content_queue_rejected', limit: String(limit) }),
 };

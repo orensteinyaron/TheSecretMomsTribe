@@ -5,6 +5,20 @@
 Content engine (builds audience) → Product layer (monetizes audience).
 Five autonomous agents connected through Supabase as shared memory.
 
+> **Agent Skills v1.0.0 (2026-05-11).** The four content-pipeline agents
+> (orchestrator, research, strategist-daily, content-text-gen) load their
+> behavior from versioned `SKILL.md` files at runtime via
+> `agents/lib/skill_loader.js`. The deterministic safety net beneath them
+> lives in `agents/lib/gate_validators.js` and
+> `agents/lib/pillar_translation.js`. Orchestrator invocations land in
+> the new `pipeline_runs` table; LLM outputs rejected by the gates land
+> in `content_queue_rejected`; warn/error/critical events land in
+> `escalations`. The trigger story is unchanged — the existing GitHub
+> Actions cron (`.github/workflows/orchestrator.yml`) continues to fire
+> the orchestrator, which now defaults to `--mode=daily`. See
+> [agents/skills/README.md](../agents/skills/README.md) for the
+> contract-wins precedence rule and load order.
+
 ---
 
 ## Agent Pipeline

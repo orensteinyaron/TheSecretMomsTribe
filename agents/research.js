@@ -22,6 +22,8 @@ import {
   MIN_ACCEPTABLE_BRIEFING,
   validateBriefingUrls,
 } from './lib/briefing-urls.js';
+import { loadSkill } from './lib/skill_loader.js';
+import { validateBaseSchema, validatePillarRouting, validateAiMagicGate } from './lib/gate_validators.js';
 
 // --- Config ---
 
@@ -304,71 +306,16 @@ async function fetchRecentTopics() {
 }
 
 // --- Claude Synthesis ---
+//
+// The system prompt is loaded at runtime from
+// agents/skills/smt_research/SKILL.md via loadSkill('smt_research'). The
+// only in-code prompt content that survives is the JSON output schema —
+// this script's parser depends on the exact field set below, so the
+// schema is appended to the SKILL-based system prompt rather than
+// expressed in the SKILL itself.
+const OUTPUT_SCHEMA_INSTRUCTIONS = `
 
-const SYSTEM_PROMPT = `You are the content strategist for Secret Moms Tribe (SMT), a parenting content brand on TikTok and Instagram targeting moms of kids ages 1-16.
-
-## Brand Identity
-The mom who always knows things first. Finds the AI hacks, the apps, the science, the tricks — and shares them before anyone else does.
-
-## Brand Voice
-Warm, knowing mom friend. Uses "we" and "us." Slight humor, never condescending. She knows things other moms don't — that's the "secret."
-
-## Content Categories (V1.1 canonical names — scan for ALL)
-1. ai_magic (30%) — Shows AI doing something useful for a mom on screen. Always has: the prompt/input + the AI output. Examples: AI writes bedtime story, AI generates school lunches from fridge photo, AI writes the hard email to teacher, AI creates conversation starters for teen.
-2. parenting (25%) — Science-backed, behavior-based, emotionally resonant. Always reframes something moms feel guilty about. Examples: why your teen says "fine", toddler meltdowns are nervous system not defiance, the 10 minute rule that changes bedtime.
-3. tech (20%) — Apps, tools, shortcuts. Specific and actionable. Always leads with the result not the tool. Examples: app that scans fridge and plans dinner, Chrome extension for focus, 3 phone settings every mom should change tonight.
-4. health (15%) — Mental load, burnout, sleep, physical health. Never preachy, always practical. Examples: the 90 second reset when you're about to snap, why you're always tired, the thing nobody tells you about mom brain.
-5. trending (10%) — News, studies, viral moments reframed for moms. Always timely with a SMT angle. Examples: new screen time study (what it actually means), that viral parenting debate (here's the nuance).
-
-## Content Types
-- wow: AI-magic outputs, tech reveals, actionable tools that make viewers say "I need this." Show the OUTPUT, not the process.
-- trust: Relatable mom moments, memes, guilt reframes. Builds community. Gets shares.
-- cta: Save/share-driven. Only when organic and earned. Never hard-sell.
-
-## KEY LESSONS
-- Meme/relatable content outperforms educational 25:1
-- ALWAYS lead with emotion, never with information
-- Hook MUST grab attention in 0-3 seconds
-- Show the OUTPUT not the process (especially AI magic and tech)
-- Apps/tools perform best when you show the RESULT first
-- Cross-posting fails — each platform needs NATIVE content
-
-## Category Mix Target (across ${BRIEFING_REQUEST_COUNT} opportunities)
-- 1-2x ai_magic
-- 1x parenting
-- 1x tech
-- 0-1x health
-- 0-1x trending
-At least 3 different categories must be represented. Never more than 2 from same category.
-
-## Content Type Distribution
-- 2-3x wow
-- 1-2x trust
-- 0-1x cta
-
-## Quality Requirements
-- At least 3 different categories represented
-- At least 1 TikTok-native, at least 1 Instagram-native
-- Every opportunity has a clear EMOTIONAL angle
-- Every suggested_hook works in 0-3 seconds
-- Do NOT repeat topics from the "Topics to AVOID" list
-
-## Age Ranges
-Tag each opportunity with the most relevant age range:
-- toddler (1-3)
-- little_kid (4-7)
-- school_age (8-12)
-- teen (13-16)
-- universal (all ages — max 1 per batch)
-
-Ensure at least 2 different age ranges across the ${BRIEFING_REQUEST_COUNT} opportunities.
-
-## Signal Provenance (REQUIRED)
-Every scraped signal above carries a \`signal_source\` tag: "apify_reddit", "apify_tiktok", or "apify_trends". You MUST copy that exact string to the opportunity you derive from that signal. Do not rename, mutate, or drop this field.
-
-If you synthesize an opportunity from multiple signals, pick the signal_source of the STRONGEST contributing signal. If you introduce a URL that wasn't in any scraped signal (e.g. a link you know exists from training data), set \`signal_source\` to "llm_inferred".
-
-## Output Format
+## In-code Output Format (overrides any conflicting format in the SKILL)
 Return a JSON array of exactly ${BRIEFING_REQUEST_COUNT} objects. Each object:
 {
   "topic": "Short topic title (5-8 words)",
@@ -568,11 +515,14 @@ async function generateBriefing(sources) {
 
   const userPrompt = buildUserPrompt(sources, recentTopics, directives, insights, renderProfiles);
 
+  const skill = await loadSkill('smt_research');
+  const systemPrompt = skill.systemPrompt + OUTPUT_SCHEMA_INSTRUCTIONS;
+  console.log(`[Research] Loaded skill smt_research v${skill.skillVersion} (contract v${skill.contractVersion})`);
   console.log(`[Research] Calling Claude (${CLAUDE_MODEL})...`);
   const msg = await anthropic.messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 4096,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
   });
 
@@ -599,7 +549,12 @@ async function generateBriefing(sources) {
     throw new Error(`JSON parse failed: ${err.message}`);
   }
 
-  return validateOpportunities(opportunities);
+  const validated = await validateOpportunities(opportunities);
+  return {
+    opportunities: validated,
+    skillVersion: skill.skillVersion,
+    contractVersion: skill.contractVersion,
+  };
 }
 
 // --- Signal ID + URL validation ---
@@ -698,7 +653,7 @@ async function main() {
 
   // Synthesize with Claude — we over-generate by BRIEFING_REQUEST_COUNT so
   // URL validation can prune dead ones without shortening the final briefing.
-  const opportunities = await generateBriefing(sources);
+  const { opportunities, skillVersion, contractVersion } = await generateBriefing(sources);
 
   // Attach stable signal_ids (used by content_queue.source_urls.signal_id)
   attachSignalIds(opportunities);
@@ -762,9 +717,39 @@ async function main() {
   // Write to Supabase
   await writeBriefing(finalOpps, sourceSummary);
 
+  // Stamp skill_version + contract_version on the most-recent agent_runs row
+  // for this agent so the lineage is auditable. We do this best-effort —
+  // if the row isn't there yet (the orchestrator hasn't inserted it), we
+  // skip silently rather than failing the whole run.
+  try {
+    const { data: agentRow } = await supabase
+      .from('agents')
+      .select('id')
+      .eq('slug', 'research-agent')
+      .maybeSingle();
+    if (agentRow?.id) {
+      const { data: latestRun } = await supabase
+        .from('agent_runs')
+        .select('id')
+        .eq('agent_id', agentRow.id)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestRun?.id) {
+        await supabase
+          .from('agent_runs')
+          .update({ skill_version: skillVersion, contract_version: contractVersion })
+          .eq('id', latestRun.id);
+      }
+    }
+  } catch (err) {
+    console.warn(`[Research] Failed to stamp skill_version on agent_runs (non-fatal): ${err.message}`);
+  }
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n[Research Agent] Done in ${elapsed}s.`);
   console.log(`[Research Agent] ${finalOpps.length} opportunities written to Supabase.`);
+  console.log(`[Research Agent] Skill: smt_research v${skillVersion} (contract v${contractVersion})`);
 
   // Print summary
   console.log('\n=== TODAY\'S OPPORTUNITIES ===');

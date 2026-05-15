@@ -14,6 +14,8 @@
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { logCost, printCostSummary } from '../scripts/utils/cost-logger.js';
+import { loadSkill } from './lib/skill_loader.js';
+import { detectStrategistInvention } from './lib/gate_validators.js';
 
 // --- Config ---
 
@@ -144,30 +146,15 @@ async function fetchCostData() {
 }
 
 // --- Claude Prompt ---
+//
+// The system prompt is loaded at runtime from
+// agents/skills/smt_strategist_daily/SKILL.md via loadSkill. Only the
+// in-code JSON output schema lives below — this script's parser depends
+// on the exact field set described here, so the schema is appended to
+// the SKILL-based system prompt rather than expressed in the SKILL.
+const OUTPUT_SCHEMA_INSTRUCTIONS = `
 
-const SYSTEM_PROMPT = `You are the Strategy Analyst for Secret Moms Tribe (SMT), an AI-powered parenting content operation.
-
-Your job is to analyze the last 24 hours of operation and produce:
-1. INSIGHTS — observations about what's working or not (with confidence scores)
-2. TASKS — specific actionable recommendations for the admin to approve
-
-## Rules for Insights
-- Each insight has a type: format_performance | pillar_performance | timing | trend | audience | competitor | cost_efficiency
-- New insights start as "hypothesis" with confidence 0.30
-- If an existing insight matches your observation, increase its confidence by 0.10 and bump times_confirmed
-- If an existing insight is contradicted by today's data, note it (don't invalidate yet — needs 3+ contradictions)
-- Max 5 new insights per day (don't flood)
-- Be specific: "TikTok slideshows get 2x more renders than static" not "video performs well"
-
-## Rules for Tasks
-- Each task has a type: research_adjustment | content_mix_change | format_priority | competitor_response | profile_development | schedule_optimization | budget_adjustment
-- Each task has urgency: low | normal | high | critical
-- Each task must have a clear recommended_action
-- If the task should create a system_directive when approved, include proposed_directive as JSON
-- Max 5 tasks per day
-- Don't create tasks that duplicate active directives
-
-## Output Format
+## In-code Output Format (overrides any conflicting format in the SKILL)
 Return a JSON object:
 {
   "insights": [
@@ -190,7 +177,8 @@ Return a JSON object:
       "proposed_directive": { "directive": "...", "directive_type": "...", "target_agent": "..." } or null
     }
   ],
-  "summary": "2-3 sentence summary of today's analysis"
+  "summary": "2-3 sentence summary of today's analysis",
+  "notes_for_content_gen": "Optional free-text editorial guidance about ordering, prioritization, and pillar mix. NEVER invent prompts, outputs, or example artifacts here — that crosses the line into Content Agent territory and will be stripped by the orchestrator."
 }
 
 Return ONLY the JSON. No markdown fences.`;
@@ -471,12 +459,15 @@ async function main() {
     recentContent, briefing, existingInsights, directives, agentRuns, feedback, costs,
   });
 
-  // Call Claude
+  // Load skill (versioned SYSTEM_PROMPT) and call Claude
+  const skill = await loadSkill('smt_strategist_daily');
+  const systemPrompt = skill.systemPrompt + OUTPUT_SCHEMA_INSTRUCTIONS;
+  console.log(`[Strategist-Daily] Loaded skill smt_strategist_daily v${skill.skillVersion} (contract v${skill.contractVersion})`);
   console.log(`[Strategist-Daily] Calling Claude (${CLAUDE_MODEL})...`);
   const msg = await anthropic.messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 4096,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
   });
 
@@ -519,6 +510,19 @@ async function main() {
   result.insights = result.insights.slice(0, 5);
   result.tasks = result.tasks.slice(0, 5);
 
+  // Defensive fabrication check: scan notes_for_content_gen for the
+  // telltales of strategist invention. If detected we strip the field
+  // and emit a warn-level activity event; the orchestrator will pick it
+  // up and decide whether to escalate. (May 11 incident anchor.)
+  if (typeof result.notes_for_content_gen === 'string') {
+    const detection = detectStrategistInvention(result.notes_for_content_gen);
+    if (detection.detected) {
+      console.warn(`[Strategist-Daily] Stripping notes_for_content_gen — fabrication patterns: ${detection.matches.join(', ')}`);
+      result.notes_for_content_gen = '';
+      result.notes_stripped_for_invention = detection.matches;
+    }
+  }
+
   console.log(`[Strategist-Daily] Claude returned ${result.insights.length} insights, ${result.tasks.length} tasks`);
 
   // Process insights
@@ -537,9 +541,37 @@ async function main() {
     newTaskIds,
   });
 
+  // Stamp skill_version + contract_version onto the latest agent_runs row
+  // (best-effort — see the matching block in research.js for rationale).
+  try {
+    const { data: agentRow } = await supabase
+      .from('agents')
+      .select('id')
+      .eq('slug', 'strategist-daily')
+      .maybeSingle();
+    if (agentRow?.id) {
+      const { data: latestRun } = await supabase
+        .from('agent_runs')
+        .select('id')
+        .eq('agent_id', agentRow.id)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestRun?.id) {
+        await supabase
+          .from('agent_runs')
+          .update({ skill_version: skill.skillVersion, contract_version: skill.contractVersion })
+          .eq('id', latestRun.id);
+      }
+    }
+  } catch (err) {
+    console.warn(`[Strategist-Daily] Failed to stamp skill_version on agent_runs (non-fatal): ${err.message}`);
+  }
+
   // Print summary
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(`\n[Strategist-Daily] Done in ${elapsed}s.`);
+  console.log(`[Strategist-Daily] Skill: smt_strategist_daily v${skill.skillVersion} (contract v${skill.contractVersion})`);
 
   console.log('\n=== DAILY PULSE SUMMARY ===');
   console.log(result.summary);

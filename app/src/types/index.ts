@@ -74,6 +74,12 @@ export interface GenerationContext {
   created_at: string;
   needs_review_reason?: string | null;
 
+  // Agent Skills v1.0.0 — versioned skill audit trail. Populated by the
+  // four smt_* agents starting 2026-05-11. Older rows have nulls.
+  agent_slug?: string | null;
+  skill_version?: string | null;
+  contract_version?: string | null;
+
   // Reconstructed-data conventions — established by PR #21 backfill.
   // Canonical reference: agents/lib/prompt_logger.js JSDoc.
   // Spec: docs/specs/PIECE_3BCAFC78_BACKFILL_V1.md §5.
@@ -382,4 +388,37 @@ export interface CostSummary {
   by_stage: Record<string, number>;
   by_service: Record<string, number>;
   trend: { date: string; total: number }[];
+}
+
+
+// Agent Skills v1.0.0 — pipeline_runs + content_queue_rejected
+
+export interface PipelineRun {
+  id: string;
+  mode: "daily" | "hot_signal" | "resume_from_stage" | "dry_run";
+  status: "in_progress" | "completed" | "partial" | "failed" | "escalated" | "timeout";
+  parent_run_id: string | null;
+  started_at: string;
+  completed_at: string | null;
+  stages: Array<Record<string, unknown>>;
+  warnings: Array<Record<string, unknown>>;
+  escalations: Array<Record<string, unknown>>;
+  pre_flight: Record<string, unknown> | null;
+  total_cost_usd: number | null;
+  next_action: string | null;
+  trigger_source: string | null;
+}
+
+export interface ContentQueueRejected {
+  id: string;
+  pipeline_run_id: string | null;
+  briefing_id: string | null;
+  signal_id: string | null;
+  agent_id: string | null;
+  rejected_at: string;
+  reason: string;
+  field: string | null;
+  evidence: string | null;
+  raw_llm_output: unknown;
+  raw_briefing_row: unknown;
 }
