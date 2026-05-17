@@ -407,6 +407,7 @@ The `not.anyOf` block ensures contentgen explicitly cannot regress to the old sh
 5. Verify: any new `content_queue` row has `render_profile_id` set; matching `scheduled_posts` rows exist (one per channel).
 6. Spot-check one piece in the UI: detail page shows scheduled state correctly per channel.
 7. After 1 cron tick + verification clean: ship migration 4 (drop legacy columns).
+8. `scheduled_posts_post_check` stage in the orchestrator now guards this invariant on every run (added by YAR-128).
 
 ### 6.3 Rollback plan
 
