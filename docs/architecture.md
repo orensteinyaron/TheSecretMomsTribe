@@ -131,6 +131,38 @@ channel)`. The legacy `post_format` enum and the inline
 
 ---
 
+## Dependent-write post-checks
+
+Every persistent write the pipeline depends on must have a post-check stage. Schema-shaped gates (Skills contracts, NOT NULL constraints) are NOT sufficient — they verify input shape, not whether the database accepted the row.
+
+Run #667 (2026-05-17) demonstrated the failure mode: contentgen reported success and `contentgen_post_check` passed, but zero rows landed in `scheduled_posts` because a legacy unique index swallowed the inserts. The orchestrator marked the run `completed`. Reality: the pipeline produced zero shippable pieces.
+
+### The pattern
+
+For every table the pipeline writes to as a dependent step (e.g., content_queue → scheduled_posts → render outputs → published posts/equivalent):
+
+1. After the stage that writes to that table reports completion,
+2. Add a post-check stage that queries the table for the expected row count over the run window,
+3. Compute violations (rows that should exist but don't, or have wrong shape),
+4. If violations > 0: record an escalation and throw — DO NOT allow the run to be marked `completed`.
+
+### Implemented post-checks
+
+- `contentgen_post_check` — asserts content_queue rows landed cleanly after contentgen stage. Located in `agents/orchestrator.js`.
+- `scheduled_posts_post_check` — asserts every new content_queue row has matching scheduled_posts rows (one per channel in `DEFAULT_CHANNELS`). Located in `agents/orchestrator.js` (validator in `agents/lib/post_checks.js`). Added by YAR-128.
+
+### When to add a new post-check
+
+Any new dependent-write table introduced into the pipeline gets a post-check at the same time. Adding the write without the check is incomplete work. If a future ticket adds `render_outputs` or `publish_attempts` or similar, that ticket must include the corresponding `*_post_check` stage.
+
+### What a post-check is NOT
+
+- Not a replacement for Skills contract validation. Skills checks LLM output shape before insert. Post-checks verify the database accepted the insert.
+- Not an alternative to throwing on insert failure. Both layers are needed: insert failures should throw immediately; post-checks catch silent drops where the insert appeared to succeed but the row didn't land.
+- Not a metric. Post-check violations are pipeline failures, not warnings to track. They escalate and halt the run.
+
+---
+
 ## Tech Stack
 
 | Component | Tool |

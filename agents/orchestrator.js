@@ -33,6 +33,8 @@ import {
   detectStrategistInvention,
 } from './lib/gate_validators.js';
 import { toDbPillar, isCanonicalPillar } from './lib/pillar_translation.js';
+import { DEFAULT_CHANNELS } from './lib/channels.js';
+import { validateScheduledPostsCoverage } from './lib/post_checks.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '..');
@@ -432,6 +434,69 @@ async function runDaily({ pipelineRun, dryRun }) {
       });
     }
     await appendStage(pipelineRun?.id, { stage: 'contentgen_post_check', rows: cqCheck.rows.length, violations: cqCheck.violations.length });
+
+    // STAGE 3b: scheduled_posts_post_check (YAR-128). Symmetric dependent-
+    // write check for the table contentgen writes downstream of content_queue.
+    // contentgen_post_check passing tells us content_queue rows landed; this
+    // stage tells us each of those rows has matching scheduled_posts rows for
+    // every channel in DEFAULT_CHANNELS. See docs/architecture.md →
+    // "Dependent-write post-checks".
+    let spCheck;
+    try {
+      spCheck = await validateScheduledPostsCoverage({
+        supabase,
+        runStartIso,
+        channels: DEFAULT_CHANNELS,
+      });
+    } catch (err) {
+      await appendStage(pipelineRun?.id, {
+        stage: 'scheduled_posts_post_check',
+        status: 'failed',
+        reason: 'scheduled_posts_post_check_query_failed',
+      });
+      await escalate(pipelineRun?.id, {
+        severity: 'error',
+        reason: 'scheduled_posts_post_check_query_failed',
+        details: { error: err.message, run_window_start: runStartIso },
+        recommendedAction: 'Investigate Supabase connectivity; rerun --mode=resume_from_stage --stage=contentgen.',
+      });
+      throw err;
+    }
+
+    if (spCheck.status === 'skipped') {
+      await appendStage(pipelineRun?.id, {
+        stage: 'scheduled_posts_post_check',
+        status: 'skipped',
+        reason: spCheck.reason,
+      });
+    } else {
+      await appendStage(pipelineRun?.id, {
+        stage: 'scheduled_posts_post_check',
+        status: spCheck.status,
+        content_rows: spCheck.contentRows,
+        expected_scheduled_rows: spCheck.expectedScheduledRows,
+        actual_scheduled_rows: spCheck.scheduledRows,
+        violations: spCheck.violations.length,
+      });
+
+      if (spCheck.status === 'failed') {
+        await escalate(pipelineRun?.id, {
+          severity: 'error',
+          reason: 'scheduled_posts_missing',
+          details: {
+            violation_count: spCheck.violations.length,
+            violations: spCheck.violations.slice(0, 10),
+            run_window_start: runStartIso,
+          },
+          recommendedAction:
+            'Inspect content.js writeScheduledPosts; check scheduled_posts table for insert failures; ' +
+            'rerun --mode=resume_from_stage --stage=contentgen.',
+        });
+        throw new Error(
+          `scheduled_posts_post_check: ${spCheck.violations.length} content rows missing scheduled_posts coverage`,
+        );
+      }
+    }
   }
 
   await updatePipelineRun(pipelineRun?.id, { status: 'completed', next_action: 'idle_until_next_cron' });
