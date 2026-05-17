@@ -1032,18 +1032,27 @@ async function writeScheduledPosts(posts, insertedContentRows, captionsPerPost) 
 
   const { error } = await supabase.from('scheduled_posts').insert(allRows);
   if (error) {
+    // FAIL LOUD. Silent returns here are exactly what masked Run #667:
+    // pipeline reported clean while zero rows persisted. The orchestrator's
+    // failure path (non-zero exit code → escalation) is the correct place
+    // for this — not a silently swallowed log.
+    //
+    // 'alert' is the right activity_log category here: 'error' is not a
+    // valid value (see agents/lib/activity.js), and a silent logActivity
+    // failure is part of how Run #667 hid for 2+ hours.
     console.error('[Content] Failed to write scheduled_posts:', error);
-    // Non-fatal: content_queue rows are already in place. The orchestrator
-    // can re-run the schedule step. But log loud — this is a regression risk.
     await logActivity({
-      category: 'error',
+      category: 'alert',
       actor_type: 'agent',
       actor_name: 'content-agent',
       action: 'scheduled_posts_insert_failed',
       description: `scheduled_posts insert failed for ${insertedContentRows.length} pieces: ${error.message}`,
       metadata: { content_ids: insertedContentRows.map((r) => r.id), error: error.message },
     });
-    return;
+    throw new Error(
+      `scheduled_posts insert failed for ${insertedContentRows.length} pieces ` +
+      `(content_ids: ${insertedContentRows.map((r) => r.id).join(',')}): ${error.message}`,
+    );
   }
   console.log(`[Content] ${allRows.length} scheduled_posts rows written (${insertedContentRows.length} pieces × channels)`);
 }
