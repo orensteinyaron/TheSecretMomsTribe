@@ -9,7 +9,7 @@ Same as Moving Images:
 
 ## Text Composition
 - Brand typography applied by compose.js
-- Text positioned per post_format layout
+- Text positioned per render profile layout
 - Pillar-specific color accents
 - @thesecretmomstribe handle watermark
 
