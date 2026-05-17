@@ -203,3 +203,93 @@ test('scheduled_posts.channel enum accepts tiktok + instagram', { skip: !hasReal
     }
   }
 });
+
+// Issue 1 regression lock (Run #667). Legacy single-column unique index
+// `idx_published_posts_content` survived the published_posts → scheduled_posts
+// rename and blocked every batch insert (5 pieces × 2 channels each → all
+// rolled back atomically; pipeline reported clean while 0 rows persisted).
+//
+// This test pins the correct invariant: scheduled_posts permits exactly one
+// row per (content_id, channel) pair — meaning N rows per content_id when
+// the piece targets N channels, but never two rows with the same
+// (content_id, channel).
+test('scheduled_posts: 2 rows per content_id (one per channel) allowed; duplicate (content_id, channel) rejected', { skip: !hasRealSupabase }, async () => {
+  const supabase = await getSupabase();
+  const { randomUUID } = await import('node:crypto');
+
+  // 1. Create a real content_queue row to attach to (avoids FK violation).
+  //    Use a valid render_profile_id resolved at runtime.
+  const { data: profile } = await supabase
+    .from('render_profiles')
+    .select('id')
+    .eq('slug', 'static-image')
+    .maybeSingle();
+  assert.ok(profile?.id, 'static-image render profile must exist for this test');
+
+  const probeHook = `schema-contract-probe-${randomUUID()}`;
+  const { data: piece, error: pieceErr } = await supabase
+    .from('content_queue')
+    .insert({
+      content_type: 'wow',
+      status: 'draft',
+      hook: probeHook,
+      caption: 'schema-contract probe — please ignore',
+      hashtags: ['#probe'],
+      age_range: 'universal',
+      content_pillar: 'ai_magic',
+      image_status: 'pending',
+      launch_bank: false,
+      slides: [],
+      source_urls: [],
+      metadata: { probe: true },
+      render_profile_id: profile.id,
+    })
+    .select('id')
+    .single();
+  assert.equal(pieceErr, null, `content_queue insert failed: ${pieceErr?.message}`);
+
+  try {
+    // 2. Insert one tiktok + one instagram row for this piece. Both must persist.
+    const { error: ttErr } = await supabase
+      .from('scheduled_posts')
+      .insert({ content_id: piece.id, channel: 'tiktok', status: 'pending' })
+      .select()
+      .limit(0);
+    assert.equal(ttErr, null, `tiktok row should insert: ${ttErr?.message}`);
+
+    const { error: igErr } = await supabase
+      .from('scheduled_posts')
+      .insert({ content_id: piece.id, channel: 'instagram', status: 'pending' })
+      .select()
+      .limit(0);
+    assert.equal(igErr, null, `instagram row should insert (this is the Run #667 regression): ${igErr?.message}`);
+
+    const { data: rows } = await supabase
+      .from('scheduled_posts')
+      .select('channel')
+      .eq('content_id', piece.id);
+    assert.equal(rows?.length, 2, 'both channels must persist; expected 2 rows');
+    assert.deepEqual(
+      [...rows.map((r) => r.channel)].sort(),
+      ['instagram', 'tiktok'],
+      'expected one row per channel',
+    );
+
+    // 3. Duplicate (content_id, channel) MUST be rejected by the composite
+    //    UNIQUE constraint. This is the correct invariant — the legacy
+    //    single-column unique index was wrong, the composite is right.
+    const { error: dupErr } = await supabase
+      .from('scheduled_posts')
+      .insert({ content_id: piece.id, channel: 'tiktok', status: 'pending' })
+      .select()
+      .limit(0);
+    assert.ok(dupErr, 'duplicate (content_id, channel) must be rejected');
+    assert.equal(dupErr.code, '23505', `expected unique_violation (23505), got ${dupErr.code}: ${dupErr.message}`);
+  } finally {
+    // Cleanup. ON DELETE CASCADE on scheduled_posts.content_id → content_queue
+    // takes care of the children. If it doesn't, scheduled_posts cleanup is
+    // explicit for safety.
+    await supabase.from('scheduled_posts').delete().eq('content_id', piece.id);
+    await supabase.from('content_queue').delete().eq('id', piece.id);
+  }
+});
