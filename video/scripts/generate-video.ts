@@ -73,20 +73,27 @@ function slideWordCount(slide: SlideData): number {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// CHANNEL_MODEL_V1: format = render profile. We read render_profile_id +
+// the joined render_profiles.slug and gate template selection on the slug.
+// Only `moving-images` is supported by this script today; everything else
+// is logged + skipped.
 interface ContentItem {
   id: string;
   hook: string;
   caption: string;
   content_pillar: string;
   age_range: string;
-  post_format: string;
+  render_profile_id: string | null;
+  render_profiles: { slug: string } | null;
   metadata: Record<string, any>;
 }
 
 async function fetchContent(id: string): Promise<ContentItem> {
   const { data, error } = await supabase
     .from("content_queue")
-    .select("id, hook, caption, content_pillar, age_range, post_format, metadata")
+    .select(
+      "id, hook, caption, content_pillar, age_range, render_profile_id, render_profiles(slug), metadata",
+    )
     .eq("id", id)
     .single();
   if (error || !data) throw new Error(`Content not found: ${id} — ${error?.message}`);
@@ -470,8 +477,25 @@ async function main() {
   // 1. Fetch content
   console.log("1. Fetching content...");
   const content = await fetchContent(contentId!);
+  const slug = content.render_profiles?.slug || null;
   console.log(`   Hook: "${content.hook.slice(0, 60)}..."`);
   console.log(`   Pillar: ${content.content_pillar}  |  Age: ${content.age_range}`);
+  console.log(`   Render profile: ${slug || "(none)"}`);
+
+  // CHANNEL_MODEL_V1: dispatch on render_profile.slug. Only moving-images
+  // is wired through this slideshow generator today. Anything else is a
+  // hard skip — fail loudly so callers don't think a video was produced.
+  switch (slug) {
+    case "moving-images":
+      break;
+    case null:
+      console.error(`   No render_profile_id set on ${contentId}; cannot generate.`);
+      process.exit(1);
+      break;
+    default:
+      console.warn(`   Render profile "${slug}" is not supported by generate-video.ts (only "moving-images"). Skipping.`);
+      process.exit(0);
+  }
 
   // 2. Parse into slides
   console.log("\n2. Parsing slides...");

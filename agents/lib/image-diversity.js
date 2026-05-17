@@ -74,11 +74,13 @@ export const RACHEL_LOCATIONS = [
 ];
 
 /**
- * Decide rachel_mode from post_format. Avatar formats put Rachel on
- * screen; everything else is b-roll.
+ * Decide rachel_mode from render_profile_slug. The `avatar-v1` profile
+ * puts Rachel on screen; everything else is b-roll. (The avatar variant
+ * — full_avatar vs avatar_visual — is carried by avatar_config.format
+ * and does not change rachel_mode for the cover image.)
  */
-export function pickRachelMode(postFormat) {
-  if (postFormat === 'tiktok_avatar' || postFormat === 'tiktok_avatar_visual') {
+export function pickRachelMode(renderProfileSlug) {
+  if (renderProfileSlug === 'avatar-v1') {
     return 'rachel_in_frame';
   }
   return 'broll';

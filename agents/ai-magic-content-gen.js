@@ -56,19 +56,14 @@ let run = { runId: null, owned: false };
 
 // --- Format mapping ---
 //
-// suggested_format (from curator) → render_profiles.slug + content_queue.post_format
-// Aligned with FORMAT_TO_PROFILE in agents/content.js.
+// suggested_format (from curator) → render_profiles.slug.
+// v2.0.0 (CHANNEL_MODEL_V1): post_format is dropped; render_profile_slug
+// is the source of truth.
 
 const SUGGESTED_TO_PROFILE_SLUG = {
   'moving-images': 'moving-images',
   'carousel': 'carousel',
   'static': 'static-image',
-};
-
-const SUGGESTED_TO_POST_FORMAT = {
-  'moving-images': 'tiktok_slideshow',
-  'carousel': 'ig_carousel',
-  'static': 'ig_static',
 };
 
 // --- DNA loader ---
@@ -219,10 +214,10 @@ original_output (VERBATIM — must appear word-for-word in at least one slide):
 ${opp.original_output}
 """
 
-Write one SMT post. The post_format will be derived from suggested_format:
-- moving-images → tiktok_slideshow (4-6 slides total)
-- carousel      → ig_carousel (5-7 slides total)
-- static        → ig_static (1 hook slide + 1 content slide is fine)
+Write one SMT post. The render_profile will be derived from suggested_format:
+- moving-images → moving-images render profile (4-6 slides total)
+- carousel      → carousel render profile (5-7 slides total)
+- static        → static-image render profile (1 hook slide + 1 content slide is fine)
 
 Slide #1 must be the hook. Last slide must be the CTA. Put the verbatim prompt on its own slide and the verbatim output on its own slide (or split across consecutive slides if too long).
 
@@ -329,7 +324,6 @@ function buildAiMagicOutputText(structured) {
 
 async function writeContentQueueRow(piece, opp, renderProfileMap, genMeta) {
   const profileSlug = SUGGESTED_TO_PROFILE_SLUG[opp.suggested_format] || 'static-image';
-  const postFormat = SUGGESTED_TO_POST_FORMAT[opp.suggested_format] || 'ig_static';
   const profile = renderProfileMap[profileSlug];
 
   const ai_magic_output_structured = piece.ai_magic_output;
@@ -348,8 +342,9 @@ async function writeContentQueueRow(piece, opp, renderProfileMap, genMeta) {
     opportunity_id: opp.id,
     signal_id: opp.signal_id,
     pillar_input: 'ai_magic',
-    format_input: postFormat,
+    format_input: profileSlug,
     suggested_format: opp.suggested_format,
+    channels: ['tiktok', 'instagram'],
     tokens_in: genMeta.usage?.input_tokens ?? 0,
     tokens_out: genMeta.usage?.output_tokens ?? 0,
     cost_usd: Number((genMeta.costUsd ?? 0).toFixed(6)),
@@ -368,7 +363,6 @@ async function writeContentQueueRow(piece, opp, renderProfileMap, genMeta) {
     image_prompt: piece.slides?.[0]?.image_prompt || null,
     age_range: opp.age_range || 'universal',
     content_pillar: 'ai_magic',
-    post_format: postFormat,
     slides: piece.slides || [],
     image_status: 'pending',
     launch_bank: false,
@@ -392,7 +386,27 @@ async function writeContentQueueRow(piece, opp, renderProfileMap, genMeta) {
     console.error('[ContentGen] Failed to insert content_queue row:', error);
     throw error;
   }
-  console.log(`[ContentGen] content_queue id=${data.id} (post_format=${postFormat}, render_profile=${profileSlug}${profile ? '' : ' MISSING'})`);
+  console.log(`[ContentGen] content_queue id=${data.id} (render_profile=${profileSlug}${profile ? '' : ' MISSING'})`);
+
+  // v2.0.0 (CHANNEL_MODEL_V1): insert scheduled_posts rows in 'pending' status
+  // for the default channel set. Caption polish for this curated single-piece
+  // path is intentionally deferred — the AI Magic agent generates one piece
+  // at a time and a downstream batch job can run the polish step on
+  // pending rows. For now, scheduled_posts.caption is null and the publish
+  // agent falls back to content_queue.caption.
+  const channels = ['tiktok', 'instagram'];
+  const { error: spError } = await supabase
+    .from('scheduled_posts')
+    .insert(channels.map((channel) => ({
+      content_id: data.id,
+      channel,
+      caption: null,
+      status: 'pending',
+    })));
+  if (spError) {
+    console.error(`[ContentGen] Failed to insert scheduled_posts for ${data.id}: ${spError.message}`);
+  }
+
   return data.id;
 }
 

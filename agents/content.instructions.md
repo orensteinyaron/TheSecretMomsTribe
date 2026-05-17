@@ -24,7 +24,7 @@ The agent MUST load and follow these three documents:
 Before generating, query the last 7 days of content_queue:
 
 ```sql
-SELECT age_range, content_pillar, content_type, platform
+SELECT age_range, content_pillar, content_type, render_profile_id
 FROM content_queue
 WHERE created_at >= NOW() - INTERVAL '7 days'
 ```
@@ -37,58 +37,60 @@ so it prioritizes uncovered combinations.
 
 ## Daily Batch (4 posts, fully automated)
 
-### 1. TikTok Slideshow — `post_format: tiktok_slideshow`
-TikTok native photo slideshow. 5-7 slides with text.
+Every piece carries exactly one `render_profile_slug` (the format) and a
+`channels` array (where it gets posted). Channels default to BOTH
+`tiktok` and `instagram` — the same rendered file ships to both, with
+platform-native captions. The four canonical render profiles:
+
+### 1. Moving Images — `render_profile_slug: moving-images`
+Slideshow video (1080×1920, 9:16, 15-60s). Hook → 4 magic slides → payoff.
 - Slide 1: Hook (serif, large, stops scroll)
 - Slides 2-5: Content (one idea per slide, max 15 words)
 - Final slide: Payoff + @handle + "Save for later"
-- Dimensions: 1080x1920 (9:16)
-- Audio suggestion required
+- TTS + Pexels b-roll; per-pillar palette
+- Audio suggestion required (TikTok-native music)
+- Also covers the "text-on-screen short" variant: 3-4 frames, dark bg, clean sans-serif
 
-### 2. TikTok Text-on-Screen OR Slideshow — `post_format: tiktok_text` or `tiktok_slideshow`
-Second TikTok post. Can be either format.
-- Text-on-screen: 3-4 frames, dark bg, clean sans-serif
-- Slideshow: same rules as above
-
-### 3. IG Carousel (5-7 slides) — `post_format: ig_carousel`
+### 2. Carousel — `render_profile_slug: carousel`
+IG-style swipe deck, 5-7 slides (1080×1350, 4:5).
 - Slide 1: Hook (stops scroll in feed, works standalone in grid)
 - Slide 2: Context / the problem
 - Slides 3-5: The content (tips, swaps, insights)
 - Slide 6: Reframe / emotional resonance
 - Slide 7: CTA + @handle
-- Dimensions: 1080x1350 (4:5)
 - Swipe indicator on slide 1
 
-### 4. IG Static OR Meme — `post_format: ig_static` or `ig_meme`
-Single image with text overlay.
-- One powerful statement, large serif text
+### 3. Static Image — `render_profile_slug: static-image`
+Single image with text overlay (1080×1920).
+- One powerful statement, large serif text — or meme format
 - Warm background (cream or navy per pillar)
-- Caption: 100-180 words, mini-essay format
-- Dimensions: 1080x1350 (4:5)
+- Caption: 100-180 words on Instagram, mini-essay format
 
-### Avatar Formats (NEW)
+### 4. Avatar — `render_profile_slug: avatar-v1`
+Rachel speaking. The specific variant is carried by `avatar_config.format`:
 
-**`tiktok_avatar`** — Full avatar video. Marry talks directly to camera, no B-roll.
-- Duration: 15-60 seconds
-- Use for: hot takes, personal stories, trust content, emotional topics
-- Clips: 3-5, all type "avatar"
-- Generates: `avatar_config` JSON in content_queue
+- **`avatar_config.format: "full_avatar"`** — full avatar video. Rachel talks directly to camera, no B-roll.
+  - Duration: 15-60s
+  - Use for: hot takes, personal stories, trust content, emotional topics
+  - Clips: 3-5, all type "avatar"
 
-**`tiktok_avatar_visual`** — Avatar + visual inserts. Marry talks with B-roll breaks.
-- Duration: 15-60 seconds
-- Use for: product reveals, explainers, comparisons, proof-based content
-- Clips: 3-6, mixing avatar/split/broll
-- Generates: `avatar_config` JSON in content_queue
+- **`avatar_config.format: "avatar_visual"`** — avatar + visual inserts. Rachel talks with B-roll breaks.
+  - Duration: 15-60s
+  - Use for: product reveals, explainers, comparisons, proof-based content
+  - Clips: 3-6, mixing avatar/split/broll
 
-**When to Use Avatar vs Moving Images:**
-- Avatar: When the content needs a HUMAN FACE for trust. Personal opinions, emotional topics, "I tested this" reveals.
-- Moving Images: When the content is VISUAL. Before/after comparisons, step-by-step tutorials, aesthetic content.
+**When to use Avatar vs Moving Images:**
+- Avatar: when the content needs a HUMAN FACE for trust. Personal opinions, emotional topics, "I tested this" reveals.
+- Moving Images: when the content is VISUAL. Before/after comparisons, step-by-step tutorials, aesthetic content.
 - Default to Moving Images unless the topic specifically benefits from a face.
 
-**Daily Mix Target (updated):**
-- 2 Moving Images (TikTok slideshow)
-- 1 Avatar video (tiktok_avatar OR tiktok_avatar_visual)
-- 1 Instagram (carousel or static)
+**Daily Mix Target:**
+- 2 Moving Images
+- 1 Avatar (`full_avatar` or `avatar_visual`)
+- 1 Carousel or Static Image
+
+Every piece in the batch defaults to `channels: ['tiktok','instagram']`
+unless the briefing explicitly asks otherwise.
 
 ---
 
@@ -107,17 +109,24 @@ Every batch of 4 MUST satisfy:
 
 | Field | Source |
 |---|---|
-| platform | tiktok or instagram |
+| channels | array of `tiktok` and/or `instagram` (default: both) |
 | content_type | wow, trust, or cta |
-| post_format | tiktok_slideshow, tiktok_text, ig_carousel, ig_static, ig_meme |
+| render_profile_slug | `avatar-v1`, `moving-images`, `static-image`, `carousel` |
+| avatar_config.format | `full_avatar` or `avatar_visual` (only when render_profile_slug = `avatar-v1`) |
 | age_range | toddler, little_kid, school_age, teen, universal |
-| content_pillar | ai_magic, parenting, tech, health, trending |
+| content_pillar | ai_magic, parenting, tech, health, trending, financial |
 | hook | The first thing the viewer sees |
-| caption | Full post caption (TikTok: 2-3 lines, IG: 100-180 words) |
+| caption | Base caption ≤300 chars; the Haiku polish step produces platform-native variants per channel |
 | hashtags | 5-8 per post, mix niche + medium |
-| ai_magic_output | The full content (for wow posts) |
+| ai_magic_output | Verbatim `original_prompt` + `original_output` (AI Magic pillar only — never fabricate) |
 | image_prompt | Per-slide array or single prompt |
 | audio_suggestion | TikTok only |
+
+Do NOT emit `post_format`, `scheduled_at_ig`, `scheduled_at_tt`,
+`published_at_ig`, `published_at_tt`, `published_url_ig`,
+`published_url_tt`, or `channel_override`. Those columns are dropped;
+emitting any of them is hard-rejected by
+`gate_validators.rejectLegacyFormatFields`.
 
 ---
 

@@ -1,5 +1,14 @@
 import { apiFetch, apiPost, apiPatch } from './client';
-import type { ContentItem, PiecePagePayload, PromptExecution, MetricSnapshot, ContentPillar } from '../types';
+import type {
+  ContentItem,
+  PiecePagePayload,
+  PromptExecution,
+  MetricSnapshot,
+  ContentPillar,
+  Channel,
+  ScheduledPost,
+  ScheduledPostStatus,
+} from '../types';
 
 const API_BASE = 'https://fvxaykkmzsbrggjgdfjj.supabase.co/functions/v1';
 
@@ -34,8 +43,21 @@ export const contentApi = {
   getPromptChain:  (id: string) => piecePath<PromptExecution[]>(`/pieces/${id}/prompt-chain`),
   getRenderOutput: (id: string) => piecePath<{ queue_row: any; profile: any; output_urls: any }>(`/pieces/${id}/render-output`),
   getMetrics:      (id: string) => piecePath<{ ig: { latest: MetricSnapshot | null; series: MetricSnapshot[] }; tt: { latest: MetricSnapshot | null; series: MetricSnapshot[] } }>(`/pieces/${id}/metrics`),
-  patchSchedule: (id: string, updates: { scheduled_at_ig?: string | null; scheduled_at_tt?: string | null; channel_override?: 'ig_only' | 'tt_only' | null }) =>
-    piecePath<{ id: string; scheduled_at_ig: string | null; scheduled_at_tt: string | null; channel_override: string | null }>(`/pieces/${id}/schedule`, 'PATCH', updates),
+  // CHANNEL_MODEL_V1: per-channel schedule + status edits. Each one
+  // targets a single `scheduled_posts` row (keyed by content_id + channel).
+  patchChannelSchedule: (id: string, channel: Channel, updates: { scheduled_for: string | null }) =>
+    piecePath<ScheduledPost>(`/pieces/${id}/channels/${channel}/schedule`, 'PATCH', updates),
+  patchChannelStatus: (
+    id: string,
+    channel: Channel,
+    updates: {
+      status: ScheduledPostStatus;
+      post_url?: string | null;
+      external_post_id?: string | null;
+      failure_reason?: string | null;
+    },
+  ) =>
+    piecePath<ScheduledPost>(`/pieces/${id}/channels/${channel}/status`, 'PATCH', updates),
   patchPillar: (id: string, pillar: ContentPillar) =>
     piecePath<{ id: string; content_pillar: ContentPillar }>(`/pieces/${id}/pillar`, 'PATCH', { pillar }),
   regenerateFromStep: (id: string, stepName: string, editedPrompt?: string) =>

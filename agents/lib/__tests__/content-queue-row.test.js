@@ -23,7 +23,8 @@ function samplePiece(overrides = {}) {
     content_type: 'wow',
     age_range: 'toddler',
     content_pillar: 'ai_magic',
-    post_format: 'tiktok_slideshow',
+    render_profile_slug: 'moving-images',
+    channels: ['tiktok', 'instagram'],
     platform: 'tiktok',            // in-memory routing — MUST NOT reach DB
     ai_magic_output: 'some magic',
     image_prompt: 'prompt',
@@ -47,11 +48,29 @@ test('buildContentQueueRow: NEVER includes platform (column was dropped)', () =>
   assert.ok(!('platform' in row), `platform leaked into row: ${JSON.stringify(Object.keys(row))}`);
 });
 
-test('buildContentQueueRow: does not include channel_override by default', () => {
-  // Per PIECE_PAGE_LIFECYCLE_V1 — default is dual-platform. channel_override
-  // is set only by explicit single-platform routing, which no caller does today.
+test('buildContentQueueRow: does not include channel_override (dropped in v2.0.0)', () => {
+  // Per CHANNEL_MODEL_V1 — channel_override is dropped. Per-channel state
+  // lives in scheduled_posts, written separately by writeScheduledPosts.
   const row = buildContentQueueRow(samplePiece(), OPTS);
   assert.ok(!('channel_override' in row));
+});
+
+test('buildContentQueueRow: does not include post_format (dropped in v2.0.0)', () => {
+  // Per CHANNEL_MODEL_V1 — post_format is dropped. Format is render_profile_id.
+  const row = buildContentQueueRow(samplePiece(), OPTS);
+  assert.ok(!('post_format' in row));
+});
+
+test('buildContentQueueRow: does not leak inline channel columns', () => {
+  // scheduled_at_ig/tt, published_at_ig/tt, published_url_ig/tt are dropped.
+  const row = buildContentQueueRow(samplePiece(), OPTS);
+  for (const col of [
+    'scheduled_at_ig', 'scheduled_at_tt',
+    'published_at_ig', 'published_at_tt',
+    'published_url_ig', 'published_url_tt',
+  ]) {
+    assert.ok(!(col in row), `leaked legacy column: ${col}`);
+  }
 });
 
 // --- Whitelist: columns that SHOULD be written -----------------------------
@@ -62,7 +81,7 @@ test('buildContentQueueRow: writes the expected whitelist columns', () => {
     'briefing_id', 'content_type', 'status',
     'hook', 'caption', 'hashtags',
     'ai_magic_output', 'image_prompt', 'audio_suggestion',
-    'age_range', 'content_pillar', 'post_format',
+    'age_range', 'content_pillar',
     'slides', 'avatar_config',
     'image_status', 'launch_bank', 'quality_rating',
     'render_profile_id', 'render_status',

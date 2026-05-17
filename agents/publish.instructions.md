@@ -7,37 +7,55 @@ to Instagram and TikTok at the scheduled time.
 
 ## Your Mission
 
-Query `content_queue` for approved posts with a `scheduled_for`
-time that has passed. Post them to the correct platform via API.
-Log results to `published_posts` table.
+For each `scheduled_posts` row in `pending` status whose parent piece is
+`approved` and whose `scheduled_for` has passed, post the rendered piece
+to the row's `channel` via API. Update the same row in-place with the
+outcome (`posted` or `failed`).
 
 ---
 
 ## Workflow
 
-1. Query approved, unposted content:
+1. Query pending channel rows for approved content:
    ```sql
-   SELECT cq.*
+   SELECT cq.*, sp.id AS scheduled_post_id, sp.channel, sp.caption AS channel_caption, sp.scheduled_for
    FROM content_queue cq
-   LEFT JOIN published_posts pp ON pp.content_id = cq.id
+   JOIN scheduled_posts sp ON sp.content_id = cq.id
    WHERE cq.status = 'approved'
-     AND cq.scheduled_for <= now()
-     AND pp.id IS NULL
-   ORDER BY cq.scheduled_for ASC;
+     AND sp.status = 'pending'
+     AND sp.scheduled_for <= now()
+   ORDER BY sp.scheduled_for ASC;
    ```
 
-2. For each post:
-   - If platform = instagram → use Instagram Graph API
-   - If platform = tiktok → use TikTok Content Posting API
-   - If image_prompt exists and no image generated → generate image first
+2. For each row:
+   - If `channel = 'instagram'` → use Instagram Graph API
+   - If `channel = 'tiktok'` → use TikTok Content Posting API
+   - Use `sp.caption` (the platform-native variant) if present; fall back to `cq.caption`
+   - If `image_prompt` exists and no image generated → generate image first
 
-3. On success:
-   - Insert into `published_posts` with platform_post_id and post_url
-   - Log confirmation
+3. On success — UPDATE the existing `scheduled_posts` row (do NOT insert a new one):
+   ```sql
+   UPDATE scheduled_posts
+   SET status = 'posted',
+       post_url = $1,
+       external_post_id = $2,
+       published_at = now()
+   WHERE id = $scheduled_post_id;
+   ```
+   The `UNIQUE (content_id, channel)` constraint guarantees one row per
+   channel for the life of the piece — you are mutating that row's state,
+   not creating a parallel record.
 
 4. On failure:
    - Retry once after 5 minutes
-   - If still fails, log error and alert (don't update status)
+   - If still fails:
+     ```sql
+     UPDATE scheduled_posts
+     SET status = 'failed',
+         failure_reason = $error
+     WHERE id = $scheduled_post_id;
+     ```
+   - Log error and alert (don't touch `content_queue.status`)
 
 ---
 

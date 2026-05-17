@@ -1,7 +1,8 @@
-// Content — V1.1 (PIECE_PAGE_LIFECYCLE_V1):
+// Content — V2.0.0 (CHANNEL_MODEL_V1):
 // - `platform` dropped (content goes to both IG + TT by policy).
-// - Per-channel schedule/publish fields added.
-// - Pillar taxonomy expanded: parenting, health, ai_magic, tech, trending, financial, uncategorized.
+// - Per-channel state lives in `scheduled_posts` table — never on the row.
+// - `post_format` replaced by `render_profile_id` + joined `render_profile`.
+// - Pillar taxonomy: parenting, health, ai_magic, tech, trending, financial, uncategorized.
 export type ContentPillar =
   | 'parenting'
   | 'health'
@@ -10,6 +11,48 @@ export type ContentPillar =
   | 'trending'
   | 'financial'
   | 'uncategorized';
+
+// CHANNEL_MODEL_V1: every piece targets multiple channels (TikTok +
+// Instagram by default). Per-channel state lives on `scheduled_posts`.
+export type Channel = 'tiktok' | 'instagram';
+
+export type ScheduledPostStatus =
+  | 'pending'
+  | 'scheduled'
+  | 'posted'
+  | 'failed'
+  | 'skipped';
+
+export type RenderProfileSlug =
+  | 'avatar-v1'
+  | 'moving-images'
+  | 'static-image'
+  | 'carousel';
+
+// One row per (content_id, channel). Source of truth for per-channel
+// scheduling, captions, and publish state.
+export interface ScheduledPost {
+  id: string;
+  content_id: string;
+  channel: Channel;
+  status: ScheduledPostStatus;
+  caption: string | null;
+  scheduled_for: string | null;       // ISO timestamp
+  published_at: string | null;
+  post_url: string | null;
+  external_post_id: string | null;
+  failure_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Compact view of the joined render_profiles row attached to a piece.
+// Full RenderProfile (with pipeline_steps etc.) is defined below.
+export interface RenderProfileRef {
+  id: string;
+  slug: RenderProfileSlug;
+  name: string;
+}
 
 export interface ContentItem {
   id: string;
@@ -25,7 +68,6 @@ export interface ContentItem {
   slides: Slide[] | null;
   age_range: 'toddler' | 'little_kid' | 'school_age' | 'teen' | 'universal' | null;
   content_pillar: ContentPillar;
-  post_format: string | null;
   image_url: string | null;
   image_status: string | null;
   slide_images: any[] | null;
@@ -40,20 +82,19 @@ export interface ContentItem {
   rejection_reason: string | null;
   created_at: string;
   updated_at: string;
+  // CHANNEL_MODEL_V1: joined render_profiles row (singular). The legacy
+  // `render_profiles` field is kept temporarily for places that still
+  // read it (e.g. RenderQueue); new code should use `render_profile`.
+  render_profile: RenderProfileRef | null;
   render_profiles?: RenderProfile;
   source_urls: Array<{ url: string; source: string }> | null;
-  // Legacy single-channel schedule field. Still present on the row for
-  // back-compat with Planner.tsx; new piece-level scheduling should use
-  // scheduled_at_ig / scheduled_at_tt per PIECE_PAGE_LIFECYCLE_V1.
+  // Single-row "when should this piece go live" date. The per-channel
+  // schedule lives on `scheduled_posts`; this column is kept on the row
+  // for the Planner's day-grouping (it picks the earliest channel slot).
   scheduled_for: string | null;
-  // Per-channel scheduling (added V1.1). Nullable until user sets them.
-  scheduled_at_ig: string | null;
-  scheduled_at_tt: string | null;
-  published_at_ig: string | null;
-  published_at_tt: string | null;
-  published_url_ig: string | null;
-  published_url_tt: string | null;
-  channel_override: 'ig_only' | 'tt_only' | null;
+  // Per-channel state. Always an array — empty if no scheduled_posts rows
+  // exist yet for this piece (legacy data).
+  scheduled_posts: ScheduledPost[];
   // Full generation prompt chain context (set by content_gen agent).
   generation_context: GenerationContext | null;
 }
@@ -183,16 +224,11 @@ export interface PiecePagePayload {
     };
     performance_vs_pillar: { ig: number | null; tt: number | null };
   };
+  // CHANNEL_MODEL_V1: per-channel state is now on each scheduled_posts
+  // row (carried on `piece.scheduled_posts`); the payload-level `schedule`
+  // object only exposes derived/next-slot info the server computes.
   schedule: {
-    scheduled_at_ig: string | null;
-    scheduled_at_tt: string | null;
-    published_at_ig: string | null;
-    published_at_tt: string | null;
-    published_url_ig: string | null;
-    published_url_tt: string | null;
-    channel_override: 'ig_only' | 'tt_only' | null;
-    next_available_slot_ig: string;
-    next_available_slot_tt: string;
+    next_available_slot: Record<Channel, string>;
   };
 }
 

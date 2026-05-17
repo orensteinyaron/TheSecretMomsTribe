@@ -24,6 +24,7 @@ import assert from 'node:assert/strict';
 
 import {
   detectStrategistInvention,
+  rejectLegacyFormatFields,
   validateContentQueueRow,
 } from '../../lib/gate_validators.js';
 
@@ -92,6 +93,36 @@ check(
       fixture.research_briefing_opp,
     );
     assert.equal(verdict.ok, false);
+  },
+);
+
+// 5. v2.0.0 fail-closed: legacy v1.0.0 shape is hard-rejected.
+//    The May 11 fabricated post fixture carries post_format='ig_static'
+//    (pre-CHANNEL_MODEL_V1 shape). The new gate catches that shape
+//    regardless of which pillar gate would also fail.
+check(
+  'rejectLegacyFormatFields catches the post_format field in the May 11 fixture',
+  () => {
+    const verdict = rejectLegacyFormatFields(fixture.contentgen_fabricated_post);
+    assert.equal(verdict.ok, false, 'expected legacy field gate to reject');
+    assert.ok(
+      verdict.fields.includes('post_format'),
+      `expected post_format in flagged fields; got ${JSON.stringify(verdict.fields)}`,
+    );
+  },
+);
+
+check(
+  'rejectLegacyFormatFields passes a clean v2.0.0 row',
+  () => {
+    const verdict = rejectLegacyFormatFields({
+      signal_id: 'x',
+      render_profile_slug: 'avatar-v1',
+      channels: ['tiktok', 'instagram'],
+      hook: 'h',
+      caption: 'c',
+    });
+    assert.equal(verdict.ok, true);
   },
 );
 

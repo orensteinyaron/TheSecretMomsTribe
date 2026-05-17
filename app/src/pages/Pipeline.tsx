@@ -127,10 +127,10 @@ export default function Pipeline() {
         <EmptyState title="No content" description={`No ${tab === 'all' ? '' : tab} items found.`} />
       ) : (
         <div className="bg-bg-surface border border-border-default rounded-lg overflow-hidden">
-          {/* Header — Platform column removed (V1.1: channel is implicit; every piece
-              goes to both IG + TT by policy unless channel_override is set). Format
-              is now primary categorical via the Pillar column; channels are visible
-              on the piece page Scheduling section. */}
+          {/* Header — CHANNEL_MODEL_V1: channels are implicit (every piece
+              ships to TikTok + Instagram by default). Format = render
+              profile; per-channel state is visible on the piece page
+              Scheduling section. */}
           <div className="grid grid-cols-[36px_1fr_120px_90px_90px_80px_80px] gap-2 px-4 py-2 border-b border-border-subtle" data-testid="pipeline-header">
             <label className="flex items-center">
               <input type="checkbox" checked={selected.size === (displayItems || []).length && (displayItems || []).length > 0} onChange={toggleAll} className="accent-accent" />
@@ -165,8 +165,8 @@ export default function Pipeline() {
                   </span>
                 )}
               </div>
-              <span className="text-xs text-text-secondary truncate" title={item.post_format || ''}>
-                {item.post_format ? item.post_format.replace(/_/g, ' ') : '—'}
+              <span className="text-xs text-text-secondary truncate" title={item.render_profile?.name ?? ''}>
+                {item.render_profile?.name ?? '—'}
               </span>
               <PillarBadge pillar={item.content_pillar} />
               <StatusBadge status={item.status} />

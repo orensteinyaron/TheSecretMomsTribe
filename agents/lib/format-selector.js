@@ -1,36 +1,40 @@
 /**
- * Format selection + caption length validation.
+ * Render-profile recommendation + deterministic format validation.
  *
- * Rules (from CONTENT_QUALITY_V1_SPEC):
- * - Single emotional punch (≤20 words core payload) → ig_static / tiktok_text / ig_meme
- * - Method or list with 3+ distinct points → ig_carousel (or tiktok_slideshow for TT)
- * - Hook-driven reveal / story with a twist → tiktok_slideshow
- * - Rachel speaking direct-to-camera → tiktok_avatar / tiktok_avatar_visual
+ * v2.0.0 (CHANNEL_MODEL_V1): Format is `render_profile_slug` — one of
+ * `avatar-v1`, `moving-images`, `static-image`, `carousel`. The legacy
+ * `post_format` enum is dropped.
  *
- * Caption length caps come from platform truncation realities:
- * IG feed truncates around 125 chars; TikTok users read on-screen text
- * rather than the caption; avatar formats lean on voice not text.
+ * Caption caps here are for the BASE caption that the main LLM emits.
+ * The downstream Haiku polish step produces per-channel variants with
+ * their own caps (see CHANNEL_STYLE in channels.js: tiktok max 150,
+ * instagram max 2200). Render-profile-level caps encode content-density
+ * expectations — a static-image piece is tighter than a carousel piece.
+ *
+ * Rules (from CONTENT_QUALITY_V1_SPEC, re-keyed):
+ * - Single emotional punch (≤20 words core payload) → static-image
+ * - Method or list with 3+ distinct points → moving-images (or carousel
+ *   when the piece is explicitly an IG-style image swipe).
+ * - Hook-driven reveal / story with a twist → moving-images
+ * - Rachel speaking direct-to-camera → avatar-v1
  */
 
-export const CAPTION_MAX_BY_FORMAT = {
-  ig_static: 125,
-  ig_carousel: 400,
-  ig_meme: 125,
-  tiktok_slideshow: 100,
-  tiktok_text: 100,
-  tiktok_avatar: 150,
-  tiktok_avatar_visual: 150,
-  video_script: 400,
+import { RENDER_PROFILE_SLUGS } from './render-profiles.js';
+
+export const CAPTION_MAX_BY_SLUG = {
+  [RENDER_PROFILE_SLUGS.STATIC_IMAGE]:  200,
+  [RENDER_PROFILE_SLUGS.MOVING_IMAGES]: 300,
+  [RENDER_PROFILE_SLUGS.CAROUSEL]:      400,
+  [RENDER_PROFILE_SLUGS.AVATAR_V1]:     200,
 };
 
 // Soft target: what we ASK the LLM to write to. Hard cap stays as
-// CAPTION_MAX_BY_FORMAT — that's what the post-validator enforces.
-// The 20% headroom absorbs the LLM's observed ~15-30% miscalibration
-// (see PR #13 investigation). Empirically tuned; adjust if the
-// caption_length_overshoot debug log shows the margin is too tight or
-// too generous.
-export const CAPTION_TARGET_BY_FORMAT = Object.fromEntries(
-  Object.entries(CAPTION_MAX_BY_FORMAT).map(([fmt, cap]) => [fmt, Math.round(cap * 0.8)]),
+// CAPTION_MAX_BY_SLUG — that's what the post-validator enforces. The 20%
+// headroom absorbs the LLM's observed ~15-30% miscalibration (see PR #13
+// investigation). Empirically tuned; adjust if the caption_length_overshoot
+// debug log shows the margin is too tight or too generous.
+export const CAPTION_TARGET_BY_SLUG = Object.fromEntries(
+  Object.entries(CAPTION_MAX_BY_SLUG).map(([slug, cap]) => [slug, Math.round(cap * 0.8)]),
 );
 
 // Max overshoot (as fraction of cap) that's still considered
@@ -81,51 +85,51 @@ export function classifyDensity(post) {
 }
 
 /**
- * Pure recommendation: given a post's shape, which post_format best fits?
+ * Pure recommendation: given a post's shape, which render_profile_slug fits?
  * Does not mutate the post.
+ *
+ * The LLM emits its own render_profile_slug; this function exists for
+ * tooling that needs to suggest a slug deterministically (e.g.,
+ * regenerate-stale-drafts).
  */
-export function recommendFormat(post) {
+export function recommendRenderProfileSlug(post) {
   const { structure, payload_word_count } = classifyDensity(post);
 
   if (structure === 'conversation') {
-    return post?.post_format === 'tiktok_avatar_visual' ? 'tiktok_avatar_visual' : 'tiktok_avatar';
+    return RENDER_PROFILE_SLUGS.AVATAR_V1;
   }
-
-  const platform = post?.platform || (String(post?.post_format || '').startsWith('tiktok') ? 'tiktok' : 'instagram');
-
-  if (structure === 'list' || structure === 'method') {
-    return platform === 'tiktok' ? 'tiktok_slideshow' : 'ig_carousel';
+  if (structure === 'list' || structure === 'method' || structure === 'story') {
+    return RENDER_PROFILE_SLUGS.MOVING_IMAGES;
   }
-  if (structure === 'story') return 'tiktok_slideshow';
-
-  // single_punch → short-caption formats
-  if (platform === 'tiktok') return 'tiktok_text';
-  if (payload_word_count <= 8) return 'ig_meme';
-  return 'ig_static';
+  // single_punch → tight, statement-style piece
+  if (payload_word_count <= SINGLE_PUNCH_MAX_WORDS) {
+    return RENDER_PROFILE_SLUGS.STATIC_IMAGE;
+  }
+  return RENDER_PROFILE_SLUGS.STATIC_IMAGE;
 }
 
 /**
  * Deterministic post-generation validation. Returns an array of error
  * codes. Empty array = post passes format gates.
  */
-export function validateFormat(post) {
+export function validateRenderProfile(post) {
   const errors = [];
-  const fmt = post?.post_format;
+  const slug = post?.render_profile_slug;
   const caption = typeof post?.caption === 'string' ? post.caption : '';
-  const max = CAPTION_MAX_BY_FORMAT[fmt];
+  const max = CAPTION_MAX_BY_SLUG[slug];
 
   if (max != null && caption.length > max) {
-    errors.push(`caption_too_long:${caption.length}>${max}:${fmt}`);
+    errors.push(`caption_too_long:${caption.length}>${max}:${slug}`);
   }
 
-  if (fmt === 'ig_static' && Array.isArray(post?.slides) && post.slides.length > 1) {
-    errors.push('ig_static_must_have_single_slide');
+  if (slug === RENDER_PROFILE_SLUGS.STATIC_IMAGE && Array.isArray(post?.slides) && post.slides.length > 1) {
+    errors.push('static_image_must_have_single_slide');
   }
 
-  if (fmt === 'ig_carousel') {
+  if (slug === RENDER_PROFILE_SLUGS.CAROUSEL) {
     const slides = Array.isArray(post?.slides) ? post.slides : [];
     if (slides.length < MIN_CAROUSEL_SLIDES) {
-      errors.push(`ig_carousel_needs_${MIN_CAROUSEL_SLIDES}+_slides:have=${slides.length}`);
+      errors.push(`carousel_needs_${MIN_CAROUSEL_SLIDES}+_slides:have=${slides.length}`);
     }
   }
 

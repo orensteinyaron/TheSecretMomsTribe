@@ -1,19 +1,53 @@
-import type { ContentItem, StrategyTask, Agent, Service } from '../../src/types';
+import type { ContentItem, ScheduledPost, StrategyTask, Agent, Service } from '../../src/types';
+
+// CHANNEL_MODEL_V1: render profile slug + a scheduled_posts row per
+// channel. The render_profile.id below is a stable placeholder; tests
+// that need a real FK should override.
+const RENDER_PROFILE_FIXTURE = {
+  id: 'render-profile-fixture-id',
+  slug: 'moving-images' as const,
+  name: 'Moving Images',
+};
+
+function makeScheduledPost(
+  channel: ScheduledPost['channel'],
+  overrides: Partial<ScheduledPost> = {},
+): ScheduledPost {
+  return {
+    id: `sp-${channel}-fixture`,
+    content_id: 'content-fixture-id',
+    channel,
+    status: 'pending',
+    caption: null,
+    scheduled_for: null,
+    published_at: null,
+    post_url: null,
+    external_post_id: null,
+    failure_reason: null,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
 
 export function makeContent(overrides: Partial<ContentItem> = {}): Partial<ContentItem> {
   return {
-    platform: 'tiktok',
     content_type: 'wow',
     status: 'draft',
     hook: 'Test hook — AI planned my entire week in 30 seconds',
     caption: 'Test caption for E2E testing. Save this before Monday morning.',
     hashtags: ['#test', '#e2e', '#smttest'],
     content_pillar: 'ai_magic',
-    post_format: 'tiktok_slideshow',
+    render_profile: RENDER_PROFILE_FIXTURE,
+    render_profile_id: RENDER_PROFILE_FIXTURE.id,
     age_range: 'toddler',
     slides: [{ slide_number: 1, text: 'Hook slide', type: 'hook' }, { slide_number: 2, text: 'Content slide', type: 'content' }],
     image_status: 'pending',
     render_status: 'pending',
+    scheduled_posts: [
+      makeScheduledPost('tiktok'),
+      makeScheduledPost('instagram'),
+    ],
     ...overrides,
   };
 }

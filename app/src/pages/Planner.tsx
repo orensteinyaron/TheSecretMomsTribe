@@ -33,10 +33,12 @@ function getThumbnail(item: ContentItem): string | null {
 }
 
 function getFormatLabel(item: ContentItem): string {
-  if (item.render_profiles && typeof item.render_profiles === 'object' && 'name' in item.render_profiles) {
-    return (item.render_profiles as any).name;
-  }
-  return item.post_format?.replace(/_/g, ' ') || '—';
+  // CHANNEL_MODEL_V1: format = render profile. The joined `render_profile`
+  // (singular) is the new source of truth; fall back to legacy
+  // `render_profiles` for endpoints that still return it (e.g. RenderQueue).
+  if (item.render_profile?.name) return item.render_profile.name;
+  if (item.render_profiles?.name) return item.render_profiles.name;
+  return '—';
 }
 
 // ── Preview Modal ──

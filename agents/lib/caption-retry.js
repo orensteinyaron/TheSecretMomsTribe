@@ -2,25 +2,25 @@
  * Caption-length retry discipline.
  *
  * Runs between validateBatch (shape gate) and enforceFormatGates
- * (deterministic structural checks). Its only job: catch captions
- * that overshoot the per-format cap by a recoverable margin and
+ * (deterministic structural checks). Its only job: catch base captions
+ * that overshoot the per-render-profile cap by a recoverable margin and
  * regenerate them with explicit feedback — the same pattern the
- * regen-stale-drafts script uses to land 11/11 in-limit captions.
+ * regen-stale-drafts script uses to land in-limit captions.
+ *
+ * v2.0.0 (CHANNEL_MODEL_V1): operates on `post.render_profile_slug` +
+ * `post.caption` (the base caption). Per-channel polish is downstream
+ * (see channels.js / generateChannelCaptions).
  *
  * Decision tree per post:
  *   caption ≤ cap                              → pass through
  *   cap < caption ≤ cap * (1 + RECOVERABLE)    → one-shot retry
  *   caption > cap * (1 + RECOVERABLE)          → no retry, flag for
  *                                                 draft review
- *
- * Every overshoot (recoverable or not, successful retry or not)
- * emits a caption_length_overshoot debug event. Telemetry for
- * tuning the 20% target margin empirically.
  */
 
 import {
-  CAPTION_MAX_BY_FORMAT,
-  CAPTION_TARGET_BY_FORMAT,
+  CAPTION_MAX_BY_SLUG,
+  CAPTION_TARGET_BY_SLUG,
   RECOVERABLE_OVERSHOOT_FRACTION,
 } from './format-selector.js';
 import { logActivity } from './activity.js';
@@ -29,9 +29,9 @@ const RETRY_MODEL = 'claude-haiku-4-5';
 
 function buildRetryPrompt(post, previousLen, target, cap) {
   return (
-    `You are tightening a caption for a parenting Instagram/TikTok post.\n` +
+    `You are tightening a base caption for a parenting Instagram/TikTok post.\n` +
     `The editorial core is LOCKED — preserve hook, voice, emotional angle. Only cut words.\n\n` +
-    `Format: ${post.post_format}\n` +
+    `Render profile: ${post.render_profile_slug}\n` +
     `Hook (keep intact as orientation, do NOT include in caption): ${JSON.stringify(post.hook || '')}\n` +
     `Previous caption (${previousLen} chars — OVER the ${cap}-char hard cap):\n` +
     `"""${post.caption}"""\n\n` +
@@ -68,12 +68,12 @@ export async function enforceCaptionLengthWithRetry(posts, { client, log = logAc
   if (!client) throw new Error('enforceCaptionLengthWithRetry: missing deps.client');
 
   for (const post of posts) {
-    const fmt = post?.post_format;
-    const cap = CAPTION_MAX_BY_FORMAT[fmt];
-    const target = CAPTION_TARGET_BY_FORMAT[fmt];
+    const slug = post?.render_profile_slug;
+    const cap = CAPTION_MAX_BY_SLUG[slug];
+    const target = CAPTION_TARGET_BY_SLUG[slug];
     const caption = typeof post?.caption === 'string' ? post.caption : '';
 
-    if (cap == null || target == null) continue;              // unknown format — let format gate handle it
+    if (cap == null || target == null) continue;              // unknown slug — let format gate handle it
     if (caption.length <= cap) continue;                      // clean, no-op
 
     const overByChars = caption.length - cap;
@@ -115,14 +115,14 @@ export async function enforceCaptionLengthWithRetry(posts, { client, log = logAc
       actor_name: 'content-agent',
       action: 'caption_length_overshoot',
       description:
-        `Caption for ${fmt} was ${caption.length} chars (cap ${cap}, target ${target}). ` +
+        `Caption for ${slug} was ${caption.length} chars (cap ${cap}, target ${target}). ` +
         (retryFired
           ? (retrySuccess
               ? `Retry succeeded → ${finalLength} chars.`
               : `Retry exhausted, flagged draft_needs_review (final ${finalLength} chars).`)
           : `Overshoot >5%, no retry — flagged draft_needs_review.`),
       metadata: {
-        format: fmt,
+        render_profile_slug: slug,
         target,
         cap,
         actual: caption.length,

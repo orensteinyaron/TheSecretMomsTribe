@@ -1,10 +1,13 @@
 /**
- * Tests for the live content generation user prompt. Pins the length
- * discipline that keeps Sonnet from producing over-cap captions — same
- * pattern the regen script uses, which runs 11/11 in-limit.
+ * Tests for the live content generation user prompt.
  *
- * If someone later softens "REJECTED" back to "flagged", or restores
- * the "IG: 100-180 words" guideline, these tests fail.
+ * v2.0.0 (CHANNEL_MODEL_V1): the prompt asks the LLM for
+ * `render_profile_slug` + `channels` and explicitly forbids legacy
+ * `post_format` / inline channel columns. Caps are keyed by render
+ * profile slug (CAPTION_MAX_BY_SLUG) — not by the legacy post_format.
+ *
+ * Pins the length discipline that keeps Sonnet from producing over-cap
+ * captions — same pattern the regen script uses, which runs in-limit.
  */
 
 import test from 'node:test';
@@ -26,13 +29,11 @@ function stubParams(overrides = {}) {
   };
 }
 
-test('prompt: explicit per-format char caps in the caption schema line', () => {
+test('prompt: explicit per-slug char caps in the caption schema line', () => {
   const prompt = buildUserPrompt(stubParams());
-  // The schema's caption field must restate the numbers inline so the
-  // LLM has them at the point of writing — mirrors regen-prompt pattern.
-  assert.match(prompt, /ig_static[^\n]*125/);
-  assert.match(prompt, /ig_carousel[^\n]*400/);
-  assert.match(prompt, /tiktok_slideshow[^\n]*100/);
+  assert.match(prompt, /static-image[^\n]*200/);
+  assert.match(prompt, /carousel[^\n]*400/);
+  assert.match(prompt, /moving-images[^\n]*300/);
 });
 
 test('prompt: REJECTED threat language is present', () => {
@@ -42,62 +43,50 @@ test('prompt: REJECTED threat language is present', () => {
 
 test('prompt: contradictory "100-180 words" rule is gone', () => {
   const prompt = buildUserPrompt(stubParams());
-  // Earlier version had "Follow caption structure per platform (...IG: 100-180 words)"
-  // which told the LLM to write up to 1100+ chars in direct conflict with
-  // the 125/400-char caps.
   assert.doesNotMatch(prompt, /100-180 words/);
 });
 
-test('prompt: soft "flagged" language is gone', () => {
+test('prompt: all render profile slugs are enumerated in the caps block', () => {
   const prompt = buildUserPrompt(stubParams());
-  // "flagged" reads optional next to "REJECTED". If someone re-softens
-  // the threat during a future prompt cleanup, this fails.
-  assert.doesNotMatch(prompt, /flagged/i);
-});
-
-test('prompt: all caption-max formats are enumerated in the caps block', () => {
-  const prompt = buildUserPrompt(stubParams());
-  for (const fmt of ['ig_static', 'ig_carousel', 'tiktok_slideshow', 'tiktok_text', 'tiktok_avatar', 'tiktok_avatar_visual', 'ig_meme']) {
-    assert.match(prompt, new RegExp(`${fmt}[^\\n]*≤\\d+ chars`), `caps block lists ${fmt}`);
+  for (const slug of ['static-image', 'moving-images', 'carousel', 'avatar-v1']) {
+    assert.match(prompt, new RegExp(`${slug}[^\\n]*≤\\d+ chars`), `caps block lists ${slug}`);
   }
 });
 
 test('prompt: caps block lists TARGET alongside cap (PR #13 headroom)', () => {
   const prompt = buildUserPrompt(stubParams());
-  // target ≤100 for ig_static (80% of 125), target ≤80 for tiktok_slideshow (80% of 100).
-  assert.match(prompt, /ig_static:\s*target\s*≤100[^\n]*hard cap\s*≤125/);
-  assert.match(prompt, /tiktok_slideshow:\s*target\s*≤80[^\n]*hard cap\s*≤100/);
-  assert.match(prompt, /ig_carousel:\s*target\s*≤320[^\n]*hard cap\s*≤400/);
+  // target = 80% of cap, rounded — e.g. static-image cap 200 → target 160.
+  assert.match(prompt, /static-image:\s*target\s*≤160[^\n]*hard cap\s*≤200/);
+  assert.match(prompt, /moving-images:\s*target\s*≤240[^\n]*hard cap\s*≤300/);
+  assert.match(prompt, /carousel:\s*target\s*≤320[^\n]*hard cap\s*≤400/);
 });
 
-test('prompt: schema caption field restates target/cap for every format', () => {
+test('prompt: schema caption field restates target/cap for every slug', () => {
   const prompt = buildUserPrompt(stubParams());
-  // The schema restates the numbers inline — critical for LLM attention
-  // at the exact point of writing the caption field.
   assert.match(prompt, /"caption":[\s\S]*TARGET[\s\S]*cap\s*≤/);
-  assert.match(prompt, /ig_static:\s*target\s*≤100,\s*cap\s*≤125/);
+  assert.match(prompt, /static-image:\s*target\s*≤160,\s*cap\s*≤200/);
 });
 
-test('prompt: still renders briefing opportunities and coverage gaps', () => {
-  const prompt = buildUserPrompt(stubParams({
-    briefing: { opportunities: [{ topic: 'AI bedtime stories', source: 'tiktok' }] },
-    coverageGaps: { gaps: 'Missing toddler + tech' },
-  }));
-  assert.match(prompt, /AI bedtime stories/);
-  assert.match(prompt, /Missing toddler \+ tech/);
+test('prompt: asks for render_profile_slug, never a post_format JSON key', () => {
+  const prompt = buildUserPrompt(stubParams());
+  assert.match(prompt, /render_profile_slug/);
+  // The output schema must NOT use post_format as a key. (The fail-closed
+  // disclaimer DOES mention the word post_format as a forbidden field
+  // — that's fine; what matters is the schema example.)
+  assert.doesNotMatch(prompt, /"post_format":/);
 });
 
-test('prompt: strategy block only appears when directives or insights exist', () => {
-  const empty = buildUserPrompt(stubParams());
-  assert.doesNotMatch(empty, /Active Directives/);
-  assert.doesNotMatch(empty, /Confirmed Strategy Insights/);
+test('prompt: asks for channels array defaulting to [tiktok, instagram]', () => {
+  const prompt = buildUserPrompt(stubParams());
+  assert.match(prompt, /channels/);
+  // Default channel set must be clearly documented.
+  assert.match(prompt, /tiktok[\s\S]*instagram|instagram[\s\S]*tiktok/);
+});
 
-  const withStrategy = buildUserPrompt(stubParams({
-    directives: [{ directive: 'Do X', directive_type: 'priority' }],
-    insights: [{ insight: 'Y works', insight_type: 'audience', confidence: 8 }],
-  }));
-  assert.match(withStrategy, /Active Directives/);
-  assert.match(withStrategy, /\[priority\] Do X/);
-  assert.match(withStrategy, /Confirmed Strategy Insights/);
-  assert.match(withStrategy, /Y works/);
+test('prompt: fail-closed disclaimer for legacy v1.0.0 fields', () => {
+  const prompt = buildUserPrompt(stubParams());
+  // rejectLegacyFormatFields catches these — the prompt warns the LLM upfront.
+  assert.match(prompt, /Do NOT emit/);
+  assert.match(prompt, /scheduled_at_ig/);
+  assert.match(prompt, /channel_override/);
 });

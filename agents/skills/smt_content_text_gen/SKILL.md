@@ -1,8 +1,8 @@
 ---
 name: smt-content-text-gen
-description: The Content Agent (Text Generation) for The Secret Moms Tribe (SMT). Reads the Strategist's daily briefing and produces a fully-formed content_queue row for each prioritized opportunity, including hook, caption, hashtags, slides, hook_overlay, render_profile, age_range, and (for AI Magic only) verbatim original_prompt + original_output. Use this skill whenever content posts need to be generated from a briefing, when re-generating from a specific pipeline step, or when producing a single ad-hoc post from a vetted signal. This skill enforces a defensive gate re-check — if a briefing row for AI Magic is missing its verbatim AI artifact, the agent hard-aborts on that row instead of fabricating, and writes a structured rejection so the operator can audit.
-version: 1.0.0
-last_updated: 2026-05-11
+description: The Content Agent (Text Generation) for The Secret Moms Tribe (SMT). Reads the Strategist's daily briefing and produces a fully-formed content_queue row for each prioritized opportunity, including hook, caption, hashtags, slides, hook_overlay, render_profile_slug, channels, age_range, and (for AI Magic only) verbatim original_prompt + original_output. Use this skill whenever content posts need to be generated from a briefing, when re-generating from a specific pipeline step, or when producing a single ad-hoc post from a vetted signal. This skill enforces a defensive gate re-check — if a briefing row for AI Magic is missing its verbatim AI artifact, the agent hard-aborts on that row instead of fabricating, and writes a structured rejection so the operator can audit.
+version: 2.0.0
+last_updated: 2026-05-17
 owner: Yaron Orenstein
 companion_files:
   - SMT_PIPELINE_CONTRACT.md
@@ -74,17 +74,22 @@ Verify the base schema is complete (`signal_id`, `source_url`, `age_range`, `cha
 
 ## Content generation rules
 
-### Post anatomy by format
-Apply the rules from `content_dna_framework.md`. Summary:
+### Post anatomy by render profile (v2.0.0)
+A piece has exactly one **render_profile_slug** (the format) and one or more **channels** (where it gets posted). Profile slug is the truth; channels default to `['tiktok', 'instagram']`.
 
-- **TikTok slideshow:** 6 slides — hook → 4 magic → payoff. Hook 0-3s, magic 3-10s, payoff 10-15s.
-- **TikTok text-on-screen:** 3-4 frames, one idea per frame.
-- **IG carousel:** 5-7 slides — hook → context → 3 magic → reframe → CTA.
-- **IG static:** one powerful statement.
-- **Avatar Full (Rachel):** 3-5 clips, all `type: avatar`. Hook → body → CTA.
-- **Avatar + Visual:** 3-6 clips mixing avatar, split, broll.
-- **AI Magic Video:** Rachel bookends + static output slides showing `original_prompt` and `original_output` verbatim.
-- **Ask Rachel:** podcast-style, interviewer voice asks Rachel a 1-line question, Rachel answers 15-30s.
+The four canonical render profile slugs:
+
+- **`moving-images`** — slideshow video (1080×1920, 15-60s). Pattern depends on intent:
+  - Slideshow / list / method: hook → 4 magic slides → payoff.
+  - Text-on-screen short: 3-4 frames, one idea per frame.
+  - AI Magic Video: Rachel bookends + on-screen `original_prompt` and `original_output` verbatim.
+- **`static-image`** — one PNG (1080×1920). One powerful statement OR a meme. No motion, no slides.
+- **`carousel`** — IG-style swipe deck, 5-7 slides: hook → context → 3 magic → reframe → CTA.
+- **`avatar-v1`** — Rachel speaking. Carries `avatar_config.format`:
+  - `"full_avatar"` — 3-5 clips, all `type: avatar`. Hook → body → CTA.
+  - `"avatar_visual"` — 3-6 clips mixing avatar, split, broll.
+
+Legacy values (`tiktok_slideshow`, `tiktok_text`, `tiktok_avatar`, `tiktok_avatar_visual`, `ig_carousel`, `ig_static`, `ig_meme`, `video_script`) and the `post_format` field itself are **DROPPED**. Emitting any of them causes `gate_validators.rejectLegacyFormatFields` to hard-fail the row.
 
 ### Hook rules
 Every hook obeys the formulas in `content_dna_framework.md` (pattern interrupt, curiosity gap, mirror + punch, reframe, secret/discovery, before/after). Hook stops the scroll in 2 seconds.
@@ -92,18 +97,16 @@ Every hook obeys the formulas in `content_dna_framework.md` (pattern interrupt, 
 ### Hook overlay (REQUIRED for all avatar/video formats)
 Every avatar/video script must include a `hook_overlay` field: 3-6 words, on-screen text version of the spoken opening. Punchy, curiosity-driven, readable in 1 second. The spoken line and the overlay are independent — the spoken line stays natural, the overlay is tightened for the eye.
 
-### Caption rules (per-format hard caps)
-Per `content_dna_framework.md`:
-- `ig_static`: target ≤100 chars, hard cap 125
-- `ig_carousel`: target ≤320, hard cap 400
-- `ig_meme`: target ≤100, hard cap 125
-- `tiktok_slideshow`: target ≤80, hard cap 100
-- `tiktok_text`: target ≤80, hard cap 100
-- `tiktok_avatar`: target ≤120, hard cap 150
-- `tiktok_avatar_visual`: target ≤120, hard cap 150
-- `video_script`: target ≤320, hard cap 400
+### Caption rules (v2.0.0 — base + per-channel polish)
+You emit a single `caption` per piece: the **base caption**. Target ≤300 chars; if your piece naturally lands shorter, that's fine.
 
-Over hard cap → reject the row from your own output and regenerate.
+A downstream Haiku step then produces **platform-native variants**, one per channel:
+- **TikTok:** short, hook-first, hashtag-dense; on-screen text is the real payload. Target ≤100 chars, hard cap 150.
+- **Instagram:** longer prose, storytelling, hashtags buried at end or in first comment. Target ≤400 chars, hard cap 2200.
+
+You do NOT emit `captions_per_channel` — that's the polish step's job. Just emit the base caption.
+
+Over your own base cap (300 chars) → tighten and regenerate.
 
 ### Hashtag rules
 - 5-8 hashtags per post.
@@ -133,7 +136,7 @@ Apply `face_of_smt_v1.md`. Specifically:
 ## Pillar-specific generation rules
 
 ### AI Magic
-- Use the **AI Magic Video** render profile.
+- Render profile: **`moving-images`** (slideshow with Rachel bookends + on-screen prompt/output) or **`avatar-v1`** with `avatar_config.format = "avatar_visual"` (Rachel + visual inserts).
 - The hook is Rachel reacting to the AI output.
 - The body shows `original_prompt` as on-screen text (verbatim), then `original_output` as on-screen text (verbatim). You may break long outputs across slides but you may not edit them.
 - The CTA is Rachel's reaction: "Save this. I'm using it tomorrow."
@@ -141,35 +144,35 @@ Apply `face_of_smt_v1.md`. Specifically:
 - Forbidden: writing a fake prompt. Forbidden: writing a fake AI output. If `original_prompt` or `original_output` is missing → abort the row (you've already done this in the gate re-check, but verify again at generation time).
 
 ### Parenting Insights
-- Use Avatar Full, Ask Rachel, or Avatar + Visual.
+- Render profile: **`avatar-v1`** (full_avatar or avatar_visual) or **`moving-images`**.
 - Rachel reframes the parenting moment from the signal. She is parenting a 5, 11, and 15-year-old — she draws from her actual life.
 - No AI references unless the signal had one (which it didn't, because that would be `ai_magic`).
 - Strong emotional payoff at the end.
 
 ### Mom Health
-- Use Avatar Full or Ask Rachel.
+- Render profile: **`avatar-v1`** with `avatar_config.format = "full_avatar"`.
 - Trust content. Rachel's imperfections + voice are the delivery mechanism.
 - Never preachy. No toxic positivity.
 - Practical solutions only.
 
 ### Tech for Moms
-- Use Avatar + Visual or Moving Images.
+- Render profile: **`avatar-v1`** with `avatar_config.format = "avatar_visual"` or **`moving-images`**.
 - Lead with result, not tool specs.
 - Show the tool in action via screen recording or product b-roll.
 - Name the tool clearly.
 
 ### Trending
-- Use Moving Images or Ask Rachel.
+- Render profile: **`moving-images`** or **`avatar-v1`**.
 - Reactive — must publish within 72h of `captured_at`.
 - Reframe for moms.
 
 ### Financial
-- Use Avatar Full.
+- Render profile: **`avatar-v1`** with `avatar_config.format = "full_avatar"`.
 - First-person framing only.
 - No specific products, stocks, crypto, tax, legal.
 - Mandatory caption disclaimer: "Not financial advice. Just what worked for our family."
 
-## Output schema for each `content_queue` row
+## Output schema for each piece (v2.0.0)
 
 ```json
 {
@@ -177,17 +180,17 @@ Apply `face_of_smt_v1.md`. Specifically:
   "content_pillar": "<from briefing>",
   "age_range": "<from briefing>",
   "source_urls": [{"url": "...", "source": "...", "relation": "primary_inspiration", "signal_id": "..."}],
-  "render_profile_id": "<uuid of the chosen render profile>",
-  "post_format": "tiktok_slideshow | tiktok_text | tiktok_avatar | tiktok_avatar_visual | ig_carousel | ig_static | ig_meme",
+  "render_profile_slug": "avatar-v1 | moving-images | static-image | carousel",
+  "channels": ["tiktok", "instagram"],
   "content_type": "wow | trust | cta",
   "hook": "<the spoken/written hook>",
   "hook_overlay": "<3-6 words for on-screen text on the opening frame>",
-  "caption": "<within per-format hard cap>",
+  "caption": "<base caption, target ≤300 chars; Haiku polish step will produce platform-native variants>",
   "hashtags": ["#...", ...],
   "slides": [{"slide_number": 1, "text": "...", "type": "hook | content | cta", "image_prompt": "..."}, ...],
   "ai_magic_output": "<verbatim original_prompt + original_output, ONLY for ai_magic pillar, NEVER fabricated>",
   "image_prompt": { "prompt": "...", "axes": { "shot_type": "...", "lighting": "...", "palette": "...", "subject": "...", "mood": "...", "rachel_mode": "rachel_in_frame | broll" } },
-  "avatar_config": { "format": "...", "voice_id": "9JqF6OmJtGjHTDODKG2c", "duration_target": 30, "clips": [...] },
+  "avatar_config": { "format": "full_avatar | avatar_visual", "voice_id": "9JqF6OmJtGjHTDODKG2c", "duration_target": 30, "clips": [...] },
   "audio_suggestion": "<TikTok only, null for IG>",
   "generation_context": {
     "model": "<model id>",
@@ -201,6 +204,8 @@ Apply `face_of_smt_v1.md`. Specifically:
 }
 ```
 
+**v2.0.0 fail-closed:** Do NOT emit `post_format`, `scheduled_at_ig`, `scheduled_at_tt`, `published_at_ig`, `published_at_tt`, `published_url_ig`, `published_url_tt`, or `channel_override`. These columns are gone. Emitting them hard-fails the row at the gate validator.
+
 ## Self-check before output
 
 Run this checklist on every row in `generated[]`:
@@ -208,11 +213,13 @@ Run this checklist on every row in `generated[]`:
 1. **Gate re-check:** If pillar is `ai_magic`, are `original_prompt` and `original_output` carried verbatim from the briefing into `ai_magic_output`? No edits, no paraphrasing.
 2. **No invention:** I have not written any sentence that purports to be from an external source (a prompt someone typed, an AI's response, a study's findings) without it being in the briefing's verbatim fields.
 3. **Pillar match:** The post I generated matches the pillar declared in the briefing. I did not silently re-pillar.
-4. **Format match:** The `post_format` matches the pillar's allowed formats per the routing table in `content_dna_framework.md`.
-5. **Caption length:** Under the per-format hard cap.
-6. **Hook overlay:** Present and 3-6 words for all avatar/video formats.
-7. **The SMT Test:** Would the friend in the group chat say this? If it sounds like a blog or a textbook, rewrite.
-8. **Voice rules:** No banned phrases, no banned emoji, no mega-hashtags.
+4. **Format match:** The `render_profile_slug` is one of `avatar-v1`, `moving-images`, `static-image`, `carousel` and matches the pillar's allowed render profiles per the section above.
+5. **No legacy fields:** I have NOT emitted `post_format`, `scheduled_at_ig`, `scheduled_at_tt`, `published_at_ig`, `published_at_tt`, `published_url_ig`, `published_url_tt`, or `channel_override`. Those columns are dropped.
+6. **Channels:** `channels` is a non-empty array of `"tiktok"` and/or `"instagram"`. Default both.
+7. **Caption length:** Under 300 chars for the base caption.
+8. **Hook overlay:** Present and 3-6 words for all `avatar-v1` and `moving-images` pieces.
+9. **The SMT Test:** Would the friend in the group chat say this? If it sounds like a blog or a textbook, rewrite.
+10. **Voice rules:** No banned phrases, no banned emoji, no mega-hashtags.
 
 If any check fails on a row, fix it. If you can't fix it (e.g. gate re-check fails because the briefing row was malformed), move the row to `rejected[]`.
 
@@ -247,17 +254,18 @@ This is the section the May 11 incident proved we need most.
 {
   "signal_id": "abc-123",
   "content_pillar": "ai_magic",
-  "post_format": "tiktok_avatar_visual",
+  "render_profile_slug": "avatar-v1",
+  "channels": ["tiktok", "instagram"],
   "hook": "Wait. ChatGPT just wrote the teacher email I've been putting off for two weeks.",
   "hook_overlay": "I asked ChatGPT for help",
   "ai_magic_output": "PROMPT: Write a polite email to my 3rd grader's teacher asking about the field trip refund.\n\nOUTPUT: Hi Ms. Rivera, I hope this finds you well. I'm writing about the field trip on Oct 12 that Marcus had to miss...",
   "caption": "The teacher email I've been avoiding. Done in 12 seconds. Tool: ChatGPT.",
   "hashtags": ["#aimom", "#chatgptforparents", "#momhack", "#schoolage", "#workingmom"],
-  ...
+  "avatar_config": { "format": "avatar_visual", "voice_id": "9JqF6OmJtGjHTDODKG2c", "duration_target": 30, "clips": [...] }
 }
 ```
 
-The `ai_magic_output` field carries the verbatim prompt and output from the briefing. The Content Agent adds Rachel's framing in the hook and caption but never modifies the AI artifact.
+The `ai_magic_output` field carries the verbatim prompt and output from the briefing. The Content Agent adds Rachel's framing in the hook and caption but never modifies the AI artifact. `render_profile_slug` is `avatar-v1` (the format that mixes Rachel's avatar with visual inserts); `avatar_config.format` is `"avatar_visual"`.
 
 ### Example 2 — Briefing row fails gate, post REJECTED
 **Briefing input row (this is what happened May 11):**
@@ -294,7 +302,8 @@ If the Strategist had correctly routed signal_id `6d65fbae-...` as `parenting_in
 ```json
 {
   "content_pillar": "parenting_insights",
-  "post_format": "tiktok_avatar",
+  "render_profile_slug": "avatar-v1",
+  "channels": ["tiktok", "instagram"],
   "hook": "Your 4-year-old just asked where her dad is. Here's exactly what I'd say.",
   "hook_overlay": "The dad question. Solved.",
   "caption": "The reframe single moms need. Save this before bedtime tonight. 🤍",

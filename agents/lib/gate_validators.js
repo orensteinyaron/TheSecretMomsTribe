@@ -180,6 +180,42 @@ export function validateContentQueueRow(row, briefingRow) {
 }
 
 /**
+ * v2.0.0 (CHANNEL_MODEL_V1) — reject any row containing fields from the
+ * legacy `post_format` / inline-channel-columns model. These columns are
+ * dropped (or being dropped) from `content_queue`; an LLM emitting them
+ * means it regressed to a pre-v2 contract and the output cannot be
+ * trusted. Hard-fail at the gate; raw output goes to `content_queue_rejected`.
+ *
+ * Returns `{ ok: true }` on clean rows; `{ ok: false, reason, fields }`
+ * when one or more legacy fields are present.
+ */
+const LEGACY_FORMAT_FIELDS = Object.freeze([
+  'post_format',
+  'scheduled_at_ig',
+  'scheduled_at_tt',
+  'published_at_ig',
+  'published_at_tt',
+  'published_url_ig',
+  'published_url_tt',
+  'channel_override',
+]);
+
+export function rejectLegacyFormatFields(row) {
+  if (!row || typeof row !== 'object') {
+    return ok();
+  }
+  const offenders = LEGACY_FORMAT_FIELDS.filter((field) => field in row);
+  if (offenders.length === 0) {
+    return ok();
+  }
+  return {
+    ok: false,
+    reason: `legacy_format_fields_present: ${offenders.join(', ')} (these were dropped by CHANNEL_MODEL_V1 / v2.0.0)`,
+    fields: offenders,
+  };
+}
+
+/**
  * Scan strategist `notes_for_content_gen` for fabrication telltales.
  * The Strategist is allowed to reorder, prioritize, and adjust mix —
  * but not to invent prompts or outputs. If any of these patterns appear,
@@ -212,4 +248,5 @@ export const GATE_VALIDATOR_CONSTANTS = Object.freeze({
   VALID_AGE_RANGES: [...VALID_AGE_RANGES],
   VALID_CHANNEL_TYPES: [...VALID_CHANNEL_TYPES],
   VALID_SOURCE_PLATFORMS: [...VALID_SOURCE_PLATFORMS],
+  LEGACY_FORMAT_FIELDS: [...LEGACY_FORMAT_FIELDS],
 });
