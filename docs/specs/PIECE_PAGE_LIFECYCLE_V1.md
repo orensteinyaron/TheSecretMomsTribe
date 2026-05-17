@@ -5,6 +5,10 @@
 **Supersedes:** N/A (additive to `SMT_SYSTEM_ARCHITECTURE_V1.md`)
 **Execution model:** One Claude Code session, end-to-end. No incremental patches.
 
+> **⚠️ SUPERSEDED by `CHANNEL_MODEL_V1` (2026-05-17).**
+> The inline `scheduled_at_ig`/`scheduled_at_tt`/`published_at_ig`/`published_at_tt`/`published_url_ig`/`published_url_tt`/`channel_override` columns described in §3.1 below were deprecated in favor of a per-channel `scheduled_posts` table. See `docs/specs/CHANNEL_MODEL_V1.md`.
+> This spec is kept as-is for historical record of the design that preceded the new channel model.
+
 ---
 
 ## 1. Context & goal

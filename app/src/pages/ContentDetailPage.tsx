@@ -1,13 +1,28 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, X, RefreshCw, ExternalLink, ChevronDown, ChevronRight, Camera, Music2, RotateCcw, Clock, Zap } from 'lucide-react';
+import { ArrowLeft, Check, X, RefreshCw, ExternalLink, ChevronDown, ChevronRight, Camera, Music2, RotateCcw, Clock, Zap, AlertTriangle } from 'lucide-react';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { PillarBadge } from '../components/shared/PillarBadge';
 import { EditableField } from '../components/shared/EditableField';
 import { useContentUpdate } from '../hooks/useContent';
 import { contentApi } from '../api/content';
 import { useQueryClient, useMutation, useQuery } from '@tanstack/react-query';
-import type { ContentPillar, PromptExecution, PiecePagePayload } from '../types';
+import type {
+  ContentPillar,
+  PromptExecution,
+  PiecePagePayload,
+  Channel,
+  ScheduledPost,
+} from '../types';
+
+// CHANNEL_MODEL_V1 §1.3: every piece ships to both channels by default.
+// UI renders these in order even if `scheduled_posts` is empty (legacy data).
+const DEFAULT_CHANNELS: Channel[] = ['tiktok', 'instagram'];
+
+const CHANNEL_META: Record<Channel, { label: string; Icon: React.ComponentType<{ size?: number; className?: string }>; testId: string }> = {
+  tiktok:    { label: 'TikTok',    Icon: Music2, testId: 'tiktok' },
+  instagram: { label: 'Instagram', Icon: Camera, testId: 'instagram' },
+};
 
 const PILLAR_CHOICES: ContentPillar[] = [
   'parenting', 'health', 'ai_magic', 'tech', 'trending', 'financial', 'uncategorized',
@@ -37,8 +52,8 @@ export default function ContentDetailPage() {
   });
 
   const scheduleMutation = useMutation({
-    mutationFn: (upd: { scheduled_at_ig?: string | null; scheduled_at_tt?: string | null }) =>
-      contentApi.patchSchedule(id!, upd),
+    mutationFn: (params: { channel: Channel; scheduled_for: string | null }) =>
+      contentApi.patchChannelSchedule(id!, params.channel, { scheduled_for: params.scheduled_for }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['piece', id] }),
   });
 
@@ -64,13 +79,22 @@ export default function ContentDetailPage() {
   const backToDraft = () => updateMutation.mutate({ id: piece.id, status: 'draft', rejection_reason: null });
   const triggerRender = () => renderMutation.mutate(piece.id);
 
-  const channelsLit = piece.channel_override === 'ig_only'
-    ? { ig: true, tt: false }
-    : piece.channel_override === 'tt_only'
-    ? { ig: false, tt: true }
-    : { ig: true, tt: true };
+  // CHANNEL_MODEL_V1: per-channel state comes from `scheduled_posts`.
+  // Build a quick lookup; render in the canonical channel order even if
+  // some channels don't have a row yet (treated as "not scheduled").
+  const scheduledByChannel = new Map<Channel, ScheduledPost>();
+  for (const sp of piece.scheduled_posts ?? []) scheduledByChannel.set(sp.channel, sp);
+  const channelList: Channel[] =
+    (piece.scheduled_posts ?? []).length > 0
+      ? [...DEFAULT_CHANNELS].sort((a, b) => {
+          // Keep default order, but ensure any extras are appended.
+          const ai = scheduledByChannel.has(a) ? 0 : 1;
+          const bi = scheduledByChannel.has(b) ? 0 : 1;
+          return ai - bi;
+        })
+      : DEFAULT_CHANNELS;
 
-  const isPublished = Boolean(piece.published_at_ig || piece.published_at_tt);
+  const isPublished = (piece.scheduled_posts ?? []).some((sp) => sp.status === 'posted');
 
   return (
     <div>
@@ -93,17 +117,24 @@ export default function ContentDetailPage() {
               {PILLAR_CHOICES.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
             <PillarBadge pillar={piece.content_pillar} />
-            {piece.post_format && (
-              <span className="text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-bg-elevated text-text-secondary">
-                {piece.post_format.replace(/_/g, ' ')}
+            {piece.render_profile?.name && (
+              <span className="text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-bg-elevated text-text-secondary" data-testid="render-profile-badge">
+                {piece.render_profile.name}
               </span>
             )}
             <StatusBadge status={piece.status} />
             {piece.render_status && piece.render_status !== 'pending' && <StatusBadge status={piece.render_status} />}
-            {/* Dual-channel indicator */}
-            <div className="flex items-center gap-1 ml-2" data-testid="channel-indicator" title={piece.channel_override ? `Channel override: ${piece.channel_override}` : 'Both channels'}>
-              <Camera size={14} className={channelsLit.ig ? 'text-pink-400' : 'text-text-tertiary opacity-40'} />
-              <Music2 size={14} className={channelsLit.tt ? 'text-text-primary' : 'text-text-tertiary opacity-40'} />
+            {/* Channel indicator — shows the channels with a scheduled_posts row.
+                Per CHANNEL_MODEL_V1 the default is both. */}
+            <div className="flex items-center gap-1 ml-2" data-testid="channel-indicator" title="Channels with a scheduled_posts row">
+              <Camera
+                size={14}
+                className={scheduledByChannel.has('instagram') ? 'text-pink-400' : 'text-text-tertiary opacity-40'}
+              />
+              <Music2
+                size={14}
+                className={scheduledByChannel.has('tiktok') ? 'text-text-primary' : 'text-text-tertiary opacity-40'}
+              />
             </div>
             <span className="text-xs text-text-tertiary ml-2">{new Date(piece.created_at).toLocaleDateString()}</span>
           </div>
@@ -127,31 +158,27 @@ export default function ContentDetailPage() {
         </div>
       </div>
 
-      {/* Section 2 — Scheduling */}
+      {/* Section 2 — Scheduling (CHANNEL_MODEL_V1). One row per channel.
+          Each row is its own `scheduled_posts` record; status + URL + failure
+          live there. */}
       <Section title="Scheduling" testId="section-scheduling" defaultOpen={true}>
         <div className="grid grid-cols-2 gap-6">
-          <ChannelSchedule
-            channel="ig"
-            label="Instagram"
-            Icon={Camera}
-            scheduledAt={schedule.scheduled_at_ig}
-            publishedAt={schedule.published_at_ig}
-            publishedUrl={schedule.published_url_ig}
-            nextSlot={schedule.next_available_slot_ig}
-            onSchedule={(iso) => scheduleMutation.mutate({ scheduled_at_ig: iso })}
-            disabled={!channelsLit.ig}
-          />
-          <ChannelSchedule
-            channel="tt"
-            label="TikTok"
-            Icon={Music2}
-            scheduledAt={schedule.scheduled_at_tt}
-            publishedAt={schedule.published_at_tt}
-            publishedUrl={schedule.published_url_tt}
-            nextSlot={schedule.next_available_slot_tt}
-            onSchedule={(iso) => scheduleMutation.mutate({ scheduled_at_tt: iso })}
-            disabled={!channelsLit.tt}
-          />
+          {channelList.map((channel) => {
+            const meta = CHANNEL_META[channel];
+            const sp = scheduledByChannel.get(channel) ?? null;
+            const nextSlot = schedule.next_available_slot?.[channel] ?? null;
+            return (
+              <ChannelSchedule
+                key={channel}
+                channel={channel}
+                label={meta.label}
+                Icon={meta.Icon}
+                scheduledPost={sp}
+                nextSlot={nextSlot}
+                onSchedule={(iso) => scheduleMutation.mutate({ channel, scheduled_for: iso })}
+              />
+            );
+          })}
         </div>
       </Section>
 
@@ -286,17 +313,14 @@ function Section({ title, testId, defaultOpen = false, children }: { title: stri
 }
 
 function ChannelSchedule({
-  label, Icon, scheduledAt, publishedAt, publishedUrl, nextSlot, onSchedule, disabled,
+  channel, label, Icon, scheduledPost, nextSlot, onSchedule,
 }: {
-  channel: 'ig' | 'tt';
+  channel: Channel;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  scheduledAt: string | null;
-  publishedAt: string | null;
-  publishedUrl: string | null;
-  nextSlot: string;
+  scheduledPost: ScheduledPost | null;
+  nextSlot: string | null;
   onSchedule: (iso: string | null) => void;
-  disabled: boolean;
 }) {
   const localForInput = (iso: string | null): string => {
     if (!iso) return '';
@@ -305,40 +329,102 @@ function ChannelSchedule({
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
+
+  // No `scheduled_posts` row yet — render a placeholder. Most often this
+  // is legacy data; once a date is picked the edge function will upsert
+  // the row. We still emit the picker so users can schedule from here.
+  if (!scheduledPost) {
+    return (
+      <div className="border border-border-subtle rounded-md p-4" data-testid={`schedule-card-${channel}`}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Icon size={14} />
+            <span className="text-sm font-medium">{label}</span>
+          </div>
+          <span className="text-[10px] uppercase tracking-wide text-text-tertiary">Not scheduled</span>
+        </div>
+        <input
+          type="datetime-local"
+          value=""
+          onChange={(e) => onSchedule(e.target.value ? new Date(e.target.value).toISOString() : null)}
+          className="bg-bg-input border border-border-default rounded-md px-2 py-1 text-sm text-text-primary"
+          data-testid={`schedule-input-${channel}`}
+        />
+        {nextSlot && (
+          <button
+            onClick={() => onSchedule(nextSlot)}
+            className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover mt-2"
+            data-testid={`schedule-next-slot-${channel}`}
+          >
+            <Clock size={12} /> Next available: {new Date(nextSlot).toLocaleString()}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const { status, scheduled_for, published_at, post_url, failure_reason } = scheduledPost;
   return (
-    <div className={`border border-border-subtle rounded-md p-4 ${disabled ? 'opacity-50' : ''}`}>
+    <div className="border border-border-subtle rounded-md p-4" data-testid={`schedule-card-${channel}`}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Icon size={14} />
           <span className="text-sm font-medium">{label}</span>
         </div>
-        {publishedAt && publishedUrl && (
-          <a href={publishedUrl} target="_blank" rel="noopener" className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover">
-            <ExternalLink size={12} /> Published
-          </a>
-        )}
+        <div className="flex items-center gap-2">
+          <StatusBadge status={status} />
+          {status === 'posted' && post_url && (
+            <a href={post_url} target="_blank" rel="noopener" className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover" data-testid={`schedule-post-url-${channel}`}>
+              <ExternalLink size={12} /> View
+            </a>
+          )}
+        </div>
       </div>
-      {publishedAt ? (
-        <div className="text-xs text-text-tertiary">
-          Published at <span className="text-text-primary">{new Date(publishedAt).toLocaleString()}</span>
+
+      {status === 'posted' ? (
+        <div className="text-xs text-text-tertiary" data-testid={`schedule-published-${channel}`}>
+          Published at{' '}
+          <span className="text-text-primary">
+            {published_at ? new Date(published_at).toLocaleString() : '—'}
+          </span>
+        </div>
+      ) : status === 'failed' ? (
+        <div className="space-y-2">
+          <div className="flex items-start gap-2 text-xs text-error bg-error/10 border border-error/20 rounded p-2" data-testid={`schedule-failure-${channel}`}>
+            <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+            <span className="whitespace-pre-line">{failure_reason || 'Publish failed (no reason recorded).'}</span>
+          </div>
+          <input
+            type="datetime-local"
+            value={localForInput(scheduled_for)}
+            onChange={(e) => onSchedule(e.target.value ? new Date(e.target.value).toISOString() : null)}
+            className="bg-bg-input border border-border-default rounded-md px-2 py-1 text-sm text-text-primary"
+            data-testid={`schedule-input-${channel}`}
+          />
+        </div>
+      ) : status === 'skipped' ? (
+        <div className="text-xs text-text-tertiary italic" data-testid={`schedule-skipped-${channel}`}>
+          Skipped on this channel.
         </div>
       ) : (
+        // pending | scheduled
         <>
           <input
             type="datetime-local"
-            value={localForInput(scheduledAt)}
+            value={localForInput(scheduled_for)}
             onChange={(e) => onSchedule(e.target.value ? new Date(e.target.value).toISOString() : null)}
-            disabled={disabled}
-            className="bg-bg-input border border-border-default rounded-md px-2 py-1 text-sm text-text-primary disabled:cursor-not-allowed"
-            data-testid={`schedule-input-${label.toLowerCase()}`}
+            className="bg-bg-input border border-border-default rounded-md px-2 py-1 text-sm text-text-primary"
+            data-testid={`schedule-input-${channel}`}
           />
-          <button
-            onClick={() => onSchedule(nextSlot)}
-            disabled={disabled}
-            className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover mt-2 disabled:cursor-not-allowed"
-          >
-            <Clock size={12} /> Next available: {new Date(nextSlot).toLocaleString()}
-          </button>
+          {nextSlot && (
+            <button
+              onClick={() => onSchedule(nextSlot)}
+              className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover mt-2"
+              data-testid={`schedule-next-slot-${channel}`}
+            >
+              <Clock size={12} /> Next available: {new Date(nextSlot).toLocaleString()}
+            </button>
+          )}
         </>
       )}
     </div>

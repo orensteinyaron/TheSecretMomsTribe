@@ -24,15 +24,20 @@ test('AXES: every axis has at least 2 options', () => {
   }
 });
 
-test('pickRachelMode: avatar formats → rachel_in_frame', () => {
-  assert.equal(pickRachelMode('tiktok_avatar'), 'rachel_in_frame');
-  assert.equal(pickRachelMode('tiktok_avatar_visual'), 'rachel_in_frame');
+test('pickRachelMode: avatar-v1 → rachel_in_frame', () => {
+  assert.equal(pickRachelMode('avatar-v1'), 'rachel_in_frame');
 });
 
-test('pickRachelMode: non-avatar formats → broll', () => {
-  assert.equal(pickRachelMode('ig_static'), 'broll');
-  assert.equal(pickRachelMode('tiktok_slideshow'), 'broll');
-  assert.equal(pickRachelMode('ig_carousel'), 'broll');
+test('pickRachelMode: non-avatar render profiles → broll', () => {
+  assert.equal(pickRachelMode('static-image'), 'broll');
+  assert.equal(pickRachelMode('moving-images'), 'broll');
+  assert.equal(pickRachelMode('carousel'), 'broll');
+});
+
+test('pickRachelMode: unknown slug → broll', () => {
+  assert.equal(pickRachelMode('whatever'), 'broll');
+  assert.equal(pickRachelMode(null), 'broll');
+  assert.equal(pickRachelMode(undefined), 'broll');
 });
 
 test('normalizeAxisValue: slugifies free-form', () => {

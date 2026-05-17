@@ -45,7 +45,7 @@ async function fetchWeekContent() {
   try {
     const { data, error } = await supabase
       .from('content_queue')
-      .select('status, content_pillar, post_format, content_type, age_range, render_status, render_cost_usd, rejection_reason, created_at, updated_at')
+      .select('status, content_pillar, content_type, age_range, render_status, render_cost_usd, rejection_reason, created_at, updated_at, render_profile:render_profiles(slug)')
       .gte('created_at', weekAgo);
 
     if (error) throw error;
@@ -281,19 +281,20 @@ function buildUserPrompt(data) {
   if (data.weekContent.length > 0) {
     const byStatus = {};
     const byPillar = {};
-    const byFormat = {};
+    const byRenderProfile = {};
     const rejectionReasons = [];
 
     for (const c of data.weekContent) {
       byStatus[c.status] = (byStatus[c.status] || 0) + 1;
       byPillar[c.content_pillar] = (byPillar[c.content_pillar] || 0) + 1;
-      byFormat[c.post_format] = (byFormat[c.post_format] || 0) + 1;
+      const slug = c.render_profile?.slug || 'unknown';
+      byRenderProfile[slug] = (byRenderProfile[slug] || 0) + 1;
       if (c.rejection_reason) rejectionReasons.push(c.rejection_reason);
     }
 
     sections.push(`By status: ${JSON.stringify(byStatus)}`);
     sections.push(`By pillar: ${JSON.stringify(byPillar)}`);
-    sections.push(`By format: ${JSON.stringify(byFormat)}`);
+    sections.push(`By render profile: ${JSON.stringify(byRenderProfile)}`);
     if (rejectionReasons.length > 0) {
       sections.push(`Rejection reasons: ${JSON.stringify(rejectionReasons)}`);
     }

@@ -32,16 +32,21 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !OPENAI_API_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// --- Size mapping by post_format ---
+// --- Size mapping by render_profile slug ---
+// Tall (9:16) for video/avatar surfaces; square for static + carousel.
 
 const SIZE_MAP = {
-  tiktok_slideshow: '1024x1792',
-  tiktok_text: '1024x1792',
-  ig_carousel: '1024x1024',
-  ig_static: '1024x1024',
-  ig_meme: '1024x1024',
-  video_script: '1024x1024',
+  'moving-images': '1024x1792',
+  'avatar-v1':     '1024x1792',
+  'static-image':  '1024x1024',
+  'carousel':      '1024x1024',
 };
+const DEFAULT_SIZE = '1024x1024';
+
+function profileSizeFor(post) {
+  const slug = post?.render_profiles?.slug || post?.render_profile_slug;
+  return SIZE_MAP[slug] || DEFAULT_SIZE;
+}
 
 // --- Image prompt enhancement ---
 
@@ -186,8 +191,9 @@ async function processPost(post) {
     return 0; // No images generated, $0 cost
   }
 
-  const size = SIZE_MAP[post.post_format] || '1024x1024';
-  console.log(`[ImageGen] Processing ${post.id} (${post.post_format}, ${size})...`);
+  const size = profileSizeFor(post);
+  const slug = post?.render_profiles?.slug || post?.render_profile_slug || '(no-profile)';
+  console.log(`[ImageGen] Processing ${post.id} (${slug}, ${size})...`);
 
   // Mark as generating
   await supabase.from('content_queue')
@@ -217,8 +223,8 @@ async function processPost(post) {
         pipeline_stage: 'image_generation', service: 'openai',
         model: `dall-e-3-${size}-hd`,
         content_id: post.id,
-        description: `Hero image for ${post.platform} ${post.post_format}`,
-        metadata: { size, quality: 'hd', style: 'natural', type: 'hero' },
+        description: `Hero image for ${slug}`,
+        metadata: { size, quality: 'hd', style: 'natural', type: 'hero', render_profile_slug: slug },
       });
     }
 
@@ -292,10 +298,11 @@ async function main() {
   console.log('[ImageGen Agent] Starting image generation for approved posts...');
   const startTime = Date.now();
 
-  // Query approved posts that need images
+  // Query approved posts that need images. Join render_profiles so we
+  // can size DALL-E output per profile (moving/avatar = 9:16, others = square).
   const { data: posts, error } = await supabase
     .from('content_queue')
-    .select('*')
+    .select('*, render_profiles(slug)')
     .eq('status', 'approved')
     .eq('image_status', 'pending')
     .not('image_prompt', 'is', null)

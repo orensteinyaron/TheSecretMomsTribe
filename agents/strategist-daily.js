@@ -41,7 +41,7 @@ async function fetchRecentContent() {
   try {
     const { data, error } = await supabase
       .from('content_queue')
-      .select('status, content_pillar, post_format, content_type, age_range, render_status, render_cost_usd, rejection_reason, created_at')
+      .select('status, content_pillar, content_type, age_range, render_status, render_cost_usd, rejection_reason, created_at, render_profile:render_profiles(slug)')
       .gte('created_at', yesterday);
     if (error) throw error;
     console.log(`[Strategist-Daily] Recent content: ${(data || []).length} items`);
@@ -191,20 +191,21 @@ function buildUserPrompt({ recentContent, briefing, existingInsights, directives
   if (recentContent.length > 0) {
     const statusCounts = {};
     const pillarCounts = {};
-    const formatCounts = {};
+    const renderProfileCounts = {};
     const typeCounts = {};
     const rejections = [];
     for (const c of recentContent) {
       statusCounts[c.status] = (statusCounts[c.status] || 0) + 1;
       pillarCounts[c.content_pillar] = (pillarCounts[c.content_pillar] || 0) + 1;
-      formatCounts[c.post_format] = (formatCounts[c.post_format] || 0) + 1;
+      const slug = c.render_profile?.slug || 'unknown';
+      renderProfileCounts[slug] = (renderProfileCounts[slug] || 0) + 1;
       typeCounts[c.content_type] = (typeCounts[c.content_type] || 0) + 1;
       if (c.rejection_reason) rejections.push(c.rejection_reason);
     }
     sections.push(`Total: ${recentContent.length} posts`);
     sections.push(`Status breakdown: ${JSON.stringify(statusCounts)}`);
     sections.push(`Pillar breakdown: ${JSON.stringify(pillarCounts)}`);
-    sections.push(`Format breakdown: ${JSON.stringify(formatCounts)}`);
+    sections.push(`Render profile breakdown: ${JSON.stringify(renderProfileCounts)}`);
     sections.push(`Content type breakdown: ${JSON.stringify(typeCounts)}`);
     if (rejections.length > 0) {
       sections.push(`Rejection reasons: ${rejections.join('; ')}`);
@@ -411,11 +412,12 @@ async function writeStrategyReport({ summary, recentContent, tasks, newInsightId
     contentPerformance.total = recentContent.length;
     contentPerformance.by_status = {};
     contentPerformance.by_pillar = {};
-    contentPerformance.by_format = {};
+    contentPerformance.by_render_profile = {};
     for (const c of recentContent) {
       contentPerformance.by_status[c.status] = (contentPerformance.by_status[c.status] || 0) + 1;
       contentPerformance.by_pillar[c.content_pillar] = (contentPerformance.by_pillar[c.content_pillar] || 0) + 1;
-      contentPerformance.by_format[c.post_format] = (contentPerformance.by_format[c.post_format] || 0) + 1;
+      const slug = c.render_profile?.slug || 'unknown';
+      contentPerformance.by_render_profile[slug] = (contentPerformance.by_render_profile[slug] || 0) + 1;
     }
   }
 

@@ -4,6 +4,11 @@
  * Posts approved content to Instagram and TikTok.
  * NOT YET FUNCTIONAL — requires platform API credentials.
  *
+ * v2.0.0 (CHANNEL_MODEL_V1): the agent iterates over pending rows in
+ * `scheduled_posts` (one per channel). The publish operation UPDATEs
+ * the existing pending row to `posted` (or `failed`) with the platform
+ * post URL + external ID. No new rows are inserted post-publish.
+ *
  * See: agents/publish.instructions.md for full runtime spec.
  *
  * Usage:
@@ -11,6 +16,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { CHANNEL, SCHEDULED_POST_STATUS, updateScheduledPostStatus } from './lib/channels.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -22,66 +28,76 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-async function getApprovedPosts() {
+/**
+ * Find scheduled_posts rows that are due now: status='pending' or
+ * status='scheduled' AND scheduled_for ≤ now. The piece itself must
+ * be approved.
+ */
+async function getDueScheduledPosts() {
+  const nowIso = new Date().toISOString();
   const { data, error } = await supabase
-    .from('content_queue')
-    .select('*, published_posts(id)')
-    .eq('status', 'approved')
-    .lte('scheduled_for', new Date().toISOString())
-    .is('published_posts.id', null)
-    .order('scheduled_for', { ascending: true });
+    .from('scheduled_posts')
+    .select('*, content_queue!inner(id, status, hook, caption, hashtags, content_pillar, render_profile_id)')
+    .in('status', [SCHEDULED_POST_STATUS.PENDING, SCHEDULED_POST_STATUS.SCHEDULED])
+    .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
+    .order('scheduled_for', { ascending: true, nullsFirst: false });
 
   if (error) {
-    console.error('[Publish] Failed to query approved posts:', error);
+    console.error('[Publish] Failed to query due scheduled_posts:', error);
     return [];
   }
 
-  return data || [];
+  // The piece must be approved for us to publish it.
+  return (data || []).filter((sp) => sp.content_queue?.status === 'approved');
 }
 
-async function publishToInstagram(post) {
+async function publishToInstagram(sp) {
   // TODO: Implement Instagram Graph API publishing
   // 1. Create media container
   // 2. Publish media
-  console.log(`[Publish] IG publish not implemented yet: ${post.id}`);
+  console.log(`[Publish] IG publish not implemented yet: content=${sp.content_id}`);
   return null;
 }
 
-async function publishToTikTok(post) {
+async function publishToTikTok(sp) {
   // TODO: Implement TikTok Content Posting API
   // 1. Upload video
   // 2. Publish
-  console.log(`[Publish] TT publish not implemented yet: ${post.id}`);
+  console.log(`[Publish] TT publish not implemented yet: content=${sp.content_id}`);
   return null;
 }
 
-async function recordPublish(contentId, platform, platformPostId, postUrl) {
-  const { error } = await supabase.from('published_posts').insert({
-    content_id: contentId,
-    platform,
-    platform_post_id: platformPostId,
-    post_url: postUrl,
-  });
-
-  if (error) {
-    console.error(`[Publish] Failed to record publish for ${contentId}:`, error);
-  }
-}
-
 async function main() {
-  console.log('[Publishing Agent] Checking for approved posts...');
+  console.log('[Publishing Agent] Checking for due scheduled_posts...');
 
-  const posts = await getApprovedPosts();
-  console.log(`[Publish] Found ${posts.length} posts to publish`);
+  const due = await getDueScheduledPosts();
+  console.log(`[Publish] Found ${due.length} scheduled_posts to publish`);
 
-  for (const post of posts) {
-    const result = post.platform === 'instagram'
-      ? await publishToInstagram(post)
-      : await publishToTikTok(post);
+  for (const sp of due) {
+    let result = null;
+    try {
+      if (sp.channel === CHANNEL.INSTAGRAM) {
+        result = await publishToInstagram(sp);
+      } else if (sp.channel === CHANNEL.TIKTOK) {
+        result = await publishToTikTok(sp);
+      } else {
+        console.warn(`[Publish] Unknown channel "${sp.channel}" on scheduled_post ${sp.id}`);
+        continue;
+      }
 
-    if (result) {
-      await recordPublish(post.id, post.platform, result.id, result.url);
-      console.log(`[Publish] Published: ${post.platform} — ${result.url}`);
+      if (!result) continue; // not implemented yet — keep status as-is
+
+      await updateScheduledPostStatus(supabase, sp.content_id, sp.channel, SCHEDULED_POST_STATUS.POSTED, {
+        post_url: result.url,
+        external_post_id: result.id,
+        published_at: new Date().toISOString(),
+      });
+      console.log(`[Publish] Published: ${sp.channel} — ${result.url}`);
+    } catch (err) {
+      console.error(`[Publish] Failed for content=${sp.content_id} channel=${sp.channel}: ${err.message}`);
+      await updateScheduledPostStatus(supabase, sp.content_id, sp.channel, SCHEDULED_POST_STATUS.FAILED, {
+        failure_reason: err.message,
+      });
     }
   }
 

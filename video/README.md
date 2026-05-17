@@ -93,4 +93,4 @@ ANTHROPIC_API_KEY=...   # Optional, for AI slide parser
 1. Create `src/templates/YourTemplate.tsx`
 2. Register in `src/Root.tsx` as a new `<Composition>`
 3. Add matching props interface
-4. Update generate script to select template based on `post_format`
+4. Update generate script to select template based on `render_profile.slug`

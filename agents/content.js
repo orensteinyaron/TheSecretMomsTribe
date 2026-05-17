@@ -2,15 +2,13 @@
  * SMT Content Generation Agent
  *
  * Reads today's briefing + 3 brand DNA docs → generates a batch
- * of 4 posts with full metadata (age_range, content_pillar, post_format).
+ * of posts with full metadata (age_range, content_pillar,
+ * render_profile_slug, channels).
  *
- * Daily batch:
- *   1. TikTok slideshow
- *   2. TikTok text-on-screen OR slideshow
- *   3. IG carousel (5-7 slides)
- *   4. IG static OR meme
- *
- * Zero video dependencies. All formats publishable with images + text.
+ * v2.0.0 (CHANNEL_MODEL_V1): emits `render_profile_slug` + `channels`
+ * (not `post_format`). After inserting into `content_queue`, inserts
+ * matching rows into `scheduled_posts` (one per channel) with
+ * platform-native captions produced by a Haiku polish step.
  *
  * Usage:
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... ANTHROPIC_API_KEY=... node agents/content.js
@@ -23,7 +21,7 @@ import { fileURLToPath } from 'url';
 import { logCost, printCostSummary } from '../scripts/utils/cost-logger.js';
 import { logActivity } from './lib/activity.js';
 import { loadSkill } from './lib/skill_loader.js';
-import { validateContentQueueRow } from './lib/gate_validators.js';
+import { rejectLegacyFormatFields, validateContentQueueRow } from './lib/gate_validators.js';
 import {
   AXES,
   pickRachelMode,
@@ -35,10 +33,10 @@ import {
   buildImagePromptGuidelines,
 } from './lib/image-diversity.js';
 import {
-  CAPTION_MAX_BY_FORMAT,
+  CAPTION_MAX_BY_SLUG,
   MIN_CAROUSEL_SLIDES,
   classifyDensity,
-  validateFormat,
+  validateRenderProfile,
 } from './lib/format-selector.js';
 import { validateSocialUrl } from './lib/url-validator.js';
 import { buildUserPrompt } from './lib/content-prompt.js';
@@ -47,6 +45,19 @@ import { buildContentQueueRow } from './lib/content-queue-row.js';
 import { VALID_PILLARS, normalizePillar } from './lib/pillars.js';
 import { enforceCaptionLengthWithRetry } from './lib/caption-retry.js';
 import { logPromptExecution } from './lib/prompt_logger.js';
+import {
+  ALL_RENDER_PROFILE_SLUGS,
+  RENDER_PROFILE_SLUGS,
+  isValidRenderProfileSlug,
+} from './lib/render-profiles.js';
+import {
+  ALL_CHANNELS,
+  DEFAULT_CHANNELS,
+  CHANNEL_STYLE,
+  buildScheduledPostsRows,
+  generateChannelCaptions,
+  resolveTargetChannels,
+} from './lib/channels.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -140,17 +151,9 @@ async function fetchRenderProfileMap() {
   }
 }
 
-// Fallback: map post_format to render profile slug
-const FORMAT_TO_PROFILE = {
-  tiktok_slideshow: 'moving-images',
-  tiktok_text: 'static-image',
-  ig_carousel: 'carousel',
-  ig_static: 'static-image',
-  ig_meme: 'static-image',
-  video_script: 'moving-images',
-  tiktok_avatar: 'avatar-v1',
-  tiktok_avatar_visual: 'avatar-v1',
-};
+// v2.0.0: the LLM emits render_profile_slug directly. No legacy fallback
+// from post_format is needed; if the LLM omits the slug we throw in
+// validateBatch.
 
 const AVATAR_LOOKS = [
   'cozy_cream_sweater', 'casual_white_tee', 'soft_grey_hoodie',
@@ -233,9 +236,9 @@ async function getRecentHooks() {
 
 const OUTPUT_SCHEMA_INSTRUCTIONS = `
 
-## AVATAR VIDEO FORMAT (tiktok_avatar / tiktok_avatar_visual)
+## AVATAR VIDEO FORMAT (render_profile_slug = "avatar-v1")
 
-When post_format is "tiktok_avatar" or "tiktok_avatar_visual", you MUST generate an "avatar_config" field in the post JSON.
+When render_profile_slug is "avatar-v1", you MUST generate an "avatar_config" field in the post JSON. The avatar variant is carried by avatar_config.format ("full_avatar" or "avatar_visual").
 
 CHARACTER: Marry, 36, mom of three (14, 9, 4). She's the friend in your group chat who always finds things out first. She's NOT a teacher. She gets frustrated, emotional, excited. She is NOT happy all the time.
 
@@ -248,9 +251,9 @@ SCRIPT RULES:
 - End with CLIFFHANGER that drives follows, not generic CTA
 - NEVER: "you guys", "so basically", "like and subscribe", anything YouTuber-coded
 
-FORMAT RULES:
-- tiktok_avatar: Full avatar only. 3-5 clips, all type "avatar". Best for: hot takes, personal stories, emotional topics.
-- tiktok_avatar_visual: Avatar + visuals. 3-6 clips mixing "avatar", "split", "broll". Best for: product reveals, comparisons, explainers.
+VARIANT RULES (avatar_config.format):
+- "full_avatar": Full avatar only. 3-5 clips, all type "avatar". Best for: hot takes, personal stories, emotional topics.
+- "avatar_visual": Avatar + visuals. 3-6 clips mixing "avatar", "split", "broll". Best for: product reveals, comparisons, explainers.
 
 AVATAR_CONFIG SCHEMA:
 {
@@ -271,8 +274,8 @@ AVATAR_CONFIG SCHEMA:
 CLIP RULES:
 - First clip MUST be type "avatar" with purpose "hook"
 - Last clip MUST be type "avatar" with purpose "cta"
-- For tiktok_avatar: ALL clips are type "avatar"
-- For tiktok_avatar_visual: Mix avatar, split, broll. Max 4 visual inserts.
+- For avatar_config.format = "full_avatar": ALL clips are type "avatar"
+- For avatar_config.format = "avatar_visual": Mix avatar, split, broll. Max 4 visual inserts.
 - Broll clips have NO script (visual-only, 2-4 seconds)
 - NEVER use visual_query for AI-generated fake products
 
@@ -308,7 +311,6 @@ async function generateBatch(briefing, skillSystemPrompt, coverageGaps, recentHo
 // --- Validation ---
 
 const VALID_AGE_RANGES = ['toddler', 'little_kid', 'school_age', 'teen', 'universal'];
-const VALID_POST_FORMATS = ['tiktok_slideshow', 'tiktok_text', 'ig_carousel', 'ig_static', 'ig_meme', 'video_script', 'tiktok_avatar', 'tiktok_avatar_visual'];
 const VALID_CONTENT_TYPES = ['wow', 'trust', 'cta'];
 
 // Hashtag fallbacks keyed by V1.1 canonical pillar. If the LLM leaks
@@ -368,17 +370,26 @@ async function validateBatch(posts) {
         p.hashtags = pillarFallback[p.age_range] || pillarFallback.universal;
         console.warn(`[Content] ${prefix}: hashtags missing/insufficient, auto-generated defaults`);
       }
-      if (!VALID_POST_FORMATS.includes(p.post_format)) throw new Error(`invalid post_format "${p.post_format}"`);
+      // v2.0.0 fail-closed: any legacy field is a hard reject.
+      const legacyCheck = rejectLegacyFormatFields(p);
+      if (!legacyCheck.ok) throw new Error(legacyCheck.reason);
+
+      if (!isValidRenderProfileSlug(p.render_profile_slug)) {
+        throw new Error(`invalid render_profile_slug "${p.render_profile_slug}" (must be one of ${ALL_RENDER_PROFILE_SLUGS.join(', ')})`);
+      }
       if (!VALID_AGE_RANGES.includes(p.age_range)) throw new Error(`invalid age_range "${p.age_range}"`);
       if (!VALID_PILLARS.includes(p.content_pillar)) throw new Error(`invalid content_pillar "${p.content_pillar}"`);
       if (!VALID_CONTENT_TYPES.includes(p.content_type)) throw new Error(`invalid content_type "${p.content_type}"`);
+
+      // Default channels to [tiktok, instagram] when LLM omits or sends garbage.
+      const llmChannels = Array.isArray(p.channels)
+        ? p.channels.filter((c) => ALL_CHANNELS.includes(c))
+        : [];
+      p.channels = llmChannels.length > 0 ? [...new Set(llmChannels)] : [...DEFAULT_CHANNELS];
     } catch (err) {
       console.warn(`[Content] ${prefix} skipped: ${err.message}`);
       continue;
     }
-
-    // Enforce platform from post_format
-    p.platform = p.post_format.startsWith('tiktok') ? 'tiktok' : 'instagram';
 
     // Normalize hashtags
     p.hashtags = p.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`));
@@ -393,19 +404,19 @@ async function validateBatch(posts) {
       p.slides = null;
     }
 
-    // Avatar-specific validation
-    if (p.post_format === 'tiktok_avatar' || p.post_format === 'tiktok_avatar_visual') {
+    // Avatar-specific validation (render_profile_slug = 'avatar-v1').
+    // The variant ('full_avatar' or 'avatar_visual') is the LLM's choice
+    // via avatar_config.format; no longer coerced from a legacy post_format.
+    if (p.render_profile_slug === RENDER_PROFILE_SLUGS.AVATAR_V1) {
       if (!p.avatar_config) {
         console.warn(`  [SKIP] Avatar post missing avatar_config`);
         continue;
       }
       const ac = p.avatar_config;
 
-      if (p.post_format === 'tiktok_avatar' && ac.format !== 'full_avatar') {
-        ac.format = 'full_avatar';
-      }
-      if (p.post_format === 'tiktok_avatar_visual' && ac.format !== 'avatar_visual') {
-        ac.format = 'avatar_visual';
+      if (ac.format !== 'full_avatar' && ac.format !== 'avatar_visual') {
+        console.warn(`  [SKIP] Avatar post has invalid avatar_config.format "${ac.format}"`);
+        continue;
       }
 
       if (!Array.isArray(ac.clips) || ac.clips.length < 2) {
@@ -444,7 +455,7 @@ async function validateBatch(posts) {
   console.log(`[Content] Batch: ${valid.length} posts validated`);
   console.log(`[Content] Age ranges: ${[...ageRanges].join(', ')}`);
   console.log(`[Content] Pillars: ${[...pillars].join(', ')}`);
-  console.log(`[Content] Formats: ${valid.map((p) => p.post_format).join(', ')}`);
+  console.log(`[Content] Render profiles: ${valid.map((p) => p.render_profile_slug).join(', ')}`);
 
   return valid;
 }
@@ -479,7 +490,7 @@ function normalizeImageFields(post) {
     normalizedAxes[axisName] = val || null;
   }
   if (!normalizedAxes.rachel_mode) {
-    normalizedAxes.rachel_mode = pickRachelMode(post.post_format);
+    normalizedAxes.rachel_mode = pickRachelMode(post.render_profile_slug);
   }
 
   post.image_prompt = promptText;
@@ -498,12 +509,12 @@ needs a brand-new cover image prompt that strictly uses the given axes.
 Post hook: ${JSON.stringify(post.hook)}
 Post caption: ${JSON.stringify((post.caption || '').slice(0, 200))}
 Post pillar: ${post.content_pillar}
-Post format: ${post.post_format}
+Render profile: ${post.render_profile_slug}
 
 REQUIRED axes (override any previous choice):
   shot_type: ${targetAxes.shot_type}
   lighting:  ${targetAxes.lighting}
-  rachel_mode: ${pickRachelMode(post.post_format)}
+  rachel_mode: ${pickRachelMode(post.render_profile_slug)}
 
 Return ONLY valid JSON, no code fences:
 {
@@ -514,7 +525,7 @@ Return ONLY valid JSON, no code fences:
     "palette": one of ${JSON.stringify(AXES.palette)},
     "subject": one of ${JSON.stringify(AXES.subject)},
     "mood": one of ${JSON.stringify(AXES.mood)},
-    "rachel_mode": "${pickRachelMode(post.post_format)}"
+    "rachel_mode": "${pickRachelMode(post.render_profile_slug)}"
   }
 }`;
 
@@ -582,7 +593,7 @@ async function enforceBatchDiversity(posts) {
 async function enforceFormatGates(posts) {
   let flagged = 0;
   for (const post of posts) {
-    const errors = validateFormat(post);
+    const errors = validateRenderProfile(post);
     if (errors.length === 0) continue;
 
     flagged++;
@@ -594,9 +605,9 @@ async function enforceFormatGates(posts) {
       actor_type: 'agent',
       actor_name: 'content-agent',
       action: 'format_validation_failed',
-      description: `Format check failed for ${post.post_format}: ${errors.join(', ')}`,
+      description: `Format check failed for ${post.render_profile_slug}: ${errors.join(', ')}`,
       metadata: {
-        post_format: post.post_format,
+        render_profile_slug: post.render_profile_slug,
         errors,
         caption_length: (post.caption || '').length,
         slide_count: Array.isArray(post.slides) ? post.slides.length : 0,
@@ -690,7 +701,7 @@ async function revalidatePostSourceUrls(posts) {
       }
       dropped++;
       const reason = result.reason || result.error || 'unknown';
-      console.warn(`[Content] Dropping stale source URL for ${post.post_format}: ${entry.url} (${reason})`);
+      console.warn(`[Content] Dropping stale source URL for ${post.render_profile_slug}: ${entry.url} (${reason})`);
 
       await logActivity({
         category: 'debug',
@@ -834,8 +845,8 @@ async function writeContentQueue(posts, briefingId, renderProfileMap, batchCtx =
   const tokensOutPerPiece = batchCtx?.usage ? Math.round(batchCtx.usage.output_tokens / Math.max(1, posts.length)) : null;
 
   const rows = posts.map((p) => {
-    const recommendedSlug = p._recommendedSlug || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
-    const profile = renderProfileMap[recommendedSlug];
+    // v2.0.0: LLM emits render_profile_slug directly; resolve to ID via the map.
+    const profile = renderProfileMap[p.render_profile_slug];
     const renderProfileId = profile?.id || null;
     const density = classifyDensity(p);
     const row = buildContentQueueRow(p, { briefingId, renderProfileId, density });
@@ -849,13 +860,14 @@ async function writeContentQueue(posts, briefingId, renderProfileMap, batchCtx =
         tokens_out: tokensOutPerPiece,
         cost_usd: costPerPiece,
         pillar_input: p.content_pillar,
-        format_input: p.post_format,
+        format_input: p.render_profile_slug,
+        channels: p.channels,
         active_directives: (batchCtx.directives || []).map((d) => ({
           directive_type: d.directive_type,
           directive: d.directive,
         })),
         briefing_id: briefingId,
-        // Agent Skills v1.0.0 — pinpoint which skill produced this row.
+        // Agent Skills v2.0.0 — pinpoint which skill produced this row.
         agent_slug: 'smt_content_text_gen',
         skill_version: batchCtx.skillVersion || null,
         contract_version: batchCtx.contractVersion || null,
@@ -904,6 +916,138 @@ async function writeContentQueue(posts, briefingId, renderProfileMap, batchCtx =
   return inserted;
 }
 
+// --- Caption polish + scheduled_posts insert (v2.0.0) ---
+
+const POLISH_MODEL = 'claude-haiku-4-5';
+
+function buildChannelPolishPrompt(post, channel) {
+  const style = CHANNEL_STYLE[channel];
+  return (
+    `You are tailoring a parenting post caption to ${channel.toUpperCase()}.\n\n` +
+    `Render profile: ${post.render_profile_slug}\n` +
+    `Pillar: ${post.content_pillar}\n` +
+    `Hook (already shown on screen — do NOT repeat verbatim): ${JSON.stringify(post.hook || '')}\n` +
+    `Base caption:\n"""${post.caption || ''}"""\n\n` +
+    `Channel tone: ${style.tone}\n` +
+    `Target ≤${style.target_chars} chars. Hard cap ${style.max_chars} chars.\n\n` +
+    (channel === 'tiktok'
+      ? `TikTok rules: hook-first opening, hashtag-dense end. Lean into search-friendly tags.\n`
+      : `Instagram rules: open with the most emotionally landing line, then add 2-3 sentences of supporting context. Bury hashtags at the end (or omit if the post is long).\n`) +
+    `Voice: ${post.hashtags ? `hashtags already chosen: ${post.hashtags.join(' ')}. Use them.` : 'pick 5-8 niche/medium hashtags.'} No mega-tags (#momlife/#parenting).\n\n` +
+    `Return ONLY valid JSON: {"caption": "..."}. No explanation, no code fences.`
+  );
+}
+
+function parseChannelCaption(text) {
+  if (typeof text !== 'string') return null;
+  let cleaned = text.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?\s*```$/, '').trim();
+  }
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed.caption === 'string') return parsed.caption.trim();
+  } catch {
+    // fall through
+  }
+  const match = cleaned.match(/"caption"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  return match ? JSON.parse(`"${match[1]}"`).trim() : null;
+}
+
+/**
+ * For each (post × channel), call Haiku to produce a platform-native
+ * caption. Returns a map keyed by post index → { [channel]: caption }.
+ * Per-call failure is non-fatal: the corresponding scheduled_posts
+ * row still gets inserted with caption=null, and the publish agent
+ * falls back to content_queue.caption.
+ */
+async function polishCaptionsPerChannel(posts) {
+  const out = posts.map(() => ({}));
+
+  for (let i = 0; i < posts.length; i++) {
+    const post = posts[i];
+    const channels = Array.isArray(post.channels) && post.channels.length > 0
+      ? post.channels
+      : [...DEFAULT_CHANNELS];
+
+    try {
+      out[i] = await generateChannelCaptions(
+        post,
+        channels,
+        async (p, channel) => {
+          const msg = await anthropic.messages.create({
+            model: POLISH_MODEL,
+            max_tokens: 600,
+            messages: [{ role: 'user', content: buildChannelPolishPrompt(p, channel) }],
+          });
+          const caption = parseChannelCaption(msg?.content?.[0]?.text);
+          await logCost(supabase, {
+            pipeline_stage: 'content_generation',
+            service: 'anthropic',
+            model: POLISH_MODEL,
+            input_tokens: msg?.usage?.input_tokens ?? 0,
+            output_tokens: msg?.usage?.output_tokens ?? 0,
+            description: `Caption polish for ${channel} (${p.render_profile_slug})`,
+          });
+          if (!caption) throw new Error('empty caption from polish step');
+          return caption;
+        },
+      );
+    } catch (err) {
+      console.warn(`[Content] Caption polish failed for post ${i + 1}: ${err.message}`);
+      await logActivity({
+        category: 'debug',
+        actor_type: 'agent',
+        actor_name: 'content-agent',
+        action: 'caption_polish_failed',
+        description: `Caption polish failed for post ${i + 1}: ${err.message}`,
+        metadata: { post_index: i, render_profile_slug: post.render_profile_slug, channels },
+      });
+      // Leave out[i] as the partial map (may have some channels filled in).
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Insert scheduled_posts rows (one per channel per piece) in 'pending'
+ * status. captionsPerPost[i] is the channel→caption map from
+ * polishCaptionsPerChannel; channels missing a caption become null
+ * (publish agent falls back to content_queue.caption).
+ */
+async function writeScheduledPosts(posts, insertedContentRows, captionsPerPost) {
+  if (!Array.isArray(insertedContentRows) || insertedContentRows.length === 0) return;
+
+  const allRows = [];
+  for (let i = 0; i < insertedContentRows.length; i++) {
+    const contentId = insertedContentRows[i].id;
+    const post = posts[i];
+    const channels = resolveTargetChannels(post.render_profile_slug, post.content_pillar);
+    const rows = buildScheduledPostsRows(contentId, channels, captionsPerPost[i] || {});
+    allRows.push(...rows);
+  }
+
+  if (allRows.length === 0) return;
+
+  const { error } = await supabase.from('scheduled_posts').insert(allRows);
+  if (error) {
+    console.error('[Content] Failed to write scheduled_posts:', error);
+    // Non-fatal: content_queue rows are already in place. The orchestrator
+    // can re-run the schedule step. But log loud — this is a regression risk.
+    await logActivity({
+      category: 'error',
+      actor_type: 'agent',
+      actor_name: 'content-agent',
+      action: 'scheduled_posts_insert_failed',
+      description: `scheduled_posts insert failed for ${insertedContentRows.length} pieces: ${error.message}`,
+      metadata: { content_ids: insertedContentRows.map((r) => r.id), error: error.message },
+    });
+    return;
+  }
+  console.log(`[Content] ${allRows.length} scheduled_posts rows written (${insertedContentRows.length} pieces × channels)`);
+}
+
 // --- Main ---
 
 async function main() {
@@ -947,8 +1091,7 @@ async function main() {
   for (const p of posts) {
     normalizeImageFields(p);
     p.source_urls = resolveSourceUrls(p, briefing.opportunities);
-    const opp = (briefing.opportunities || []).find((o) => o.signal_id === p.source_urls[0]?.signal_id);
-    p._recommendedSlug = opp?.recommended_format || FORMAT_TO_PROFILE[p.post_format] || 'static-image';
+    // v2.0.0: render_profile_slug comes from the LLM. No mapping fallback.
   }
 
   // Caption length retry: one-shot regen for captions ≤5% over their
@@ -980,7 +1123,7 @@ async function main() {
 
   // Write to Supabase. Pass batch context so writeContentQueue can build
   // per-piece generation_context + prompt_executions rows (V2 §4.1).
-  await writeContentQueue(posts, briefing.id, renderProfileMap, {
+  const inserted = await writeContentQueue(posts, briefing.id, renderProfileMap, {
     systemPrompt,
     userPrompt,
     usage,
@@ -989,6 +1132,15 @@ async function main() {
     skillVersion: skill.skillVersion,
     contractVersion: skill.contractVersion,
   });
+
+  // v2.0.0 (CHANNEL_MODEL_V1): per-channel caption polish (2× Haiku per
+  // piece, one TikTok-native + one Instagram-native) → insert
+  // scheduled_posts rows in 'pending' status. Non-fatal: failures here
+  // do not roll back the content_queue write.
+  if (Array.isArray(inserted) && inserted.length > 0) {
+    const captionsPerPost = await polishCaptionsPerChannel(posts.slice(0, inserted.length));
+    await writeScheduledPosts(posts.slice(0, inserted.length), inserted, captionsPerPost);
+  }
 
   // Log per-post cost share (split generation cost evenly)
   if (usage && posts.length > 0) {
@@ -1050,7 +1202,7 @@ async function main() {
   // Summary
   console.log('\n=== GENERATED BATCH ===');
   for (const p of posts) {
-    console.log(`\n[${p.post_format}] [${p.content_type}] [${p.content_pillar}] [${p.age_range}]`);
+    console.log(`\n[${p.render_profile_slug}] [${p.channels?.join(',')}] [${p.content_type}] [${p.content_pillar}] [${p.age_range}]`);
     console.log(`  Hook: "${p.hook}"`);
     console.log(`  Caption: ${p.caption.slice(0, 100)}...`);
     console.log(`  Hashtags: ${p.hashtags.join(' ')}`);

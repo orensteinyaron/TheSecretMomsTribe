@@ -7,22 +7,20 @@
  * content_queue column — additions/renames in the schema require an
  * update here, and the integration test in __tests__ catches drift.
  *
- * Why this exists as its own file:
- *   1. `platform` was dropped from content_queue by migration
- *      20260418171725_drop_platform_add_channel_scheduling per
- *      PIECE_PAGE_LIFECYCLE_V1 §3.1. Content is dual-platform by
- *      default; per-piece routing (rare) goes through
- *      `channel_override`, which is NOT set here.
- *   2. Previously, writeContentQueue spread runtime-only fields like
- *      `p.platform` straight into the INSERT, producing PGRST204.
- *      An explicit whitelist closes that class of bug.
+ * v2.0.0 (CHANNEL_MODEL_V1): `post_format` is dropped. Format is the
+ * FK `render_profile_id`. Per-channel state (`scheduled_at_*`,
+ * `published_at_*`, `published_url_*`, `channel_override`) is dropped
+ * too — those live in the `scheduled_posts` table, written separately.
  *
- * Adding a new column?
- *   1. Add the field to this function's return object.
- *   2. Add an assertion to content-queue-row.test.js so the
- *      whitelist regression stays locked.
- *   3. Run the integration test (SUPABASE_URL set) to confirm the
- *      column exists in the live schema.
+ * Why this exists as its own file:
+ *   1. Historical: `platform` and the per-channel inline columns were
+ *      dropped from content_queue by their respective migrations. An
+ *      explicit whitelist closes the PGRST204 "unknown column" class
+ *      of bug that arose when writeContentQueue used to spread runtime
+ *      fields straight into the INSERT.
+ *   2. The shape returned here is the live `content_queue` column set.
+ *      Adding a new column means updating this function AND the
+ *      content-queue-row.test.js assertion.
  */
 
 /**
@@ -51,7 +49,6 @@ export function buildContentQueueRow(piece, { briefingId, renderProfileId, densi
     audio_suggestion: piece.audio_suggestion || null,
     age_range: piece.age_range,
     content_pillar: piece.content_pillar,
-    post_format: piece.post_format,
     slides: piece.slides || [],
     avatar_config: piece.avatar_config || null,
     image_status: 'pending',

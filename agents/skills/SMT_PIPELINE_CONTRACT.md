@@ -1,12 +1,16 @@
 ---
 name: smt-pipeline-contract
 description: The single source of truth for what each agent owes the next in the SMT content pipeline. Every agent loads this file in addition to its own SKILL.md. If a field in this contract is missing on input, the agent MUST abort with a structured error instead of fabricating it. Use this whenever debugging a pipeline failure, designing a new agent, or changing the schema of any handoff between Research Agent, Strategist - Daily Pulse, or Content Agent - Text Gen.
-version: 1.0.0
-last_updated: 2026-05-11
+version: 2.0.0
+last_updated: 2026-05-17
 owner: Yaron Orenstein
 ---
 
-# SMT Pipeline Contract v1.0.0
+# SMT Pipeline Contract v2.0.0
+
+## Changelog
+- **v2.0.0 (2026-05-17):** BREAKING. `post_format` enum deprecated. Format is now `render_profile_slug` (one of `avatar-v1`, `moving-images`, `static-image`, `carousel`). Per-channel state (captions, schedule, posting) moves to a new `scheduled_posts` table. Legacy fields (`post_format`, `scheduled_at_ig`, `scheduled_at_tt`, `published_at_ig`, `published_at_tt`, `published_url_ig`, `published_url_tt`, `channel_override`) are hard-rejected by `gate_validators.rejectLegacyFormatFields`. See `docs/specs/CHANNEL_MODEL_V1.md`.
+- **v1.0.0 (2026-05-11):** initial contract — pillar routing law, AI Magic strict gate, defensive verbatim quote check.
 
 This document is the **handoff schema** between agents. It is enforced at the row level. Every agent in the pipeline reads this file at startup and validates inputs against it before doing any work.
 
@@ -69,6 +73,60 @@ Time-sensitive cultural moments: viral takes, news stories, studies the parentin
 
 ### `financial`
 First-person framing only. No specific products, stocks, crypto, tax, or legal. Mandatory caption disclaimer.
+
+## Format and channels (v2.0.0)
+
+A piece has **exactly one format** (a render profile) and **at least one channel** (where it gets posted). These are independent dimensions.
+
+### Format = render profile
+
+Format is the slug of one row in the `render_profiles` table. The four canonical slugs are:
+
+- `avatar-v1` — Rachel speaking, full avatar or avatar+visual. Stored in `render_profiles.output_spec.formats: ["full_avatar","avatar_visual"]`; the specific variant is carried by `avatar_config.format` on the piece.
+- `moving-images` — slideshow video (hook → slides → CTA) with TTS + Pexels b-roll.
+- `static-image` — single PNG (1080×1920).
+- `carousel` — IG-style multi-slide image set.
+
+`post_format` (the legacy enum that conflated channel and format) is dropped. The Content Agent emits `render_profile_slug` directly. Any agent that emits a legacy `post_format` field is hard-rejected by `gate_validators.rejectLegacyFormatFields`.
+
+### Channel = where it gets posted
+
+Channels are independent of format. Every piece, by default, targets BOTH:
+
+- `tiktok`
+- `instagram`
+
+Other channels (YouTube Shorts, Threads, Bluesky) are not supported in v2.0.0; expansion happens via `ALTER TYPE channel ADD VALUE` when a channel is committed to.
+
+Per-channel state lives in `scheduled_posts (content_id, channel)`:
+
+```
+scheduled_posts:
+  id, content_id, channel, status, caption, scheduled_for, published_at,
+  post_url, external_post_id, failure_reason, created_at, updated_at
+
+  status: 'pending' | 'scheduled' | 'posted' | 'failed' | 'skipped'
+  UNIQUE (content_id, channel)
+```
+
+When ContentGen produces a piece, the orchestrator:
+1. Inserts the row into `content_queue` with `render_profile_id` set.
+2. Inserts one `scheduled_posts` row per target channel with `status='pending'` and the channel-native caption.
+
+The legacy inline columns on `content_queue` (`scheduled_at_ig`, `scheduled_at_tt`, `published_at_ig`, `published_at_tt`, `published_url_ig`, `published_url_tt`, `channel_override`) are dropped. Do not read or write any of them.
+
+### Caption-per-channel
+
+Captions are platform-native:
+
+- **TikTok caption:** short, hook-first, hashtag-dense. On-screen text is the real payload. Target ≤100 chars, hard cap 150.
+- **Instagram caption:** longer prose, storytelling, hashtags buried at end or in first comment. Target ≤400 chars, hard cap 2200.
+
+A piece carries:
+- `caption` on `content_queue` — the LLM's base/storytelling caption (used as fallback when a channel-specific variant is absent).
+- `caption` on each `scheduled_posts` row — the platform-native variant for that channel.
+
+The platform-native variants are produced by a separate Haiku polish step (1 call per channel = 2 calls per piece by default). The base caption from the main LLM is the input; the Haiku output is what the publish agent reads.
 
 ## Required fields by pillar
 
@@ -139,12 +197,25 @@ Strategist outputs a briefing:
 
 The Strategist may re-rank but may **not** alter the gate-verified fields (`original_prompt`, `original_output`, etc.). The Strategist may **not** add invented examples (e.g. `"Show the prompt (e.g., 'My 4yo is asking…')"` — this is the exact failure mode that caused the May 11 incident).
 
-### Stage 3: Content Agent → content_queue
-Content Agent reads the briefing and produces one row per opportunity. For each row:
+### Stage 3: Content Agent → content_queue + scheduled_posts
+Content Agent reads the briefing and produces one piece per opportunity. For each piece:
 
 1. Validate that the opportunity passes its pillar's gate (defensive — Research and Strategist should have already done this).
-2. If pillar is `ai_magic`, the `ai_magic_output` field in the content_queue row **must** quote `original_prompt` and `original_output` verbatim. The Content Agent may add framing language around them but may not modify them.
-3. If the gate fails at this stage, the Content Agent aborts on that row with a `rejected[]` entry. It does not generate a fallback.
+2. If pillar is `ai_magic`, the `ai_magic_output` field **must** quote `original_prompt` and `original_output` verbatim. The Content Agent may add framing language around them but may not modify them.
+3. Emit `render_profile_slug` (NEVER `post_format` — that field is dropped). The slug must be one of `avatar-v1`, `moving-images`, `static-image`, `carousel`.
+4. Emit `channels` array — the channels this piece targets. Default: `['tiktok', 'instagram']`.
+5. Emit `caption` — the base/storytelling caption. The downstream Haiku polish step generates platform-native variants from this base.
+6. If the gate fails at this stage, the Content Agent aborts on that row with a `rejected[]` entry. It does not generate a fallback.
+
+The orchestrator persists the piece atomically:
+- One `content_queue` row with `render_profile_id` resolved from `render_profile_slug`.
+- One `scheduled_posts` row per channel in `pending` status, with the platform-native caption.
+
+### Stage 3.5: Caption polish (Haiku, downstream of Stage 3)
+For each piece × each channel, Haiku generates a platform-native caption from the base caption + hook + content metadata. The output is written to `scheduled_posts.caption` for that (content_id, channel) row. Failure here is non-fatal — the publish agent falls back to `content_queue.caption` if the per-channel caption is null.
+
+### Fail-closed: legacy field rejection
+Any output from any agent containing `post_format`, `scheduled_at_ig`, `scheduled_at_tt`, `published_at_ig`, `published_at_tt`, `published_url_ig`, `published_url_tt`, or `channel_override` is hard-rejected by `gate_validators.rejectLegacyFormatFields`. The orchestrator writes the raw output to `content_queue_rejected` and escalates. This catches any LLM regression to the v1.0.0 shape.
 
 ## Failure modes the contract prevents
 

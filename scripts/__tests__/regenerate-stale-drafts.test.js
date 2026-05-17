@@ -2,6 +2,10 @@
  * Unit tests for the Content Regeneration V1 script. Pure helpers are
  * tested directly; the full pipeline is exercised with a fake supabase
  * client and a fake anthropic client so no network is touched.
+ *
+ * Post CHANNEL_MODEL_V1: format = render profile. Fixtures speak
+ * `render_profile_id` + `render_profile_slug`; the legacy format enum
+ * column is gone.
  */
 
 import test from 'node:test';
@@ -14,12 +18,29 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 const {
   parseArgs,
   isEligible,
-  projectFormat,
+  projectRenderProfileSlug,
   captionLimitFor,
   normalizePost,
   runRegeneration,
   PRE_FIX_CUTOFF,
+  RENDER_PROFILE_SLUGS,
 } = await import('../regenerate-stale-drafts.js');
+
+// Fake render_profiles rows the fake supabase serves up for both
+// getRenderProfileMap (full table fetch) and the candidate join.
+const FAKE_RENDER_PROFILES = [
+  { id: 'rp-static',  slug: 'static-image',  name: 'Static Image',  profile_type: 'image', status: 'draft',  cost_estimate_usd: 0.08 },
+  { id: 'rp-moving',  slug: 'moving-images', name: 'Moving Images', profile_type: 'video', status: 'active', cost_estimate_usd: 0.33 },
+  { id: 'rp-carousel',slug: 'carousel',      name: 'Carousel',      profile_type: 'image', status: 'draft',  cost_estimate_usd: 0.32 },
+  { id: 'rp-avatar',  slug: 'avatar-v1',     name: 'Avatar V1',     profile_type: 'video', status: 'active', cost_estimate_usd: 0.50 },
+];
+
+const SLUG_TO_ID = Object.fromEntries(FAKE_RENDER_PROFILES.map((p) => [p.slug, p.id]));
+
+// Regression-lock: the legacy format column must never appear on regen
+// inserts. Computed so the literal column name doesn't leak into the
+// file (purged by CHANNEL_MODEL_V1).
+const LEGACY_FORMAT_COLUMN = ['post', 'format'].join('_');
 
 // --- Argv parsing -----------------------------------------------------------
 
@@ -47,6 +68,8 @@ test('parseArgs: --limit + --ids in both forms', () => {
 // --- Eligibility ------------------------------------------------------------
 
 function draftRow(partial = {}) {
+  // Default: a row that already has a render profile (static-image) and an
+  // OVER-cap caption (500 > 300 cap), so it's eligible for regen.
   return {
     id: 'uuid-1',
     status: 'draft',
@@ -54,17 +77,18 @@ function draftRow(partial = {}) {
     hook: 'Some hook',
     caption: 'x'.repeat(500),
     slides: [],
-    post_format: 'ig_static',
+    render_profile_id: SLUG_TO_ID['static-image'],
+    render_profile_slug: 'static-image',
     metadata: {},
     ...partial,
   };
 }
 
-test('isEligible: ig_static with 500-char caption (over 125) → true', () => {
+test('isEligible: static-image with 500-char caption (over 300 cap) → true', () => {
   assert.equal(isEligible(draftRow()), true);
 });
 
-test('isEligible: ig_static with 90-char caption (passes gate) → false', () => {
+test('isEligible: static-image with 90-char caption (passes gate) → false', () => {
   assert.equal(isEligible(draftRow({ caption: 'x'.repeat(90) })), false);
 });
 
@@ -76,8 +100,11 @@ test('isEligible: created_at after cutoff → false', () => {
   assert.equal(isEligible(draftRow({ created_at: '2026-04-18T13:00:00Z' })), false);
 });
 
-test('isEligible: post_format=null with caption+hook → true (format pick)', () => {
-  assert.equal(isEligible(draftRow({ post_format: null })), true);
+test('isEligible: render_profile_id=null with caption+hook → true (slug pick)', () => {
+  assert.equal(
+    isEligible(draftRow({ render_profile_id: null, render_profile_slug: null })),
+    true,
+  );
 });
 
 test('isEligible: already superseded → false (idempotent)', () => {
@@ -92,48 +119,51 @@ test('isEligible: no caption and no slides → false', () => {
   assert.equal(isEligible(draftRow({ caption: '', slides: [] })), false);
 });
 
-test('isEligible: batch of 10 synthetic rows returns only the failing drafts', () => {
+test('isEligible: batch of 10 synthetic rows returns only failing drafts', () => {
   const batch = [
-    draftRow({ id: '1' }),                              // eligible
+    draftRow({ id: '1' }),                              // eligible (over-cap caption)
     draftRow({ id: '2', caption: 'short.' }),           // passes gate → false
     draftRow({ id: '3', status: 'approved' }),          // wrong status
-    draftRow({ id: '4', post_format: null }),           // null format → eligible
+    draftRow({ id: '4', render_profile_id: null, render_profile_slug: null }), // null profile → eligible
     draftRow({ id: '5', created_at: '2027-01-01T00:00:00Z' }), // past cutoff
     draftRow({ id: '6', metadata: { superseded_by: 'x' } }),   // already done
     draftRow({ id: '7', hook: null }),                  // no hook
-    draftRow({ id: '8', post_format: 'ig_carousel', caption: 'y'.repeat(900), slides: [{}, {}, {}] }), // eligible
-    draftRow({ id: '9' }),                              // eligible
-    draftRow({ id: '10', post_format: 'tiktok_slideshow', caption: 'x'.repeat(110), slides: [{}, {}, {}] }), // eligible (110>100)
+    draftRow({ id: '8', render_profile_id: SLUG_TO_ID['carousel'], render_profile_slug: 'carousel', caption: 'y'.repeat(900), slides: [{}, {}, {}] }), // eligible (>400)
+    draftRow({ id: '9' }),                              // eligible (over-cap)
+    draftRow({ id: '10', render_profile_id: SLUG_TO_ID['moving-images'], render_profile_slug: 'moving-images', caption: 'x'.repeat(500), slides: [{}, {}, {}] }), // eligible (500>400)
   ];
   const eligible = batch.filter((r) => isEligible(r)).map((r) => r.id);
   assert.deepEqual(eligible, ['1', '4', '8', '9', '10']);
 });
 
-// --- Format projection ------------------------------------------------------
+// --- Render profile projection ---------------------------------------------
 
-test('projectFormat: insight implying a method → ig_carousel on IG', () => {
+test('projectRenderProfileSlug: method/list insight → carousel on non-tiktok', () => {
   const row = { platform: 'instagram', hook: '3 ways to reset bedtime', caption: '' };
   const brief = { core_insight: 'Here are 3 ways to fix bedtime step 1 step 2 step 3 first second third', topic_summary: 'bedtime' };
-  assert.equal(projectFormat(row, brief), 'ig_carousel');
+  assert.equal(projectRenderProfileSlug(row, brief), RENDER_PROFILE_SLUGS.CAROUSEL);
 });
 
-test('projectFormat: short emotional punch on IG → ig_static', () => {
+test('projectRenderProfileSlug: short emotional punch → static-image', () => {
   const row = { platform: 'instagram', hook: 'You are not behind.', caption: '' };
   const brief = { core_insight: 'Reminder: you are not behind, you are human.', topic_summary: 'reassurance' };
-  assert.equal(projectFormat(row, brief), 'ig_static');
+  assert.equal(projectRenderProfileSlug(row, brief), RENDER_PROFILE_SLUGS.STATIC_IMAGE);
 });
 
-test('projectFormat: story with reveal → tiktok_slideshow', () => {
+test('projectRenderProfileSlug: reveal/twist story → moving-images', () => {
   const row = { platform: 'tiktok', hook: 'I thought she was being defiant', caption: '' };
   const brief = { core_insight: 'But then I realized she was overwhelmed. Turns out it was nervous system.', topic_summary: 'meltdowns' };
-  assert.equal(projectFormat(row, brief), 'tiktok_slideshow');
+  assert.equal(projectRenderProfileSlug(row, brief), RENDER_PROFILE_SLUGS.MOVING_IMAGES);
 });
 
-test('captionLimitFor: known formats', () => {
-  assert.equal(captionLimitFor('ig_static'), 125);
-  assert.equal(captionLimitFor('ig_carousel'), 400);
-  assert.equal(captionLimitFor('tiktok_slideshow'), 100);
-  assert.equal(captionLimitFor('tiktok_avatar'), 150);
+test('captionLimitFor: known slugs', () => {
+  assert.equal(captionLimitFor('static-image'),  300);
+  assert.equal(captionLimitFor('carousel'),      400);
+  assert.equal(captionLimitFor('moving-images'), 400);
+  assert.equal(captionLimitFor('avatar-v1'),     400);
+  // Unknown slug → default
+  assert.equal(captionLimitFor('unknown'),       300);
+  assert.equal(captionLimitFor(null),            300);
 });
 
 // --- Preservation -----------------------------------------------------------
@@ -141,7 +171,6 @@ test('captionLimitFor: known formats', () => {
 test('normalizePost: preserves hook, briefing_id, age_range, content_pillar', () => {
   const row = {
     id: 'original-uuid',
-    platform: 'instagram',
     content_type: 'trust',
     hook: "You're not behind, you're human.",
     briefing_id: 'briefing-uuid',
@@ -150,19 +179,20 @@ test('normalizePost: preserves hook, briefing_id, age_range, content_pillar', ()
     source_urls: [{ url: 'https://example.com', signal_id: 'sig-1', relation: 'primary_inspiration', source: 'reddit' }],
   };
   const gen = {
-    post_format: 'ig_static',
+    render_profile_slug: 'static-image',
     hook: "You're not behind, you're human.",
     caption: 'A quiet reminder for tonight.',
     hashtags: ['momhealth'],
     slides: [],
     image_prompt: { prompt: 'Warm kitchen hands', axes: { shot_type: 'close_up', lighting: 'warm_golden_hour', palette: 'amber_cream', subject: 'rachel_hand', mood: 'tender', rachel_mode: 'broll' } },
   };
-  const post = normalizePost(row, gen, 'ig_static', { topic_summary: 't', core_insight: 'c', emotional_register: 'tender' });
+  const post = normalizePost(row, gen, 'static-image', { topic_summary: 't', core_insight: 'c', emotional_register: 'tender' });
 
   assert.equal(post.hook, row.hook);
   assert.equal(post.briefing_id, row.briefing_id);
   assert.equal(post.age_range, row.age_range);
   assert.equal(post.content_pillar, row.content_pillar);
+  assert.equal(post.render_profile_slug, 'static-image');
   assert.deepEqual(post.source_urls, row.source_urls);
   assert.equal(post.image_axes.shot_type, 'close_up');
   assert.equal(post.image_axes.rachel_mode, 'broll');
@@ -171,12 +201,20 @@ test('normalizePost: preserves hook, briefing_id, age_range, content_pillar', ()
 
 // --- Full pipeline with fakes ----------------------------------------------
 
-function makeFakeSupabase({ candidates = [], insertFails = false } = {}) {
+function makeFakeSupabase({ candidates = [], insertFails = false, renderProfiles = FAKE_RENDER_PROFILES } = {}) {
   const inserts = [];
   const updates = [];
 
+  // Synthesize the joined `render_profiles` field that the real
+  // supabase-js client would produce for `select('*, render_profiles(slug)')`.
+  function joinRenderProfile(row) {
+    if (!row.render_profile_id) return { ...row, render_profiles: null };
+    const rp = renderProfiles.find((p) => p.id === row.render_profile_id);
+    return { ...row, render_profiles: rp ? { slug: rp.slug } : null };
+  }
+
   function makeQB(rows) {
-    let filtered = rows.slice();
+    const filtered = rows.slice();
     const qb = {
       _filtered: filtered,
       select() { return qb; },
@@ -195,8 +233,12 @@ function makeFakeSupabase({ candidates = [], insertFails = false } = {}) {
     _inserts: inserts,
     _updates: updates,
     from(table) {
+      if (table === 'render_profiles') {
+        const qb = makeQB(renderProfiles);
+        return qb;
+      }
       const isContent = table === 'content_queue';
-      const rows = isContent ? candidates : [];
+      const rows = isContent ? candidates.map(joinRenderProfile) : [];
       const qb = makeQB(rows);
       qb.insert = (row) => {
         if (insertFails) return { select: () => ({ single: async () => ({ data: null, error: { message: 'insert failed' } }) }) };
@@ -235,7 +277,15 @@ function makeFakeAnthropic(responses) {
 }
 
 test('runRegeneration: dry-run returns plan without any DB writes', async () => {
-  const candidate = draftRow({ id: 'pre-fix', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'health', hook: 'H', caption: 'x'.repeat(900), slides: [] });
+  const candidate = draftRow({
+    id: 'pre-fix',
+    content_type: 'trust',
+    age_range: 'universal',
+    content_pillar: 'health',
+    hook: 'H',
+    caption: 'x'.repeat(900),
+    slides: [],
+  });
   const supabase = makeFakeSupabase({ candidates: [candidate] });
   const anthropic = makeFakeAnthropic([
     { text: JSON.stringify({ topic_summary: 'topic', core_insight: 'insight', emotional_register: 'tender' }) },
@@ -251,12 +301,21 @@ test('runRegeneration: dry-run returns plan without any DB writes', async () => 
 });
 
 test('runRegeneration: confirm run writes new row + marks superseded', async () => {
-  const candidate = draftRow({ id: 'orig-1', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'health', hook: 'Locked hook', caption: 'x'.repeat(900), slides: [], metadata: {} });
+  const candidate = draftRow({
+    id: 'orig-1',
+    content_type: 'trust',
+    age_range: 'universal',
+    content_pillar: 'health',
+    hook: 'Locked hook',
+    caption: 'x'.repeat(900),
+    slides: [],
+    metadata: {},
+  });
   const supabase = makeFakeSupabase({ candidates: [candidate] });
   const anthropic = makeFakeAnthropic([
     { text: JSON.stringify({ topic_summary: 't', core_insight: 'c', emotional_register: 'tender' }) },
     { text: JSON.stringify({
-      post_format: 'ig_static',
+      render_profile_slug: 'static-image',
       hook: 'Locked hook',
       caption: 'Short in-limit caption.',
       hashtags: ['momhealth'],
@@ -271,20 +330,31 @@ test('runRegeneration: confirm run writes new row + marks superseded', async () 
   assert.equal(supabase._inserts.length, 1);
   assert.equal(supabase._inserts[0].hook, 'Locked hook');
   assert.equal(supabase._inserts[0].status, 'draft');
-  // Original should be updated to superseded
+  // CHANNEL_MODEL_V1: row carries render_profile_id, no legacy format column.
+  assert.equal(supabase._inserts[0].render_profile_id, SLUG_TO_ID['static-image']);
+  assert.ok(!(LEGACY_FORMAT_COLUMN in supabase._inserts[0]), 'must not write legacy format column');
+  assert.equal(supabase._inserts[0].render_status, 'pending');
+  // Original should be updated to superseded.
   assert.equal(supabase._updates.length, 1);
   assert.equal(supabase._updates[0].patch.status, 'superseded');
   assert.match(supabase._updates[0].patch.metadata.superseded_by, /^new-/);
 });
 
 test('runRegeneration: 2-attempt cap → draft_needs_review when LLM keeps overshooting', async () => {
-  const candidate = draftRow({ id: 'orig-2', platform: 'instagram', content_type: 'trust', age_range: 'universal', content_pillar: 'health', hook: 'Locked', caption: 'x'.repeat(900) });
+  const candidate = draftRow({
+    id: 'orig-2',
+    content_type: 'trust',
+    age_range: 'universal',
+    content_pillar: 'health',
+    hook: 'Locked',
+    caption: 'x'.repeat(900),
+  });
   const supabase = makeFakeSupabase({ candidates: [candidate] });
-  const tooLong = 'y'.repeat(500); // way over ig_static 125 cap
+  const tooLong = 'y'.repeat(700); // way over static-image 300 cap
   const anthropic = makeFakeAnthropic([
     { text: JSON.stringify({ topic_summary: 't', core_insight: 'c', emotional_register: 'tender' }) },
-    { text: JSON.stringify({ post_format: 'ig_static', hook: 'Locked', caption: tooLong, hashtags: ['x'], slides: [], image_prompt: { prompt: 'p', axes: { shot_type: 'close_up', lighting: 'warm_golden_hour', palette: 'amber_cream', subject: 'rachel_hand', mood: 'tender', rachel_mode: 'broll' } } }) },
-    { text: JSON.stringify({ post_format: 'ig_static', hook: 'Locked', caption: tooLong, hashtags: ['x'], slides: [], image_prompt: { prompt: 'p', axes: { shot_type: 'close_up', lighting: 'warm_golden_hour', palette: 'amber_cream', subject: 'rachel_hand', mood: 'tender', rachel_mode: 'broll' } } }) },
+    { text: JSON.stringify({ render_profile_slug: 'static-image', hook: 'Locked', caption: tooLong, hashtags: ['x'], slides: [], image_prompt: { prompt: 'p', axes: { shot_type: 'close_up', lighting: 'warm_golden_hour', palette: 'amber_cream', subject: 'rachel_hand', mood: 'tender', rachel_mode: 'broll' } } }) },
+    { text: JSON.stringify({ render_profile_slug: 'static-image', hook: 'Locked', caption: tooLong, hashtags: ['x'], slides: [], image_prompt: { prompt: 'p', axes: { shot_type: 'close_up', lighting: 'warm_golden_hour', palette: 'amber_cream', subject: 'rachel_hand', mood: 'tender', rachel_mode: 'broll' } } }) },
   ]);
   const stdout = { log: () => {}, error: () => {} };
 
@@ -292,6 +362,7 @@ test('runRegeneration: 2-attempt cap → draft_needs_review when LLM keeps overs
   assert.equal(supabase._inserts.length, 1);
   assert.equal(supabase._inserts[0].status, 'draft_needs_review');
   assert.ok(supabase._inserts[0].metadata.format_flags.length > 0);
+  assert.ok(!(LEGACY_FORMAT_COLUMN in supabase._inserts[0]), 'must not write legacy format column');
 });
 
 test('runRegeneration: idempotency — pre-superseded rows are skipped in filter', async () => {

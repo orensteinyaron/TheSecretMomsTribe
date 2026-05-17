@@ -75,21 +75,35 @@ const PILLAR_LABEL = {
 // Light template: parenting_insights, tech_for_moms
 const DARK_PILLARS = new Set(['ai_magic', 'health', 'trending']);
 
+// Keyed by render_profile.slug (CHANNEL_MODEL_V1). Moving/avatar renders
+// are 9:16; static + carousel are the 4:5 IG feed shape.
 const DIMS = {
-  tiktok_slideshow: { w: 1080, h: 1920 },
-  tiktok_text: { w: 1080, h: 1920 },
-  ig_carousel: { w: 1080, h: 1350 },
-  ig_static: { w: 1080, h: 1350 },
-  ig_meme: { w: 1080, h: 1350 },
+  'moving-images': { w: 1080, h: 1920 },
+  'avatar-v1':     { w: 1080, h: 1920 },
+  'static-image':  { w: 1080, h: 1350 },
+  'carousel':      { w: 1080, h: 1350 },
 };
+const DEFAULT_DIMS = DIMS['static-image'];
 
 const TEXT_SIZE = {
-  ig_static: { fontSize: 48, lineHeight: 62, maxChars: 28 },
-  ig_carousel: { fontSize: 44, lineHeight: 58, maxChars: 30 },
-  ig_meme: { fontSize: 48, lineHeight: 62, maxChars: 28 },
-  tiktok_text: { fontSize: 52, lineHeight: 66, maxChars: 26 },
-  tiktok_slideshow: { fontSize: 50, lineHeight: 64, maxChars: 27 },
+  'static-image':  { fontSize: 48, lineHeight: 62, maxChars: 28 },
+  'carousel':      { fontSize: 44, lineHeight: 58, maxChars: 30 },
+  'moving-images': { fontSize: 50, lineHeight: 64, maxChars: 27 },
+  'avatar-v1':     { fontSize: 52, lineHeight: 66, maxChars: 26 },
 };
+const DEFAULT_TEXT_SIZE = TEXT_SIZE['static-image'];
+
+function profileSlugOf(post) {
+  return post?.render_profiles?.slug || post?.render_profile_slug || null;
+}
+
+function dimsFor(post) {
+  return DIMS[profileSlugOf(post)] || DEFAULT_DIMS;
+}
+
+function textSizeFor(post) {
+  return TEXT_SIZE[profileSlugOf(post)] || DEFAULT_TEXT_SIZE;
+}
 
 // ─── Text Utilities ───
 
@@ -131,9 +145,9 @@ async function loadLogo(size, opacity) {
 // ─── Track 1: Dark Branded Background ───
 
 function createDarkBackground(post) {
-  const dims = DIMS[post.post_format] || DIMS.ig_static;
+  const dims = dimsFor(post);
   const { w, h } = dims;
-  const ts = TEXT_SIZE[post.post_format] || TEXT_SIZE.ig_static;
+  const ts = textSizeFor(post);
   const accent = PILLAR_COLOR[post.content_pillar] || BRAND.pink;
   const label = PILLAR_LABEL[post.content_pillar] || '';
 
@@ -180,9 +194,9 @@ function createDarkBackground(post) {
 // ─── Track 1: Light Branded Background ───
 
 function createLightBackground(post) {
-  const dims = DIMS[post.post_format] || DIMS.ig_static;
+  const dims = dimsFor(post);
   const { w, h } = dims;
-  const ts = TEXT_SIZE[post.post_format] || TEXT_SIZE.ig_static;
+  const ts = textSizeFor(post);
   const accent = PILLAR_COLOR[post.content_pillar] || BRAND.purple;
   const label = PILLAR_LABEL[post.content_pillar] || '';
 
@@ -240,9 +254,9 @@ function createGradientOverlay(w, h) {
 }
 
 function createPhotoTextOverlay(post) {
-  const dims = DIMS[post.post_format] || DIMS.ig_static;
+  const dims = dimsFor(post);
   const { w, h } = dims;
-  const ts = TEXT_SIZE[post.post_format] || TEXT_SIZE.ig_static;
+  const ts = textSizeFor(post);
   const label = PILLAR_LABEL[post.content_pillar] || '';
 
   const hookLines = wordWrap(post.hook || '', ts.maxChars);
@@ -272,7 +286,7 @@ function createPhotoTextOverlay(post) {
 }
 
 async function composeWithPhoto(post) {
-  const dims = DIMS[post.post_format] || DIMS.ig_static;
+  const dims = dimsFor(post);
 
   const bgResponse = await fetch(post.image_url);
   if (!bgResponse.ok) throw new Error(`Failed to download bg: ${bgResponse.status}`);
@@ -315,7 +329,7 @@ function selectTemplate(post) {
 
 async function composePost(post) {
   const template = selectTemplate(post);
-  const dims = DIMS[post.post_format] || DIMS.ig_static;
+  const dims = dimsFor(post);
 
   let imageBuffer;
   if (template === 'photo') {
@@ -381,10 +395,11 @@ async function main() {
   console.log(`[Compose] Brand: purple=#63246a, pink=#b74780`);
   const startTime = Date.now();
 
-  // Get approved posts that need composition
+  // Get approved posts that need composition. Join render_profiles so we
+  // can pick the right dims + text scale per profile slug.
   const { data: posts, error } = await supabase
     .from('content_queue')
-    .select('*')
+    .select('*, render_profiles(slug)')
     .eq('status', 'approved')
     .in('image_status', ['generated', 'not_needed'])
     .order('created_at', { ascending: true });
@@ -421,7 +436,7 @@ async function main() {
       await logCost(supabase, {
         pipeline_stage: 'image_composition', service: 'sharp', model: 'compose',
         content_id: post.id,
-        description: `Composed ${post.post_format} (${template})`,
+        description: `Composed ${profileSlugOf(post) || 'no-profile'} (${template})`,
       });
     } catch (err) {
       console.error(`[Compose]   FAILED ${post.id}: ${err.message}`);

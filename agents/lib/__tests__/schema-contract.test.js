@@ -6,19 +6,20 @@
  *
  * Purpose: catch schema-code drift at test time, NOT at GitHub Actions
  * time. For every column the agent writes into content_queue, assert
- * that every value the agent can emit is accepted by the DB's CHECK
- * constraint (pillar) or enum type (post_format, content_type,
- * age_range).
+ * that every value the agent can emit is accepted by the DB.
  *
- * This is the guard installed alongside the V1.1 pillar rename —
- * next schema migration that tightens a value set will fail this
- * test before it reaches production.
+ * v2.0.0 (CHANNEL_MODEL_V1): the legacy `post_format` enum probe is
+ * gone — that column is being dropped. The render_profile_slug → ID
+ * resolution is exercised via the agent's lib helpers (covered by
+ * render-profiles.test.js) and by a sanity probe here that confirms
+ * every slug in ALL_RENDER_PROFILE_SLUGS resolves to a live row.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { VALID_PILLARS } from '../pillars.js';
+import { ALL_RENDER_PROFILE_SLUGS } from '../render-profiles.js';
 
 const hasRealSupabase =
   process.env.SUPABASE_URL &&
@@ -32,14 +33,6 @@ const hasRealSupabase =
 // track content.js.
 const AGENT_AGE_RANGES = ['toddler', 'little_kid', 'school_age', 'teen', 'universal'];
 const AGENT_CONTENT_TYPES = ['wow', 'trust', 'cta'];
-
-// Known-pending drift: the agent's local VALID_POST_FORMATS includes
-// tiktok_avatar / tiktok_avatar_visual for the avatar video feature,
-// but those values are NOT in the DB post_format enum and are NOT in
-// the content-prompt output schema (so the LLM cannot actually emit
-// them today). Scope-strict: tracked separately. Remove from this
-// exclusion list once the avatar formats are added to the DB enum.
-const AGENT_POST_FORMATS = ['tiktok_slideshow', 'tiktok_text', 'ig_carousel', 'ig_static', 'ig_meme', 'video_script'];
 
 async function getSupabase() {
   const { createClient } = await import('@supabase/supabase-js');
@@ -95,7 +88,6 @@ test('content_queue.content_pillar CHECK accepts every VALID_PILLARS value', { s
           hashtags: ['#probe'],
           age_range: 'universal',
           content_pillar: pillar,
-          post_format: 'tiktok_slideshow',
           image_status: 'pending',
           launch_bank: false,
           slides: [],
@@ -120,7 +112,7 @@ test('content_queue.content_pillar CHECK accepts every VALID_PILLARS value', { s
   );
 });
 
-test('content_queue enums accept every agent-emitted age_range / content_type / post_format', { skip: !hasRealSupabase }, async () => {
+test('content_queue enums accept every agent-emitted age_range / content_type', { skip: !hasRealSupabase }, async () => {
   const supabase = await getSupabase();
 
   // Probe each enum field by inserting a synthetic row with the
@@ -139,7 +131,6 @@ test('content_queue enums accept every agent-emitted age_range / content_type / 
       hashtags: ['#probe'],
       age_range: 'universal',
       content_pillar: 'ai_magic',
-      post_format: 'tiktok_slideshow',
       image_status: 'pending',
       launch_bank: false,
       slides: [],
@@ -163,10 +154,6 @@ test('content_queue enums accept every agent-emitted age_range / content_type / 
     const err = await probeEnum('content_type', v);
     if (err && err.code === '22P02') findings.push({ column: 'content_type', value: v, error: err.message });
   }
-  for (const v of AGENT_POST_FORMATS) {
-    const err = await probeEnum('post_format', v);
-    if (err && err.code === '22P02') findings.push({ column: 'post_format', value: v, error: err.message });
-  }
 
   assert.deepEqual(
     findings,
@@ -174,4 +161,45 @@ test('content_queue enums accept every agent-emitted age_range / content_type / 
     `Agent emits enum values the DB rejects:\n${JSON.stringify(findings, null, 2)}\n` +
     `Fix: align agent vocabulary with the DB, or add a migration.`,
   );
+});
+
+// v2.0.0 (CHANNEL_MODEL_V1): every agent-emitted render_profile_slug
+// must resolve to a live row in render_profiles. Catches the case
+// where the agent grows a new slug ahead of the DB seed.
+test('render_profiles table has a row for every agent-emitted slug', { skip: !hasRealSupabase }, async () => {
+  const supabase = await getSupabase();
+  const { data, error } = await supabase
+    .from('render_profiles')
+    .select('slug')
+    .in('slug', [...ALL_RENDER_PROFILE_SLUGS]);
+  assert.equal(error, null, `render_profiles select failed: ${error?.message}`);
+  const present = new Set((data || []).map((r) => r.slug));
+  const missing = ALL_RENDER_PROFILE_SLUGS.filter((s) => !present.has(s));
+  assert.deepEqual(
+    missing,
+    [],
+    `render_profiles is missing rows for slugs the agent emits: ${JSON.stringify(missing)}\n` +
+    `Fix: seed render_profiles with the missing slug, or remove it from agents/lib/render-profiles.js.`,
+  );
+});
+
+// v2.0.0: channel enum must accept the canonical channel set.
+test('scheduled_posts.channel enum accepts tiktok + instagram', { skip: !hasRealSupabase }, async () => {
+  const supabase = await getSupabase();
+  for (const channel of ['tiktok', 'instagram']) {
+    const { error } = await supabase
+      .from('scheduled_posts')
+      .insert({
+        content_id: '00000000-0000-0000-0000-000000000000',
+        channel,
+        status: 'pending',
+      })
+      .select()
+      .limit(0);
+    // FK violation (23503) = channel accepted, content_id rejected → good.
+    // Enum rejection (22P02) = drift → bad.
+    if (error) {
+      assert.notEqual(error.code, '22P02', `channel "${channel}" rejected by enum: ${error.message}`);
+    }
+  }
 });

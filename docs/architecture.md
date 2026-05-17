@@ -31,7 +31,7 @@ Content Generation Agent (triggered after research)
 Approval UI (Yaron reviews, 5-10 min/day)
     ↓ updates content_queue status
 Publishing Agent (posts approved content)
-    ↓ writes published_posts
+    ↓ updates scheduled_posts
 Learning Agent (weekly Sunday night)
     ↓ writes performance_data + updates lessons
     ↓ feeds back into Research + Content agents
@@ -87,7 +87,8 @@ Yaron opens it each morning. For each post:
 
 Approved content → posted to IG and TikTok at optimal time.
 APIs: Instagram Graph API + TikTok Content Posting API.
-Confirmation logged to `published_posts` table.
+Each `(content_id, channel)` row in `scheduled_posts` is updated from
+`pending` → `posted` (or `failed`) with `post_url` + `external_post_id`.
 
 **Runtime instructions:** `agents/publish.instructions.md`
 
@@ -109,11 +110,24 @@ Writes to `performance_data` and `lessons` tables.
 |---|---|---|
 | `daily_briefings` | Research output | Research Agent |
 | `content_queue` | Posts awaiting approval | Content Agent / Approval UI |
-| `published_posts` | What went live | Publishing Agent |
+| `scheduled_posts` | Per-channel state for each piece (pending/scheduled/posted/failed/skipped). One row per (content_id, channel). | Content Agent (inserts pending rows) / Publishing Agent (updates to posted/failed) |
 | `performance_data` | Analytics snapshots | Learning Agent |
 | `lessons` | Knowledge base | Learning Agent / Manual |
 
-**Enums:** `platform` (instagram, tiktok), `content_status` (draft, pending_approval, approved, rejected), `content_type` (wow, trust, cta)
+**Enums:** `channel` (instagram, tiktok), `content_status` (draft, pending_approval, approved, rejected), `content_type` (wow, trust, cta)
+
+### Format vs channels (v2.0.0 — see `docs/specs/CHANNEL_MODEL_V1.md`)
+
+Format and channels are independent dimensions. Format = render profile:
+each piece has exactly one `render_profile_id` (FK to `render_profiles`,
+slugs: `avatar-v1`, `moving-images`, `static-image`, `carousel`), which
+produces one rendered output file. Channels = where it gets posted: every
+piece targets `tiktok` and `instagram` by default. Per-channel state
+(caption, scheduled_for, status, post_url, external_post_id,
+failure_reason) lives in `scheduled_posts`, one row per `(content_id,
+channel)`. The legacy `post_format` enum and the inline
+`scheduled_at_ig`/`scheduled_at_tt`/`published_at_*` columns on
+`content_queue` are dropped.
 
 ---
 

@@ -1,5 +1,8 @@
 /**
- * Tests for format-selector density classification + format validation.
+ * Tests for format-selector density classification + render-profile validation.
+ *
+ * v2.0.0 (CHANNEL_MODEL_V1): format is render_profile_slug, not the legacy
+ * post_format enum.
  */
 
 import test from 'node:test';
@@ -10,9 +13,9 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 
 const {
   classifyDensity,
-  recommendFormat,
-  validateFormat,
-  CAPTION_MAX_BY_FORMAT,
+  recommendRenderProfileSlug,
+  validateRenderProfile,
+  CAPTION_MAX_BY_SLUG,
   MIN_CAROUSEL_SLIDES,
 } = await import('../format-selector.js');
 
@@ -62,91 +65,89 @@ test('classifyDensity: avatar clips present → conversation', () => {
   assert.equal(classifyDensity(post).structure, 'conversation');
 });
 
-test('recommendFormat: list structure on instagram → ig_carousel', () => {
+test('recommendRenderProfileSlug: list structure → moving-images', () => {
   const post = {
-    platform: 'instagram',
     hook: '3 ways to reset bedtime',
     caption: 'Here are 3 ways to fix it',
     slides: [
       { slide_number: 1, text: 'h' }, { slide_number: 2, text: 'a' }, { slide_number: 3, text: 'b' }, { slide_number: 4, text: 'c' },
     ],
   };
-  assert.equal(recommendFormat(post), 'ig_carousel');
+  assert.equal(recommendRenderProfileSlug(post), 'moving-images');
 });
 
-test('recommendFormat: single punch quote (12 words) on instagram → ig_static', () => {
+test('recommendRenderProfileSlug: single punch quote (12 words) → static-image', () => {
   const post = {
-    platform: 'instagram',
     hook: "You're not behind, you're human.",
     caption: 'A quiet reminder for tonight.',
     slides: [],
   };
-  // 12 words total → ig_static (not ig_meme, since > 8)
-  assert.equal(recommendFormat(post), 'ig_static');
+  assert.equal(recommendRenderProfileSlug(post), 'static-image');
 });
 
-test('recommendFormat: story with reveal → tiktok_slideshow', () => {
+test('recommendRenderProfileSlug: story with reveal → moving-images', () => {
   const post = {
-    platform: 'tiktok',
     hook: 'I thought she was being defiant',
     caption: 'But then I realized she was overwhelmed. Turns out it was nervous system.',
     slides: [],
   };
-  assert.equal(recommendFormat(post), 'tiktok_slideshow');
+  assert.equal(recommendRenderProfileSlug(post), 'moving-images');
 });
 
-test('recommendFormat: avatar conversation → tiktok_avatar', () => {
+test('recommendRenderProfileSlug: avatar conversation → avatar-v1', () => {
   const post = {
-    platform: 'tiktok',
-    post_format: 'tiktok_avatar',
     hook: 'Okay wait',
     caption: 'Let me tell you',
     avatar_config: { clips: [{ type: 'avatar', purpose: 'hook' }, { type: 'avatar', purpose: 'cta' }] },
   };
-  assert.equal(recommendFormat(post), 'tiktok_avatar');
+  assert.equal(recommendRenderProfileSlug(post), 'avatar-v1');
 });
 
-test('validateFormat: ig_static with 180-char caption → caption_too_long', () => {
-  const caption = 'x'.repeat(180);
-  const errs = validateFormat({ post_format: 'ig_static', caption, slides: [{}] });
+test('validateRenderProfile: static-image with 250-char caption → caption_too_long', () => {
+  const caption = 'x'.repeat(250);
+  const errs = validateRenderProfile({ render_profile_slug: 'static-image', caption, slides: [{}] });
   assert.ok(errs.some((e) => e.startsWith('caption_too_long')));
 });
 
-test('validateFormat: ig_static with multiple slides → single-slide error', () => {
-  const errs = validateFormat({
-    post_format: 'ig_static',
+test('validateRenderProfile: static-image with multiple slides → single-slide error', () => {
+  const errs = validateRenderProfile({
+    render_profile_slug: 'static-image',
     caption: 'short',
     slides: [{ slide_number: 1 }, { slide_number: 2 }],
   });
-  assert.ok(errs.includes('ig_static_must_have_single_slide'));
+  assert.ok(errs.includes('static_image_must_have_single_slide'));
 });
 
-test('validateFormat: ig_carousel with 2 slides → needs 3+ slides', () => {
-  const errs = validateFormat({
-    post_format: 'ig_carousel',
+test('validateRenderProfile: carousel with 2 slides → needs 3+ slides', () => {
+  const errs = validateRenderProfile({
+    render_profile_slug: 'carousel',
     caption: 'short',
     slides: [{ slide_number: 1 }, { slide_number: 2 }],
   });
-  assert.ok(errs.some((e) => e.startsWith('ig_carousel_needs_')));
+  assert.ok(errs.some((e) => e.startsWith('carousel_needs_')));
 });
 
-test('validateFormat: valid ig_carousel passes', () => {
-  const errs = validateFormat({
-    post_format: 'ig_carousel',
+test('validateRenderProfile: valid carousel passes', () => {
+  const errs = validateRenderProfile({
+    render_profile_slug: 'carousel',
     caption: 'ok',
     slides: Array.from({ length: 5 }, (_, i) => ({ slide_number: i + 1 })),
   });
   assert.deepEqual(errs, []);
 });
 
-test('validateFormat: tiktok_slideshow caption > 100 → too long', () => {
-  const errs = validateFormat({ post_format: 'tiktok_slideshow', caption: 'y'.repeat(120), slides: [{}, {}, {}] });
+test('validateRenderProfile: moving-images caption > 300 → too long', () => {
+  const errs = validateRenderProfile({
+    render_profile_slug: 'moving-images',
+    caption: 'y'.repeat(320),
+    slides: [{}, {}, {}],
+  });
   assert.ok(errs.some((e) => e.startsWith('caption_too_long')));
 });
 
-test('CAPTION_MAX_BY_FORMAT has entries for every known format', () => {
-  for (const fmt of ['ig_static', 'ig_carousel', 'tiktok_slideshow', 'tiktok_text', 'tiktok_avatar', 'tiktok_avatar_visual', 'ig_meme']) {
-    assert.ok(typeof CAPTION_MAX_BY_FORMAT[fmt] === 'number', `cap for ${fmt}`);
+test('CAPTION_MAX_BY_SLUG has entries for every render profile slug', () => {
+  for (const slug of ['avatar-v1', 'moving-images', 'static-image', 'carousel']) {
+    assert.ok(typeof CAPTION_MAX_BY_SLUG[slug] === 'number', `cap for ${slug}`);
   }
 });
 
