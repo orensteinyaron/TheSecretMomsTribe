@@ -34,6 +34,7 @@ export async function loadProfileConfig(slug: string): Promise<RenderProfileConf
   if (!row.output_spec?.filter_setting) missing.push("output_spec.filter_setting");
   if (!row.output_spec?.transition_style) missing.push("output_spec.transition_style");
   if (!row.qa_rules?.in_scope_dimensions) missing.push("qa_rules.in_scope_dimensions");
+  if (!row.qa_rules?.gated_dimensions) missing.push("qa_rules.gated_dimensions");
   if (!row.qa_stability?.state) missing.push("qa_stability.state");
   if (missing.length > 0) {
     throw new Error(`loadProfileConfig(${slug}): row missing required keys: ${missing.join(", ")}. Has the qa_agents_per_profile_schema migration been applied?`);

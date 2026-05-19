@@ -157,6 +157,21 @@ export async function runAvatarFullQA(input: QAInput): Promise<QAReport> {
   await maybeRun("lip_sync", () => runLipSync());
   await maybeRun("register_adherence", () => runRegisterAdherence());
 
+  // Gated-dimension remap: dims declared in qa_rules.gated_dimensions ran
+  // and produced a real result, but the rendered output is known-stale
+  // relative to the declared output_spec. Remap FAIL → UNMEASURED with the
+  // original diff preserved in details. PASS and UNMEASURED are unchanged.
+  // (Migration 20260519100000 introduces this field. avatar-v1 ships with
+  // color_filter_consistency + transition_style_verification gated on v3
+  // approval.)
+  const gated = new Set(rules.gated_dimensions ?? []);
+  for (const d of dimensions) {
+    if (d.status === "FAIL" && gated.has(d.name)) {
+      d.details = `[GATED — declared output_spec is awaiting human approval of a manual update; this FAIL is reclassified UNMEASURED until the gate is cleared] ${d.details}`;
+      d.status = "UNMEASURED";
+    }
+  }
+
   // Cost aggregation.
   const cost: CostSummary = emptyCostSummary();
   for (const d of dimensions) {

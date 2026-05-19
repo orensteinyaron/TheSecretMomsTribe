@@ -33,6 +33,7 @@ export type RenderProfileConfig = {
     in_scope_dimensions: string[];
     unmeasured_dimensions: string[];
     out_of_scope_dimensions: string[];
+    gated_dimensions: string[]; // FAIL results remapped to UNMEASURED with diff preserved; see migration 20260519100000.
   };
   qa_stability: {
     state: "informational" | "decisional";

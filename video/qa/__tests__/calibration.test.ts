@@ -28,7 +28,8 @@ config({ path: new URL("../../.env", import.meta.url).pathname, override: true }
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { spawnSync } from "child_process";
+import { spawnSync, execFileSync } from "child_process";
+import sharp from "sharp";
 
 import { downloadFile, extractAudioMp3, whisperTranscribe, assertFfmpegAvailable } from "../../lib/qa-helpers.js";
 
@@ -47,6 +48,39 @@ function ensureWork() {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "qa-calib-"));
   process.stderr.write(`[calib] workdir=${work}\n`);
   return work;
+}
+
+// The v1/v3 proof-loop fixtures from Linear don't include the SMT
+// watermark layer — the proofs are pre-watermark, but production renders
+// stamp it on. To match production reality and let watermark_compliance
+// run honestly, we ffmpeg-composite a watermark onto each fixture before
+// passing it to the agent. The watermark itself is a synthetic PNG (white
+// "SMT" text on a transparent disc) sized to match the FACE_OF_SMT spec
+// (~50px wide on 1080).
+async function generateWatermarkPng(work: string): Promise<string> {
+  const out = path.join(work, "watermark.png");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60">
+    <circle cx="30" cy="30" r="28" fill="white" fill-opacity="0.85" stroke="white"/>
+    <text x="30" y="38" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="18" font-weight="bold" fill="#1a1a1a">smt</text>
+  </svg>`;
+  await sharp(Buffer.from(svg)).png().toFile(out);
+  return out;
+}
+
+function compositeWatermark(inMp4: string, watermarkPng: string, outMp4: string): void {
+  // Overlay watermark at bottom-right with 30px margins from edges.
+  execFileSync("ffmpeg", [
+    "-y",
+    "-i", inMp4,
+    "-i", watermarkPng,
+    "-filter_complex", "[0:v][1:v] overlay=W-w-30:H-h-30",
+    "-c:a", "copy",
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-crf", "23",
+    outMp4,
+  ], { stdio: ["ignore", "pipe", "pipe"] });
+  if (!fs.existsSync(outMp4)) throw new Error(`watermark composite failed: ${outMp4} not created`);
 }
 
 async function transcribeKnownGood(work: string): Promise<Record<string, string>> {
@@ -96,15 +130,22 @@ function runAgent(opts: {
   outputDir: string;
   workdir: string;
   fixtureName: string;
+  watermarkPng: string;
 }): { exitCode: number; reportJsonPath: string | null } {
   // Download the composited mp4 to local first.
+  const mp4Raw = path.join(opts.workdir, `${opts.fixtureName}-final-raw.mp4`);
   const mp4Local = path.join(opts.workdir, `${opts.fixtureName}-final.mp4`);
   process.stderr.write(`[calib] ${opts.fixtureName}: downloading composited mp4...\n`);
-  const dl = spawnSync("curl", ["-fsSL", "-o", mp4Local, opts.assetUrl], { stdio: ["ignore", "pipe", "pipe"] });
+  const dl = spawnSync("curl", ["-fsSL", "-o", mp4Raw, opts.assetUrl], { stdio: ["ignore", "pipe", "pipe"] });
   if (dl.status !== 0) {
     process.stderr.write(`[calib] curl failed: ${dl.stderr?.toString()}\n`);
     return { exitCode: 99, reportJsonPath: null };
   }
+
+  // Composite watermark to match production reality (proof loops are
+  // pre-watermark; production renders include it).
+  process.stderr.write(`[calib] ${opts.fixtureName}: compositing watermark...\n`);
+  compositeWatermark(mp4Raw, opts.watermarkPng, mp4Local);
 
   process.stderr.write(`[calib] ${opts.fixtureName}: running agent...\n`);
   const tsxPath = path.resolve(process.cwd(), "node_modules/.bin/tsx");
@@ -169,17 +210,18 @@ Expected outcome:
   fs.mkdirSync(outDir, { recursive: true });
 
   const scripts = await transcribeKnownGood(work);
+  const watermark = await generateWatermarkPng(work);
 
   // v1 broken
   const v1Meta = path.join(work, "v1-meta.json");
   fs.writeFileSync(v1Meta, JSON.stringify(buildMetadata({ fixtureName: "v1", clipBaseUrl: V1_BASE, scripts })), "utf-8");
-  const v1Run = runAgent({ assetUrl: `${V1_BASE}/avatar_full_deepfakes_v1.mp4`, metadataPath: v1Meta, outputDir: outDir, workdir: work, fixtureName: "v1" });
+  const v1Run = runAgent({ assetUrl: `${V1_BASE}/avatar_full_deepfakes_v1.mp4`, metadataPath: v1Meta, outputDir: outDir, workdir: work, fixtureName: "v1", watermarkPng: watermark });
   const v1Summary = v1Run.reportJsonPath ? summarizeReport(v1Run.reportJsonPath) : null;
 
   // v3 known-good
   const v3Meta = path.join(work, "v3-meta.json");
   fs.writeFileSync(v3Meta, JSON.stringify(buildMetadata({ fixtureName: "v3", clipBaseUrl: V3_BASE, scripts })), "utf-8");
-  const v3Run = runAgent({ assetUrl: `${V3_BASE}/avatar_full_deepfakes_v3.mp4`, metadataPath: v3Meta, outputDir: outDir, workdir: work, fixtureName: "v3" });
+  const v3Run = runAgent({ assetUrl: `${V3_BASE}/avatar_full_deepfakes_v3.mp4`, metadataPath: v3Meta, outputDir: outDir, workdir: work, fixtureName: "v3", watermarkPng: watermark });
   const v3Summary = v3Run.reportJsonPath ? summarizeReport(v3Run.reportJsonPath) : null;
 
   // Summary markdown
