@@ -128,13 +128,13 @@ The hybrid pattern keeps Node helpers cleanly testable, isolates MCP to the orch
 | Bucket | Target | Hard ceiling |
 |---|---|---|
 | Phase 1 (clip 1 only) | ~$0.65 (one std attempt) | $1.50 (allows one std + one fast retry) |
-| Phase 1b (clips 2..N) | ~$4 (six std attempts) | $7 |
+| Phase 1b (clips 2..N) | ~$4.55 (six std attempts at 50cr each) | $9 |
 | Phase 2-7 (Whisper, face metrics, Remotion, ffmpeg, Supabase, QA) | ~$0.65 (mostly QA Sonnet) | $1.50 |
-| **Total — target** | **under $5** | — |
-| **Total — soft ceiling** | — | **~$8 (orchestrator warns)** |
-| **Total — HARD ceiling** | — | **~300 Higgsfield credits ≈ $12 — orchestrator auto-stops, surfaces to Yaron before continuing** |
+| **Total — target** | **under $6** | — |
+| **Total — soft ceiling** | — | **~$10 (orchestrator warns)** |
+| **Total — HARD ceiling** | — | **~400 Higgsfield credits ≈ $16 — orchestrator auto-stops, surfaces to Yaron before continuing** |
 
-Whisper, ffmpeg, Supabase, mediapipe are effectively free. The cost is Higgsfield credits + Sonnet QA + ElevenLabs character spend. Hard ceiling locked per Phase 0 review: spend tracking aggregates from `cost_log` writes in real time; orchestrator halts and surfaces a numeric summary if cumulative credits exceed 300 (~$12 at $0.013/credit).
+Whisper, ffmpeg, Supabase, mediapipe are effectively free. The cost is Higgsfield credits + Sonnet QA + ElevenLabs character spend. Hard ceiling sized for the 7-clip deepfakes piece: 7 × 50cr base + retry margin ≈ 400cr. Spend tracking aggregates from `cost_log` writes in real time; orchestrator halts and surfaces a numeric summary if cumulative credits exceed 400 (~$16 at $0.013/credit). Revisable per-piece if/when a different clip-count case ships.
 
 ---
 

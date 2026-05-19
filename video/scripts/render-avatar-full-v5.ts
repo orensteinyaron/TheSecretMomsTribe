@@ -180,9 +180,11 @@ async function phaseRecord(args: Args): Promise<void> {
   saveState(state);
   console.log(`[record] ${clipId} attempt ${clip.verify_attempts} mode=${clip.verify_mode_used} cost=${clip.seedance_cost_credits}cr cumulative=${state.total_higgsfield_credits}cr`);
 
-  const HARD_CEILING = 300;
-  if ((state.total_higgsfield_credits ?? 0) > HARD_CEILING) {
-    console.error(`[ABORT] cumulative ${state.total_higgsfield_credits}cr exceeds hard ceiling ${HARD_CEILING}cr. Surface to human.`);
+  // Hard ceiling sized for the 7-clip deepfakes piece: 7 × 50cr + retry
+  // margin ≈ 400. Revisable per-piece. See docs/specs/AVATAR_FULL_V5.md.
+  const HARD_CEILING_CREDITS = 400;
+  if ((state.total_higgsfield_credits ?? 0) > HARD_CEILING_CREDITS) {
+    console.error(`[ABORT] cumulative ${state.total_higgsfield_credits}cr exceeds hard ceiling ${HARD_CEILING_CREDITS}cr. Surface to human.`);
     process.exit(4);
   }
 }
