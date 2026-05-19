@@ -273,6 +273,10 @@ async function renderVideo(item) {
   return updated?.metadata?.video_v2_url || updated?.metadata?.video_url || null;
 }
 
+// PR 2 of YAR-129: dispatches Moving Images QA to the per-profile agent
+// at video/qa/run.ts (replaces the legacy video/scripts/qa-agent.ts).
+// Behavior mirrors qaAvatarVideo: verdict is data, not gate, while the
+// moving-images profile is in 'informational' qa_stability state.
 async function qaVideo(item) {
   const localVideoPath = resolve(PROJECT_ROOT, 'video', 'out', item.id, `${item.id}-v2.mp4`);
 
@@ -280,18 +284,77 @@ async function qaVideo(item) {
     return { pass: false, reason: `Video file not found at ${localVideoPath}` };
   }
 
-  console.log(`[Render] Running video QA for ${item.id}...`);
+  console.log(`[Render] Running per-profile QA (moving-images) for ${item.id}...`);
 
+  const metadataTmp = join(tmpdir(), `qa-meta-${item.id}-${Date.now()}.json`);
+  // moving-images doesn't require raw clip metadata — base dims work on the
+  // composited mp4 only. b_roll_relevance / image_coherence / ken_burns
+  // reconstruct slide segments from Whisper + frame-diff (no upstream
+  // pipeline change needed).
+  const metadata = {
+    asset_id: item.id,
+    hook_overlay_text: item.metadata?.qa_inputs?.hook_overlay_text,
+  };
+  writeFileSync(metadataTmp, JSON.stringify(metadata), 'utf-8');
+
+  const qaOutputDir = resolve(PROJECT_ROOT, 'video', 'out', item.id, 'qa');
+  mkdirSync(qaOutputDir, { recursive: true });
+
+  let verdict = 'UNKNOWN';
+  let reportPath = null;
   try {
     await spawnWithTimeout(
       'npx',
-      ['tsx', 'scripts/qa-agent.ts', localVideoPath, '--content-id', item.id],
+      [
+        'tsx', 'qa/run.ts',
+        '--asset', localVideoPath,
+        '--profile', 'moving-images',
+        '--content-id', item.id,
+        '--metadata', metadataTmp,
+        '--output-dir', qaOutputDir,
+      ],
       { cwd: resolve(PROJECT_ROOT, 'video'), env: process.env }
     );
-    return { pass: true };
+
+    const jsons = readdirSync(qaOutputDir)
+      .filter(f => f.endsWith('.json'))
+      .map(f => ({ f, t: statSync(join(qaOutputDir, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t);
+    if (jsons.length > 0) {
+      reportPath = join(qaOutputDir, jsons[0].f);
+      const report = JSON.parse(readFileSync(reportPath, 'utf-8'));
+      verdict = report.overall_verdict;
+
+      await supabase
+        .from('content_queue')
+        .update({
+          metadata: {
+            ...(item.metadata || {}),
+            qa_report_v3: {
+              json_path: reportPath,
+              markdown_path: reportPath.replace(/\.json$/, '.md'),
+              verdict,
+              agent_version: report.agent_version,
+              ran_at: report.ran_at,
+              unmeasured_dimensions: report.unmeasured_dimensions,
+              cost_usd: report.cost_summary?.total_usd,
+              human_review_required: report.human_review_required,
+            },
+          },
+        })
+        .eq('id', item.id);
+    }
   } catch (err) {
-    return { pass: false, reason: err.message };
+    rmSync(metadataTmp, { force: true });
+    return { pass: false, reason: `QA agent crashed: ${err.message}` };
+  } finally {
+    rmSync(metadataTmp, { force: true });
   }
+
+  return {
+    pass: true,
+    reason: `QA agent ran (verdict=${verdict}); human review required during profile stabilization`,
+  };
 }
 
 // --- Renderer: avatar-v1 (Avatar Video) ---
