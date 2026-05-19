@@ -22,10 +22,10 @@ import path from "path";
 import os from "os";
 import sharp from "sharp";
 
+import { RACHEL_SOUL_STILL_URL as RACHEL_STILL_URL } from "../lib/avatar-constants.js";
+
 // ---- Hardcoded inputs (parameterise later) ----
 
-const RACHEL_STILL_URL =
-  "https://d2ol7oe51mr4n9.cloudfront.net/user_3DGDY5uQO2VTYDyY6tkVHLr8qE8/f757b09c-d94d-4ade-a076-4a1a496c641e.png";
 const HOOK_TEXT = "How I get my teen talking";
 const HANDLE = "@thesecretmomstribe";
 
