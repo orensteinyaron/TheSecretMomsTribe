@@ -227,3 +227,94 @@ npm run studio
 - [ ] Build carousel template (IG carousel → image sequence)
 - [ ] Wire into GitHub Actions (batch generate after content approval)
 - [ ] Add video to approval UI (preview before publishing)
+
+---
+
+## Avatar Full v5 (Seedance pipeline)
+
+Replaces the legacy HeyGen-based `video/scripts/generate-avatar-video.ts`.
+**Operational spec:** `/docs/specs/AVATAR_FULL_V5.md` (transport, gate
+definitions, output paths, follow-ups). **Build plan + history:**
+`/docs/superpowers/plans/2026-05-19-avatar-full-v5-seedance-pipeline.md`.
+
+### Architecture
+Hybrid orchestration. The **Claude Code session** orchestrates by interleaving
+Higgsfield MCP `generate_video` calls (Seedance 2.0, `medias=[start_image,
+audio]`) with invocations of `video/scripts/render-avatar-full-v5.ts
+--phase=<name>`. State flows through `workdir/v5-state.json` (typed in
+`video/lib/v5-state.ts`).
+
+There is no production Node SeedanceClient in v5.0 — MCP is the transport.
+The `SeedanceClient` interface exists at `video/lib/seedance/SeedanceClient.ts`
+as the swap point for v5.x (`HttpSeedanceClient` or `BytePlusClient`).
+
+### Phases (`--phase=…`)
+| Phase | Owner | Purpose |
+|---|---|---|
+| `init` | CLI | Load `content_queue` row, normalize `avatar_config.clips`, write initial state |
+| `tts` | CLI | Per-clip ElevenLabs MP3 → Supabase `post-images/avatar-full-v5/audio/` |
+| *(MCP)* | Session | `generate_video` per clip with motion-prompt + start_image + audio MP3 URL |
+| `record` | CLI | Capture Seedance result fields. **Aborts at >300 Higgsfield credits.** |
+| `verify` | CLI | Whisper WER + speech-coverage gate. Exit codes: 0=PASS, 2=retry-fast, 3=surface-to-human |
+| `face-metrics` | CLI | First+last frames → mediapipe sidecar → eye_y/face_x per endpoint |
+| `manifest` | CLI | Transitions manifest (motion-blur gating + crop offsets) |
+| `compose` | CLI | Remotion `AvatarV5Composition` → `workdir/final.mp4` |
+| `upload` | CLI | Final MP4 → `post-images/avatar-full-v5/<content_id>/<run-ts>/final.mp4` |
+| `qa` | CLI | Shell out to `video/qa/run.ts` with `avatar-v1` profile (informational only) |
+| `summary` | CLI | Human-review block: per-clip WER, per-cut bridge timestamps, motion-blur cuts, total cost, Phase 9 fallback hint |
+
+### How To Invoke
+
+In a Claude Code session that has the Higgsfield MCP loaded:
+
+```
+cd video/
+WORKDIR=$(mktemp -d /tmp/v5-XXXXX)
+npx tsx scripts/render-avatar-full-v5.ts --phase=init    --workdir=$WORKDIR --content-id=<uuid>
+npx tsx scripts/render-avatar-full-v5.ts --phase=tts     --workdir=$WORKDIR
+# For each clip:
+#   Claude calls mcp__78d93fcf-…__generate_video with seedance_2_0 + medias[start_image, audio_url]
+#   then `--phase=record --clip-id=… --job-id=… --video-url=… --cost-credits=… --mode=std`
+#   then `--phase=verify --clip-id=…`  (retry on exit 2; surface on exit 3)
+npx tsx scripts/render-avatar-full-v5.ts --phase=face-metrics --workdir=$WORKDIR
+npx tsx scripts/render-avatar-full-v5.ts --phase=manifest --workdir=$WORKDIR
+npx tsx scripts/render-avatar-full-v5.ts --phase=compose  --workdir=$WORKDIR
+npx tsx scripts/render-avatar-full-v5.ts --phase=upload   --workdir=$WORKDIR
+npx tsx scripts/render-avatar-full-v5.ts --phase=qa       --workdir=$WORKDIR
+npx tsx scripts/render-avatar-full-v5.ts --phase=summary  --workdir=$WORKDIR
+```
+
+### Cost ceilings
+- **Target:** under $5 / ~150 Higgsfield credits.
+- **Hard ceiling:** 300 credits (~$12). Orchestrator auto-aborts and surfaces.
+- Whisper + ffmpeg + mediapipe + Supabase + Sonnet QA add ~$0.65.
+
+### Pre-flight
+1. Higgsfield MCP loaded (verify with `models_explore`)
+2. `ELEVENLABS_API_KEY`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` set (loaded from `<SMT-root>/.env`)
+3. Python venv ready: `cd bin/face-metrics && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
+4. `ffmpeg` / `ffprobe` on PATH
+
+### Validation
+`video/scripts/validate-avatar-v5-passthrough.ts` renders a single existing
+Seedance MP4 through `AvatarV5Composition` and Whisper-compares input/output.
+Used to verify **YAR-129 Finding 4 (embedded audio passes through cleanly)**
+before spending Higgsfield credits. Costs ~$0.002 (Whisper only).
+
+### Per-bridge ear-check (Phase 9)
+`--phase=summary` lists each cut individually with its timestamp so a reviewer
+can ear-check each bridge moment specifically:
+```
+SCENE_01 → SCENE_02  at t=8.900s  [BRIDGE]  + motion blur
+SCENE_02 → SCENE_03  at t=16.733s  [BRIDGE]
+```
+If any bridge sounds rough: edit `workdir/v5-state.json`, set
+`transitions_manifest.transitions[i].bridge_enabled=false`, rerun compose +
+upload + summary. Per-cut fallback to hard cut, not all-or-nothing.
+
+### What v5.0 does NOT do
+- Flip `content_queue.status` — final video surfaces to a human-review queue.
+- Touch the legacy HeyGen `generate-avatar-video.ts` — retired in a separate PR after v5 ships one approved piece.
+- Implement punch-in (115% emphasis-line scale) — deferred to v5.1. See `docs/specs/AVATAR_FULL_V5.md` "Follow-ups".
+- Implement the register system schema extension (YAR-129 Gap 2) — deferred to v5.2.
+- Run unattended from GitHub Actions — needs HTTP transport (YAR-129 cost-architecture spike) first.
