@@ -110,6 +110,8 @@ that auto-triggers on matching phrases.
 | Publishing Agent (code + instructions) | `agents/publish.js` + `agents/publish.instructions.md` |
 | Learning Agent | `agents/learning.js` |
 | Approval UI (placeholder) | `ui/approval/` |
+| **Avatar/Video constants (Soul Rachel, voice id, v5 defaults)** | `video/lib/avatar-constants.ts` — canonical source; do not hardcode the Rachel CDN URL anywhere else |
+| **Avatar Full v5 spec (in build)** | `docs/specs/AVATAR_FULL_V5.md` + plan at `docs/superpowers/plans/2026-05-19-avatar-full-v5-seedance-pipeline.md` |
 | Task tracking | `tasks/todo.md` |
 | Lessons learned | `tasks/lessons.md` |
 | Scraping scripts | `scripts/scrape-instagram.js`, `scripts/scrape-tiktok.js` |
