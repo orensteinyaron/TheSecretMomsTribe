@@ -33,12 +33,19 @@
 import { config } from "dotenv";
 import fs from "node:fs";
 
-for (const rel of ["../../.env", "../../../.env", "../../../../.env", "../../../../../.env"]) {
+// Layered .env loading. Yesterday's worktree convention put OPENAI/SUPABASE/
+// etc. in <SMT-root>/.env and ELEVENLABS/HEYGEN/etc. in <SMT-root>/video/.env.
+// We honor both by loading every .env we find on the walk-up (override:false
+// so the most-local file wins on conflicts).
+for (const rel of [
+  "../.env",         // <worktree>/video/.env   (symlinked to SMT/video/.env)
+  "../../.env",      // <worktree>/.env         (symlinked to SMT/.env)
+  "../../../.env",
+  "../../../../.env",
+  "../../../../../.env",
+]) {
   const p = new URL(rel, import.meta.url).pathname;
-  if (fs.existsSync(p)) {
-    config({ path: p, override: false });
-    if (process.env.OPENAI_API_KEY) break;
-  }
+  if (fs.existsSync(p)) config({ path: p, override: false });
 }
 
 import path from "node:path";
@@ -180,9 +187,11 @@ async function phaseRecord(args: Args): Promise<void> {
   saveState(state);
   console.log(`[record] ${clipId} attempt ${clip.verify_attempts} mode=${clip.verify_mode_used} cost=${clip.seedance_cost_credits}cr cumulative=${state.total_higgsfield_credits}cr`);
 
-  // Hard ceiling sized for the 7-clip deepfakes piece: 7 × 50cr + retry
-  // margin ≈ 400. Revisable per-piece. See docs/specs/AVATAR_FULL_V5.md.
-  const HARD_CEILING_CREDITS = 400;
+  // Hard ceiling sized against ACTUAL clip_01 cost (81cr at 1080p std,
+  // not the original 50cr/clip estimate). 7 × 81 = 567cr ≈ ceiling 600cr
+  // with zero retry margin. If any clip needs a fast retry, this trips
+  // and we re-decide. Revisable per-piece. See docs/specs/AVATAR_FULL_V5.md.
+  const HARD_CEILING_CREDITS = 600;
   if ((state.total_higgsfield_credits ?? 0) > HARD_CEILING_CREDITS) {
     console.error(`[ABORT] cumulative ${state.total_higgsfield_credits}cr exceeds hard ceiling ${HARD_CEILING_CREDITS}cr. Surface to human.`);
     process.exit(4);

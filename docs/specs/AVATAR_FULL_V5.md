@@ -132,9 +132,9 @@ The hybrid pattern keeps Node helpers cleanly testable, isolates MCP to the orch
 | Phase 2-7 (Whisper, face metrics, Remotion, ffmpeg, Supabase, QA) | ~$0.65 (mostly QA Sonnet) | $1.50 |
 | **Total — target** | **under $6** | — |
 | **Total — soft ceiling** | — | **~$10 (orchestrator warns)** |
-| **Total — HARD ceiling** | — | **~400 Higgsfield credits ≈ $16 — orchestrator auto-stops, surfaces to Yaron before continuing** |
+| **Total — HARD ceiling** | — | **~600 Higgsfield credits — orchestrator auto-stops, surfaces to Yaron before continuing** |
 
-Whisper, ffmpeg, Supabase, mediapipe are effectively free. The cost is Higgsfield credits + Sonnet QA + ElevenLabs character spend. Hard ceiling sized for the 7-clip deepfakes piece: 7 × 50cr base + retry margin ≈ 400cr. Spend tracking aggregates from `cost_log` writes in real time; orchestrator halts and surfaces a numeric summary if cumulative credits exceed 400 (~$16 at $0.013/credit). Revisable per-piece if/when a different clip-count case ships.
+Whisper, ffmpeg, Supabase, mediapipe are effectively free. The cost is Higgsfield credits + Sonnet QA + ElevenLabs character spend. Hard ceiling sized against the ACTUAL clip_01 cost observed in the deepfakes acceptance run (81 cr at 1080p std, not the original 50cr/clip estimate): 7 × 81 = 567cr, ceiling 600cr leaves ~33cr (one fast-retry's worth) of margin. If any clip needs more than one retry the ceiling trips and we re-decide. Revisable per-piece if/when a different clip-count case ships.
 
 ---
 

@@ -285,8 +285,8 @@ npx tsx scripts/render-avatar-full-v5.ts --phase=summary  --workdir=$WORKDIR
 ```
 
 ### Cost ceilings
-- **Target:** under $6 / ~180 Higgsfield credits (for the 7-clip deepfakes piece).
-- **Hard ceiling:** 400 credits (~$16). Orchestrator auto-aborts and surfaces. Revisable per-piece.
+- **Target:** under $8 / ~580 Higgsfield credits (7-clip deepfakes piece — observed actual: 81cr/clip at 1080p std).
+- **Hard ceiling:** 600 credits. Orchestrator auto-aborts and surfaces. Revisable per-piece.
 - Whisper + ffmpeg + mediapipe + Supabase + Sonnet QA add ~$0.65.
 
 ### Pre-flight

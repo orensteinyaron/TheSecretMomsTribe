@@ -87,27 +87,28 @@ test("--phase=record accumulates credits and USD into state totals", () => {
   }
 });
 
-test("--phase=record aborts (exit 4) when cumulative > 400 credits", () => {
-  // Hard ceiling sized for the 7-clip deepfakes piece: 7 × 50cr + retry
-  // margin ≈ 400. Revised from the original 300cr estimate per Yaron's
-  // Phase 9 pre-flight after we projected actual clip-count and rate.
+test("--phase=record aborts (exit 4) when cumulative > 600 credits", () => {
+  // Hard ceiling sized against the ACTUAL clip_01 cost observed in
+  // the deepfakes acceptance run (81cr at 1080p std). 7 × 81 = 567cr;
+  // ceiling 600cr leaves ~33cr (one fast-retry) of margin. Revised
+  // from 400cr after Phase 9 clip_01 surfaced the real per-clip rate.
   const workdir = makeWorkdir();
   try {
     const s = initState({
       content_id: "c1", workdir, hook_text: "h", register: "concerned_insider",
       clips: [{ id: "S1", expected_script: "x", duration_target_s: 8 }],
     });
-    s.total_higgsfield_credits = 370;
-    s.total_usd = 4.81;
+    s.total_higgsfield_credits = 567;
+    s.total_usd = 7.37;
     saveState(s);
 
     const r = runCli(workdir, [
       "--phase=record", "--clip-id=S1",
       "--job-id=j-2", "--video-url=https://x.com/c.mp4",
-      "--cost-credits=50", "--cost-usd=0.65", "--mode=std",
+      "--cost-credits=81", "--cost-usd=1.05", "--mode=fast",
     ]);
     assert.equal(r.status, 4, `expected exit 4 (ceiling abort), got ${r.status}. stderr: ${r.stderr}`);
-    assert.match(r.stderr + r.stdout, /hard ceiling 400/);
+    assert.match(r.stderr + r.stdout, /hard ceiling 600/);
   } finally {
     fs.rmSync(workdir, { recursive: true, force: true });
   }
