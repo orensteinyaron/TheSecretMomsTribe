@@ -50,7 +50,16 @@ export type FaceMetricsEndpoint = {
 export type V5State = {
   content_id: string;
   workdir: string;
+  /**
+   * Full hook sentence from content_queue (kept for reference + telemetry).
+   * The renderer uses hook_primary + hook_secondary, NOT this — those are
+   * the dominant line and qualifier displayed on the locked SMTHookOverlay.
+   */
   hook_text: string;
+  /** Primary line (dominant — UPPERCASED by SMTHookOverlay). */
+  hook_primary: string;
+  /** Optional secondary line, smaller. */
+  hook_secondary?: string;
   register: string;
   clips: V5ClipState[];
   // Per-clip face metrics (start + end frame), populated by --phase=face-metrics.
@@ -92,17 +101,38 @@ export function saveState(state: V5State): void {
   fs.writeFileSync(statePath(state.workdir), JSON.stringify(state, null, 2));
 }
 
+// Default heuristic split for the hook overlay: first sentence → primary,
+// remainder → secondary. avatar_config can override by providing
+// hook_primary / hook_secondary explicitly.
+function defaultHookSplit(hookText: string): { primary: string; secondary?: string } {
+  const trimmed = hookText.trim();
+  const periodIdx = trimmed.indexOf(". ");
+  if (periodIdx > 0 && periodIdx < trimmed.length - 2) {
+    return {
+      primary: trimmed.slice(0, periodIdx).trim(),
+      secondary: trimmed.slice(periodIdx + 2).trim().replace(/\.$/, ""),
+    };
+  }
+  return { primary: trimmed.replace(/\.$/, "") };
+}
+
 export function initState(opts: {
   content_id: string;
   workdir: string;
   hook_text: string;
+  hook_primary?: string;
+  hook_secondary?: string;
   register: string;
   clips: Array<{ id: string; expected_script: string; duration_target_s: number }>;
 }): V5State {
-  return {
+  const split = (opts.hook_primary || opts.hook_secondary)
+    ? { primary: opts.hook_primary ?? "", secondary: opts.hook_secondary }
+    : defaultHookSplit(opts.hook_text);
+  const state: V5State = {
     content_id: opts.content_id,
     workdir: opts.workdir,
     hook_text: opts.hook_text,
+    hook_primary: split.primary,
     register: opts.register,
     clips: opts.clips.map((c) => ({
       id: c.id,
@@ -112,4 +142,6 @@ export function initState(opts: {
     total_higgsfield_credits: 0,
     total_usd: 0,
   };
+  if (split.secondary !== undefined) state.hook_secondary = split.secondary;
+  return state;
 }

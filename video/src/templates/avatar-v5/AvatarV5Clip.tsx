@@ -2,14 +2,22 @@ import React from "react";
 import { OffthreadVideo, useCurrentFrame } from "remotion";
 import { MOTION_BLUR_FRAMES, type V5Clip } from "./types";
 
-// Per-clip subcomponent. Three responsibilities:
+// Per-clip subcomponent. Two responsibilities:
 //   1. Render the Seedance MP4 via OffthreadVideo so the embedded audio
 //      passes through untouched (YAR-129 Finding 4).
-//   2. Apply crop_offset_y as a vertical translate so the face sits at the
-//      median eye-line across clips (transitions-manifest output).
-//   3. Apply a brief CSS blur on the first/last MOTION_BLUR_FRAMES when
+//   2. Apply a brief CSS blur on the first/last MOTION_BLUR_FRAMES when
 //      the orchestrator flagged this clip's incoming or outgoing cut as
 //      drifty enough to need it (eye-line > 40 px or face-center > 8 %).
+//
+// crop_offset_y is INFORMATIONAL only — the transitions manifest still
+// computes per-clip offsets and the summary phase surfaces them as
+// telemetry, but we do NOT apply them as a vertical translate here.
+// Why: a 1080×1920 OffthreadVideo with objectFit:"cover" exactly fills
+// the 1080×1920 container with no excess margin; translating it down by
+// crop_offset_y exposes black at the top (and loses content at the
+// bottom), making frame drift WORSE rather than better. Position drift
+// between clips is now purely Seedance's problem, mitigated via motion
+// blur on cuts where eye_line_delta exceeds threshold.
 //
 // The blur is isotropic (CSS filter:blur takes one radius). The spec
 // describes it as "horizontal motion blur" but the visual goal is just
@@ -48,7 +56,8 @@ export const AvatarV5Clip: React.FC<Props> = ({ clip, blur_in_frames, blur_out_f
           width: "100%",
           height: "100%",
           objectFit: "cover",
-          transform: `translateY(${clip.crop_offset_y}px)`,
+          // NO translateY — see docstring above. crop_offset_y stays in
+          // the V5Clip type for summary telemetry but is not applied here.
           filter: blur > 0 ? `blur(${blur.toFixed(2)}px)` : undefined,
         }}
       />

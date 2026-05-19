@@ -8,7 +8,9 @@ import {
   type AvatarV5Props,
 } from "./types";
 import { AvatarV5Clip } from "./AvatarV5Clip";
-import { AvatarV5HookOverlay } from "./AvatarV5HookOverlay";
+import { SMTHookOverlay } from "../shared/SMTHookOverlay";
+
+const HOOK_OVERLAY_DURATION_S = 1.0;
 
 // Avatar Full v5 Remotion composition.
 //
@@ -71,7 +73,7 @@ export function layoutClips(props: AvatarV5Props, fps: number = AVATAR_V5_FPS): 
 
 export const AvatarV5Composition: React.FC<AvatarV5Props> = (props) => {
   const { entries } = layoutClips(props);
-  const clip0Duration = entries[0]?.duration_in_frames ?? 0;
+  const hookFrames = Math.round(HOOK_OVERLAY_DURATION_S * AVATAR_V5_FPS);
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
       {entries.map((entry) => {
@@ -92,9 +94,11 @@ export const AvatarV5Composition: React.FC<AvatarV5Props> = (props) => {
           </Sequence>
         );
       })}
-      {clip0Duration > 0 && props.hook_text ? (
-        <Sequence from={0} durationInFrames={clip0Duration} layout="none">
-          <AvatarV5HookOverlay text={props.hook_text} />
+      {props.hook_primary ? (
+        // Locked SMT hook overlay: full-width #63246a block, lower-middle,
+        // 1.0s hard cut in/out, all-caps. See SMTHookOverlay.tsx + FACE_OF_SMT_V1.
+        <Sequence from={0} durationInFrames={hookFrames} layout="none">
+          <SMTHookOverlay primary={props.hook_primary} secondary={props.hook_secondary} />
         </Sequence>
       ) : null}
     </AbsoluteFill>

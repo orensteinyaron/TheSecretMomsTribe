@@ -39,8 +39,14 @@ export type AvatarV5Props = {
   clips: V5Clip[];
   /** transitions[i] describes the cut between clips[i] and clips[i+1]. */
   transitions: V5Transition[];
-  /** Hook text overlaid on top of clip 1. Empty string = no overlay. */
-  hook_text: string;
+  /**
+   * Hook overlay primary line (dominant — UPPERCASED by the renderer).
+   * Empty string = no overlay. See video/src/templates/shared/SMTHookOverlay.tsx
+   * for the locked design (full-width #63246a block, lower-middle, 1.0s hard cut).
+   */
+  hook_primary: string;
+  /** Optional secondary line, smaller. */
+  hook_secondary?: string;
 };
 
 export const AVATAR_V5_FPS = 30;

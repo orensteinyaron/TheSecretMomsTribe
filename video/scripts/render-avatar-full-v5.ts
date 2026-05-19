@@ -135,6 +135,8 @@ async function phaseInit(args: Args): Promise<void> {
     content_id: contentId,
     workdir,
     hook_text: String(avCfg.hook ?? row.hook ?? ""),
+    hook_primary: avCfg.hook_primary ? String(avCfg.hook_primary) : undefined,
+    hook_secondary: avCfg.hook_secondary ? String(avCfg.hook_secondary) : undefined,
     register: String(avCfg.register ?? "concerned_insider"),
     clips,
   });
@@ -343,7 +345,8 @@ async function phaseCompose(args: Args): Promise<void> {
         needs_motion_blur: t.needs_motion_blur,
         bridge_enabled: t.bridge_enabled,
       })),
-      hook_text: state.hook_text,
+      hook_primary: state.hook_primary,
+      hook_secondary: state.hook_secondary,
     };
 
     const layout = layoutClips(inputProps, AVATAR_V5_FPS);
