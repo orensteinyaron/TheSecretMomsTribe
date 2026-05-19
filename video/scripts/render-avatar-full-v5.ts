@@ -42,14 +42,23 @@ for (const rel of ["../../.env", "../../../.env", "../../../../.env", "../../../
 }
 
 import path from "node:path";
+import http from "node:http";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createReadStream, statSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+
+import { bundle } from "@remotion/bundler";
+import { renderMedia, selectComposition } from "@remotion/renderer";
 
 import { loadState, saveState, initState, statePath, type V5State } from "../lib/v5-state.js";
 import { generatePerClipMp3s } from "../lib/elevenlabs-per-clip.js";
 import { computeWer, WER_PASS_THRESHOLD } from "../qa/base/helpers/wer.js";
-import { whisperTranscribe, extractAudioMp3, downloadFile } from "../lib/qa-helpers.js";
+import { whisperTranscribe, extractAudioMp3, downloadFile, probeDurationSeconds } from "../lib/qa-helpers.js";
 import { buildTransitionsManifest } from "../lib/transitions-manifest.js";
-import { AVATAR_V5_FPS, AUDIO_BRIDGE_FRAMES } from "../src/templates/avatar-v5/types.js";
+import { measureFrames } from "../lib/face-metrics.js";
+import { AVATAR_V5_FPS, AUDIO_BRIDGE_FRAMES, AVATAR_V5_WIDTH, AVATAR_V5_HEIGHT } from "../src/templates/avatar-v5/types.js";
+import { layoutClips } from "../src/templates/avatar-v5/AvatarV5Composition.js";
+import { RACHEL_SOUL_STILL_URL } from "../lib/avatar-constants.js";
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────
 
@@ -225,6 +234,204 @@ async function phaseVerify(args: Args): Promise<void> {
   }
 }
 
+// ─── Phase: face-metrics ────────────────────────────────────────────────
+
+function extractFrameToPng(mp4Path: string, timestampS: number, outPath: string): void {
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  execFileSync(
+    "ffmpeg",
+    ["-y", "-ss", String(timestampS), "-i", mp4Path, "-frames:v", "1", outPath],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  if (!fs.existsSync(outPath)) throw new Error(`frame extract failed: ${outPath}`);
+}
+
+async function phaseFaceMetrics(args: Args): Promise<void> {
+  const workdir = requireArg(args, "workdir");
+  const state = loadState(workdir);
+  const passClips = state.clips.filter((c) => c.verify_status === "PASS");
+  if (passClips.length === 0) throw new Error("no PASS clips to measure. Run --phase=verify on each clip first.");
+
+  const framesDir = path.join(workdir, "frames");
+  fs.mkdirSync(framesDir, { recursive: true });
+  const requests: Array<{ id: string; path: string; kind: "start" | "end"; clip_id: string }> = [];
+
+  for (const clip of passClips) {
+    const localMp4 = path.join(workdir, "clips", `${clip.id}.mp4`);
+    if (!fs.existsSync(localMp4)) {
+      // Re-download if --phase=verify cleaned up.
+      await downloadFile(clip.seedance_video_url!, localMp4);
+    }
+    const dur = probeDurationSeconds(localMp4);
+    const startPng = path.join(framesDir, `${clip.id}-start.png`);
+    const endPng = path.join(framesDir, `${clip.id}-end.png`);
+    extractFrameToPng(localMp4, 0.0, startPng);
+    extractFrameToPng(localMp4, Math.max(0, dur - 0.1), endPng);
+    requests.push({ id: `${clip.id}::start`, path: startPng, kind: "start", clip_id: clip.id });
+    requests.push({ id: `${clip.id}::end`,   path: endPng,   kind: "end",   clip_id: clip.id });
+  }
+
+  const measurements = await measureFrames({ frames: requests.map((r) => ({ id: r.id, path: r.path })) });
+  state.face_metrics = state.face_metrics ?? {};
+  for (const r of requests) {
+    state.face_metrics[r.clip_id] = state.face_metrics[r.clip_id] ?? {};
+    const m = measurements.find((x) => x.id === r.id);
+    if (!m) continue;
+    if (m.error) {
+      state.face_metrics[r.clip_id].errors = [...(state.face_metrics[r.clip_id].errors ?? []), `${r.kind}: ${m.error}`];
+      continue;
+    }
+    state.face_metrics[r.clip_id][r.kind] = {
+      eye_y: m.eye_y!, face_x: m.face_x!, face_w: m.face_w!, face_h: m.face_h!,
+      img_w: m.img_w!, img_h: m.img_h!,
+    };
+  }
+  saveState(state);
+  console.log(`[face-metrics] measured ${passClips.length} clip(s), ${requests.length} frame(s)`);
+  for (const clip of passClips) {
+    const fm = state.face_metrics[clip.id];
+    console.log(`  ${clip.id}: start_eye_y=${fm?.start?.eye_y ?? "—"}, end_eye_y=${fm?.end?.eye_y ?? "—"}, errors=${(fm?.errors ?? []).join("; ") || "none"}`);
+  }
+}
+
+// ─── Phase: compose ─────────────────────────────────────────────────────
+
+async function phaseCompose(args: Args): Promise<void> {
+  const workdir = requireArg(args, "workdir");
+  const state = loadState(workdir);
+  const passClips = state.clips.filter((c) => c.verify_status === "PASS");
+  if (passClips.length === 0) throw new Error("no PASS clips to compose");
+  if (!state.transitions_manifest) throw new Error("transitions_manifest missing — run --phase=manifest first");
+
+  // Serve clip MP4s + watermark assets locally so the headless browser can fetch
+  // them via http(s) (Remotion's fetcher rejects file:// URLs).
+  const server = http.createServer((req, res) => {
+    if (!req.url) { res.writeHead(404).end(); return; }
+    const m = /^\/clip\/([^/?]+)$/.exec(req.url);
+    if (!m) { res.writeHead(404).end(); return; }
+    const local = path.join(workdir, "clips", decodeURIComponent(m[1]));
+    if (!fs.existsSync(local)) { res.writeHead(404).end(); return; }
+    const stat = statSync(local);
+    res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": stat.size });
+    createReadStream(local).pipe(res);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+
+  try {
+    const cropById = new Map(state.transitions_manifest.crops.map((c) => [c.clip_id, c.crop_offset_y]));
+    const inputProps = {
+      clips: passClips.map((c) => ({
+        id: c.id,
+        video_url: `http://127.0.0.1:${port}/clip/${c.id}.mp4`,
+        duration_s: c.whisper_duration_s ?? c.duration_target_s,
+        crop_offset_y: cropById.get(c.id) ?? 0,
+      })),
+      transitions: state.transitions_manifest.transitions.map((t) => ({
+        cut_index: t.cut_index,
+        needs_motion_blur: t.needs_motion_blur,
+        bridge_enabled: t.bridge_enabled,
+      })),
+      hook_text: state.hook_text,
+    };
+
+    const layout = layoutClips(inputProps, AVATAR_V5_FPS);
+    console.log(`[compose] ${inputProps.clips.length} clip(s), total ${layout.total_duration_in_frames} frames (${(layout.total_duration_in_frames / AVATAR_V5_FPS).toFixed(2)}s)`);
+
+    const entryPoint = path.resolve(process.cwd(), "src", "index.ts");
+    const bundleLocation = await bundle({ entryPoint });
+    const composition = await selectComposition({ serveUrl: bundleLocation, id: "AvatarV5", inputProps });
+    composition.durationInFrames = Math.max(1, layout.total_duration_in_frames);
+
+    const outPath = path.join(workdir, "final.mp4");
+    await renderMedia({
+      composition,
+      serveUrl: bundleLocation,
+      codec: "h264",
+      outputLocation: outPath,
+      inputProps,
+    });
+    state.final_local_path = outPath;
+    saveState(state);
+    console.log(`[compose] rendered ${outPath} (${fs.statSync(outPath).size} bytes)`);
+  } finally {
+    server.close();
+  }
+}
+
+// ─── Phase: upload ──────────────────────────────────────────────────────
+
+async function phaseUpload(args: Args): Promise<void> {
+  const workdir = requireArg(args, "workdir");
+  const state = loadState(workdir);
+  if (!state.final_local_path) throw new Error("final_local_path missing — run --phase=compose first");
+  const runTs = new Date().toISOString().replace(/[:.]/g, "-");
+  const bucketPath = `avatar-full-v5/${state.content_id}/${runTs}/final.mp4`;
+  state.final_public_url = await uploadToPostImages(bucketPath, state.final_local_path, "video/mp4");
+  saveState(state);
+  console.log(`[upload] ${state.final_public_url}`);
+}
+
+// ─── Phase: qa ──────────────────────────────────────────────────────────
+
+async function phaseQa(args: Args): Promise<void> {
+  const workdir = requireArg(args, "workdir");
+  const state = loadState(workdir);
+  if (!state.final_local_path) throw new Error("final_local_path missing — run --phase=compose first");
+
+  // Build the metadata.json the existing video/qa/run.ts CLI expects.
+  const metadataPath = path.join(workdir, "qa-metadata.json");
+  const metadata = {
+    asset_id: state.content_id,
+    reference_image_url: RACHEL_SOUL_STILL_URL,
+    clips: state.clips
+      .filter((c) => c.verify_status === "PASS")
+      .map((c, i, all) => ({
+        id: c.id,
+        url: c.seedance_video_url,
+        local_path: path.join(workdir, "clips", `${c.id}.mp4`),
+        expected_script: c.expected_script,
+        duration_s: c.whisper_duration_s ?? c.duration_target_s,
+        start_offset_in_final_s: all.slice(0, i).reduce((acc, x) => acc + (x.whisper_duration_s ?? x.duration_target_s), 0),
+      })),
+    hook_overlay_text: { line1: state.hook_text },
+  };
+  fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+
+  const qaArgs = [
+    path.resolve(process.cwd(), "qa", "run.ts"),
+    "--asset", state.final_local_path,
+    "--profile", "avatar-v1",
+    "--metadata", metadataPath,
+    "--variant", "full_avatar",
+    "--content-id", state.content_id,
+    "--output-dir", path.join(workdir, "qa-report"),
+    "--keep-workdir",
+  ];
+  console.log(`[qa] invoking video/qa/run.ts (informational — does not gate human review)`);
+  const r = spawnSync("npx", ["tsx", ...qaArgs], { stdio: "inherit" });
+  if (r.status !== 0) {
+    console.error(`[qa] WARNING: qa/run.ts exited ${r.status}; continuing — QA is informational.`);
+  }
+  // Read the latest report file (if produced) to extract verdict + id.
+  const reportDir = path.join(workdir, "qa-report");
+  if (fs.existsSync(reportDir)) {
+    const reports = fs.readdirSync(reportDir).filter((f) => f.endsWith(".json")).sort();
+    const last = reports.at(-1);
+    if (last) {
+      try {
+        const j = JSON.parse(fs.readFileSync(path.join(reportDir, last), "utf-8"));
+        state.qa_report_id = j.asset_id ?? state.content_id;
+        state.qa_verdict = j.overall_verdict;
+        saveState(state);
+        console.log(`[qa] verdict=${j.overall_verdict} unmeasured=[${(j.unmeasured_dimensions ?? []).join(", ")}]`);
+      } catch (e) {
+        console.error(`[qa] could not parse report JSON: ${(e as Error).message}`);
+      }
+    }
+  }
+}
+
 // ─── Phase: manifest ────────────────────────────────────────────────────
 
 async function phaseManifest(args: Args): Promise<void> {
@@ -331,9 +538,12 @@ const PHASES: Record<string, (args: Args) => Promise<void>> = {
   tts: phaseTts,
   record: phaseRecord,
   verify: phaseVerify,
+  "face-metrics": phaseFaceMetrics,
   manifest: phaseManifest,
+  compose: phaseCompose,
+  upload: phaseUpload,
+  qa: phaseQa,
   summary: phaseSummary,
-  // face-metrics, compose, upload, qa land in P7b
 };
 
 async function main(): Promise<void> {
@@ -341,7 +551,7 @@ async function main(): Promise<void> {
   const phase = args["phase"];
   if (!phase) {
     console.error("Usage: render-avatar-full-v5.ts --phase=<name> --workdir=<path> [args]");
-    console.error(`Phases: ${Object.keys(PHASES).join(", ")}, [face-metrics, compose, upload, qa coming in P7b]`);
+    console.error(`Phases: ${Object.keys(PHASES).join(", ")}`);
     process.exit(2);
   }
   const fn = PHASES[phase];
