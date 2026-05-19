@@ -33,6 +33,10 @@ import { assertFfmpegAvailable, downloadFile } from "../lib/qa-helpers.js";
 import { loadProfileConfig } from "./base/helpers/profile-config.js";
 import { runAvatarFullQA } from "./profiles/avatar-full.js";
 import { runMovingImagesQA } from "./profiles/moving-images.js";
+import { runAvatarVisualQA } from "./profiles/avatar-visual.js";
+import { runAskRachelQA } from "./profiles/ask-rachel.js";
+import { runStaticImageQA } from "./profiles/static-image.js";
+import { runCarouselQA } from "./profiles/carousel.js";
 import { renderQAReportMarkdown } from "./report/render-markdown.js";
 import { persistCostLog } from "./report/persist-cost-log.js";
 import type { QAInput, ClipMeta } from "./base/qa-contract.js";
@@ -132,26 +136,33 @@ async function main() {
   // Avatar Full agent with a note in the report.
   let report: QAReport;
   if (args.profile === "avatar-v1") {
-    if (args.variant === "avatar_visual") {
-      // TODO(PR 3): dedicated avatar-visual variant agent. Until then,
-      // run the Avatar Full baseline; variant-specific dims would emit
-      // UNMEASURED and the report surfaces the variant.
-      report = await runAvatarFullQA(input);
-      report.dimensions.unshift({
-        name: "_variant_not_yet_implemented",
-        status: "UNMEASURED",
-        details: `Variant avatar_visual not yet wired (PR 3). Ran the Avatar Full baseline. Variant-specific dims (split_timing_verification, visual_segment_relevance) need their own agent.`,
-      });
-    } else {
-      // TODO(PR 3): ask_rachel variant flag → ask-rachel agent.
-      report = await runAvatarFullQA(input);
+    // Composite dispatch on variant. Variants are declared in
+    // render_profiles.qa_rules.variants for avatar-v1 (migration
+    // 20260519120000). Each variant agent inherits the Avatar Full
+    // baseline and layers add_to_in_scope dims.
+    switch (args.variant) {
+      case "avatar_visual":
+        report = await runAvatarVisualQA(input);
+        break;
+      case "ask_rachel":
+        report = await runAskRachelQA(input);
+        break;
+      case "full_avatar":
+      case null:
+      case undefined:
+        report = await runAvatarFullQA(input);
+        break;
+      default:
+        throw new Error(`Unknown avatar-v1 variant: ${args.variant}. Valid: full_avatar | avatar_visual | ask_rachel.`);
     }
   } else if (args.profile === "moving-images") {
     report = await runMovingImagesQA(input);
+  } else if (args.profile === "static-image") {
+    report = await runStaticImageQA(input);
+  } else if (args.profile === "carousel") {
+    report = await runCarouselQA(input);
   } else {
-    // TODO(PR 3): static-image, carousel agents (ask-rachel and avatar-visual
-    // route through avatar-v1 with variant dispatch above).
-    throw new Error(`Profile '${args.profile}' is not yet wired. PR 1: avatar-v1. PR 2: moving-images. PR 3: static-image, carousel, ask-rachel, avatar-visual.`);
+    throw new Error(`Unknown profile slug '${args.profile}'. Valid: avatar-v1 | moving-images | static-image | carousel.`);
   }
 
   // Persist cost telemetry.

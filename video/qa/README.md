@@ -4,7 +4,7 @@ Replaces the monolithic `video/scripts/qa-agent-avatar.ts` and `video/scripts/qa
 
 Spec parent: [YAR-129](https://linear.app/yarono/issue/YAR-129).
 
-## What ships in PR 1 + PR 2
+## What ships in PR 1 + PR 2 + PR 3
 
 PR 1 (merged):
 - Base QA contract (`base/qa-contract.ts`, `schemas/`).
@@ -13,17 +13,24 @@ PR 1 (merged):
 - Composite-dispatch entry point (`run.ts`).
 - Markdown report renderer + `cost_log` persistence.
 - `agents/render-orchestrator.js` rewired to call the new entry point for Avatar Full.
-- Integration tests against the v1 broken and v3 known-good fixtures.
 
-PR 2 (this PR):
-- Moving Images profile agent (`profiles/moving-images.ts`) + 4 dims (3 measured: `b_roll_relevance`, `image_coherence`, `ken_burns_smoothness`; 1 UNMEASURED stub: `phrase_caption_timing`).
-- Slide-segmentation helper (`base/helpers/slide-segmentation.ts`) that reconstructs per-slide windows from the composited mp4 + Whisper transcript — no upstream pipeline change required.
-- `agents/render-orchestrator.js` qaVideo rewired to call new entry point with `--profile moving-images`.
-- `video/scripts/qa-agent.ts` replaced with a deprecation shim.
-- Calibration harness against production fixture `d93e2bcd-5665-469f-9b53-e839a1f06b13`.
-- Migrations: `phrase_caption_timing` + `color_filter_consistency` + `transition_style_verification` declared UNMEASURED on `moving-images` (the latter two require Moving Images-specific implementations — base implementations work on raw-clip metadata which doesn't exist for slideshows).
+PR 2 (merged):
+- Moving Images profile agent + 3 measured dims + 1 UNMEASURED stub.
+- Slide-segmentation helper.
+- Orchestrator `qaVideo` rewired; `qa-agent.ts` deprecation shim.
 
-Not in PR 2: Ask Rachel / Avatar+Visual / Static Image / Carousel (PR 3), real lip-sync analysis ([YAR-130](https://linear.app/yarono/issue/YAR-130)), OCR helper for `phrase_caption_timing` graduation, Moving Images-specific color + transition impls.
+PR 3 (this PR):
+- 4 new profile agents covering the rest of the render-profile matrix:
+  - `profiles/static-image.ts` — 3 measured dims (watermark, text_on_image_legibility, layout_grid_compliance).
+  - `profiles/carousel.ts` — 5 measured dims (watermark, slide_narrative_coherence, hook_slide_strength, cta_slide_presence, text_on_image_legibility per slide).
+  - `profiles/avatar-visual.ts` — variant of avatar-v1; Avatar Full baseline + 2 dims (split_timing_verification, visual_segment_relevance — both UNMEASURED until avatar_config carries the metadata).
+  - `profiles/ask-rachel.ts` — variant of avatar-v1; Avatar Full baseline + 2 dims (two_voice_presence, turn_taking_alignment — both UNMEASURED until pipeline ships audio_segments metadata).
+- Migration `qa_rules.variants` on avatar-v1 — declares per-variant `add_to_in_scope[]` overrides. Adding a new variant or moving dims into scope is a single SQL UPDATE.
+- `run.ts` dispatch updated for all 4 paths.
+
+No calibration in PR 3 — Ask Rachel / Avatar+Visual / Static Image / Carousel have not produced production assets yet (per the original YAR-129 spec: "tests can be stubs"). Calibration harnesses for these profiles will be added when their first production renders ship.
+
+Not in PR 3: real lip-sync analysis ([YAR-130](https://linear.app/yarono/issue/YAR-130)), OCR helper for `phrase_caption_timing`, Moving Images-specific color + transition impls, upstream metadata persistence for Avatar+Visual / Ask Rachel variant dims.
 
 ## Architecture
 
@@ -149,6 +156,48 @@ Base dims applying: `watermark_compliance`, `audio_integrity_final`, `caption_le
 | `phrase_caption_timing` | UNMEASURED | Whisper word-timestamp vs caption render-timestamp (needs OCR helper) | n/a |
 
 **Slide segmentation:** the agent reconstructs slide windows from frame-diff peaks on the composited mp4 (no upstream pipeline change required). Threshold: diff > 3× median AND > 8 absolute. Segments with < 2 spoken words are skipped from `b_roll_relevance` (silent gaps don't carry script context).
+
+### Static Image (`static-image` profile)
+
+| Dimension | Model | Method | PASS threshold |
+|---|---|---|---|
+| `watermark_compliance` | none (det) | pixel variance in bottom-right region of the PNG | variance ≥ 200 |
+| `text_on_image_legibility` | Haiku vision | sharp-resize PNG to 200px wide thumbnail; vision judges whether primary text is readable | `primary_text_readable: true` |
+| `layout_grid_compliance` | Haiku vision | safe-area, primary element centering, watermark visibility | all 3 checks pass |
+
+### Carousel (`carousel` profile)
+
+Asset path = first slide. Full slide set passed via `metadata.carousel_slide_paths[]`. Without the full set, all dims except `watermark_compliance` return UNMEASURED.
+
+| Dimension | Model | Method | PASS threshold |
+|---|---|---|---|
+| `watermark_compliance` | none (det) | first-slide pixel variance | variance ≥ 200 |
+| `slide_narrative_coherence` | Sonnet vision | each consecutive slide pair; `logically_follows` judgment | all pairs flow logically |
+| `hook_slide_strength` | Sonnet vision | first slide; scroll-stopping + headline + visual interest | `scroll_stopping: true` |
+| `cta_slide_presence` | Haiku vision | last slide; CTA detection | `cta_present: true` |
+| `text_on_image_legibility` | Haiku vision | every slide at 200px thumbnail | every slide passes |
+
+### Avatar+Visual (`avatar-v1` profile, `avatar_visual` variant)
+
+Inherits the Avatar Full baseline; variant-specific additions per `qa_rules.variants.avatar_visual.add_to_in_scope` (migration `20260519120000`).
+
+| Dimension | Model | Method | PASS threshold |
+|---|---|---|---|
+| `split_timing_verification` | UNMEASURED | needs `avatar_config.split_ratio` + per-clip role tags | n/a |
+| `visual_segment_relevance` | UNMEASURED | needs per-clip role tags + script-per-segment metadata | n/a |
+
+Plus everything in the Avatar Full table above.
+
+### Ask Rachel (`avatar-v1` profile, `ask_rachel` variant)
+
+Inherits the Avatar Full baseline; variant-specific additions per `qa_rules.variants.ask_rachel.add_to_in_scope`.
+
+| Dimension | Model | Method | PASS threshold |
+|---|---|---|---|
+| `two_voice_presence` | UNMEASURED | needs `metadata.qa_inputs.audio_segments[].voice_id` (interviewer + Rachel) | n/a |
+| `turn_taking_alignment` | UNMEASURED | needs `audio_segments[].role` (question/answer) + voice_id | n/a |
+
+Plus everything in the Avatar Full table above.
 
 ## Sampling rules
 
