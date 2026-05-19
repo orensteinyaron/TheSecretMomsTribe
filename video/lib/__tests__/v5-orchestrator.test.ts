@@ -87,19 +87,20 @@ test("--phase=record accumulates credits and USD into state totals", () => {
   }
 });
 
-test("--phase=record aborts (exit 4) when cumulative > 600 credits", () => {
+test("--phase=record aborts (exit 4) when cumulative > 700 credits", () => {
   // Hard ceiling sized against the ACTUAL clip_01 cost observed in
-  // the deepfakes acceptance run (81cr at 1080p std). 7 × 81 = 567cr;
-  // ceiling 600cr leaves ~33cr (one fast-retry) of margin. Revised
-  // from 400cr after Phase 9 clip_01 surfaced the real per-clip rate.
+  // the deepfakes acceptance run (81cr at 1080p std). 7 × 81 = 567cr
+  // base + 153cr YAR-137 spike margin = 720cr → ceiling 700cr. Revised
+  // from 600cr during Phase 9 after the YAR-137 distance-lock spike
+  // re-rendered clip_02 + clip_05b.
   const workdir = makeWorkdir();
   try {
     const s = initState({
       content_id: "c1", workdir, hook_text: "h", register: "concerned_insider",
       clips: [{ id: "S1", expected_script: "x", duration_target_s: 8 }],
     });
-    s.total_higgsfield_credits = 567;
-    s.total_usd = 7.37;
+    s.total_higgsfield_credits = 650;
+    s.total_usd = 8.45;
     saveState(s);
 
     const r = runCli(workdir, [
@@ -108,7 +109,7 @@ test("--phase=record aborts (exit 4) when cumulative > 600 credits", () => {
       "--cost-credits=81", "--cost-usd=1.05", "--mode=fast",
     ]);
     assert.equal(r.status, 4, `expected exit 4 (ceiling abort), got ${r.status}. stderr: ${r.stderr}`);
-    assert.match(r.stderr + r.stdout, /hard ceiling 600/);
+    assert.match(r.stderr + r.stdout, /hard ceiling 700/);
   } finally {
     fs.rmSync(workdir, { recursive: true, force: true });
   }

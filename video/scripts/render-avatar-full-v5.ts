@@ -391,6 +391,62 @@ async function phaseUpload(args: Args): Promise<void> {
   state.final_public_url = await uploadToPostImages(bucketPath, state.final_local_path, "video/mp4");
   saveState(state);
   console.log(`[upload] ${state.final_public_url}`);
+
+  // Persist caption + Whisper telemetry to content_queue.metadata so it
+  // survives workdir cleanup. Source of truth stays in workdir/v5-state.json
+  // until the row is updated; after this write, the row IS the source of
+  // truth for downstream consumers (approval UI, caption editor, etc.).
+  //
+  // Schema (see docs/specs/AVATAR_FULL_V5.md "Upload contract"):
+  //   metadata.phrases:       flat array of { clip_id, phrase_text, start_s, end_s }
+  //                           clip-local timestamps (start_s 0 = clip start, not composition start)
+  //   metadata.whisper_words: per-clip array of { clip_id, duration_s, transcript, words[] }
+  //                           each words[] entry = { word, start, end } clip-local
+  //
+  // NOT touched here: content_queue.status, render_profile_id. Those flip
+  // only after human approval (the DB-flip-on-approval invariant).
+  const phrases = state.clips
+    .filter((c) => c.verify_status === "PASS")
+    .flatMap((c) =>
+      (c.phrases ?? []).map((p) => ({
+        clip_id: c.id,
+        phrase_text: p.text,
+        start_s: p.start_s,
+        end_s: p.end_s,
+      })),
+    );
+  const whisper_words = state.clips
+    .filter((c) => c.verify_status === "PASS")
+    .map((c) => ({
+      clip_id: c.id,
+      duration_s: c.whisper_duration_s,
+      transcript: c.whisper_transcript,
+      words: (c.whisper_words ?? []).map((w) => ({ word: w.word, start: w.start, end: w.end })),
+    }));
+
+  const cur = await supa()
+    .from("content_queue")
+    .select("metadata")
+    .eq("id", state.content_id)
+    .single();
+  if (cur.error) {
+    console.warn(`[upload] could not read current metadata: ${cur.error.message} — skipping metadata persist`);
+    return;
+  }
+  const newMetadata = {
+    ...((cur.data?.metadata as Record<string, unknown>) ?? {}),
+    phrases,
+    whisper_words,
+  };
+  const upd = await supa()
+    .from("content_queue")
+    .update({ metadata: newMetadata })
+    .eq("id", state.content_id);
+  if (upd.error) {
+    console.warn(`[upload] metadata persist failed: ${upd.error.message} — final video uploaded, metadata not written`);
+    return;
+  }
+  console.log(`[upload] metadata persisted: ${phrases.length} phrases, ${whisper_words.length} per-clip Whisper entries`);
 }
 
 // ─── Phase: qa ──────────────────────────────────────────────────────────

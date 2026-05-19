@@ -347,9 +347,48 @@ Whisper, ffmpeg, Supabase, mediapipe are effectively free. The cost is Higgsfiel
 | Per-clip Whisper transcript + WER | `prompt_executions` (per-clip row, `agent_run_id` linked) |
 | Transitions manifest | `<workdir>/transitions-manifest.json` (kept locally for debugging) |
 | Final composited MP4 | Supabase `post-images/avatar-full-v5/<content_id>/<run-ts>/final.mp4` |
+| **Caption + Whisper telemetry** | **`content_queue.<id>.metadata.phrases` + `metadata.whisper_words`** — written automatically by `--phase=upload`. See "Upload contract" below. |
 | avatar-v1 QA report | `qa_reports` table |
 | All costs | `cost_log` (per-vendor, per-step) |
 | Human-review summary | stdout at end of render |
+
+---
+
+## Upload contract (`--phase=upload` DB writes)
+
+`--phase=upload` is the boundary where workdir state crosses into permanent DB storage. After this phase the row IS the source of truth for downstream consumers (approval UI, caption editor, analytics) — `workdir/v5-state.json` is just scratch and may be deleted.
+
+### What `--phase=upload` writes
+
+| Column | Field | Value | Behavior |
+|---|---|---|---|
+| Storage | `post-images/avatar-full-v5/<content_id>/<run-ts>/final.mp4` | Final MP4 (compressed by the orchestrator before upload) | Always written; new run-ts each invocation so prior renders aren't overwritten |
+| `content_queue.metadata` | `phrases` | Flat array — one entry per phrase across all PASS clips: `{ clip_id, phrase_text, start_s, end_s }` | Merged into existing metadata jsonb; clip-local timestamps |
+| `content_queue.metadata` | `whisper_words` | Per-clip array: `{ clip_id, duration_s, transcript, words: [{word, start, end}] }` | Merged into existing metadata jsonb; clip-local timestamps |
+
+### What `--phase=upload` does NOT touch (DB-flip-on-approval invariant)
+
+- `content_queue.status` — flips only on human approval
+- `content_queue.render_profile_id` — flips only on human approval (the row was tagged with the ORIGINAL profile by ContentGen; the upload doesn't claim the render is canonical until a human says so)
+- `content_queue.metadata.video_url` — set on human approval, NOT here. The orchestrator's final URL stays in `v5-state.json` until the reviewer copies it forward via the approval flow.
+- Existing `metadata.*` fields (`image_axes`, `format_flags`, `density_classification`, etc.) — preserved via spread merge
+
+### Why phrases + whisper_words live on the row, not in workdir
+
+The workdir is scratch — created in `/tmp` per render, often cleaned up by the OS. Persisting these to the row enables:
+
+- **Approval UI rendering** without re-running Whisper on every preview
+- **Caption editing tools** (future) that can read existing phrases, allow per-phrase edits, write back, and the renderer re-composes from the modified `metadata.phrases`
+- **Re-render with caption-only changes** (no Seedance credits) — read `metadata.phrases` instead of re-Whispering
+- **Downstream analytics** — phrase-level engagement, caption A/B testing, etc.
+
+Storage cost is negligible: ~16 KB JSON per piece for a 7-clip Avatar Full at 60 s duration. 1000 pieces ≈ 16 MB total — well under any jsonb sanity limit.
+
+### Schema notes for downstream consumers
+
+- **Timestamps are clip-local**, not composition-global. `start_s = 0` means "the start of clip X" not "the start of the final video". To compute composition-global time, the consumer must walk the clips in order and account for the 4-frame audio-bridge overlap per cut (see "Audio bridge between clips" section).
+- **Phrase text is mixed-case** as Whisper produced it (e.g. `"Okay wait"`, not `"OKAY WAIT"`). The `AvatarV5Captions` component applies `textTransform: uppercase` at render time. Downstream consumers that want the as-rendered string should uppercase themselves; tools that want to edit captions get the natural case to work with.
+- **Phrase boundaries follow the `phrase-grouper.ts` rules** (MAX_WORDS=4 hard cap, GAP_THRESHOLD=0.3s pause split). A caption editor that wants to merge or split phrases should regenerate the array rather than expecting these rules to be re-applied.
 
 ---
 
