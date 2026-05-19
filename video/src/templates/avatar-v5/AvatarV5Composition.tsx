@@ -8,6 +8,7 @@ import {
   type AvatarV5Props,
 } from "./types";
 import { AvatarV5Clip } from "./AvatarV5Clip";
+import { AvatarV5Captions } from "./AvatarV5Captions";
 import { SMTHookOverlay } from "../shared/SMTHookOverlay";
 
 const HOOK_OVERLAY_DURATION_S = 1.0;
@@ -91,6 +92,9 @@ export const AvatarV5Composition: React.FC<AvatarV5Props> = (props) => {
               blur_out_frames={entry.blur_out_frames}
               duration_in_frames={entry.duration_in_frames}
             />
+            {clip.phrases && clip.phrases.length > 0 ? (
+              <AvatarV5Captions phrases={clip.phrases} />
+            ) : null}
           </Sequence>
         );
       })}

@@ -63,6 +63,7 @@ import { computeWer, WER_PASS_THRESHOLD } from "../qa/base/helpers/wer.js";
 import { whisperTranscribe, extractAudioMp3, downloadFile, probeDurationSeconds } from "../lib/qa-helpers.js";
 import { buildTransitionsManifest } from "../lib/transitions-manifest.js";
 import { measureFrames } from "../lib/face-metrics.js";
+import { buildPhrases } from "../lib/phrase-grouper.js";
 import { AVATAR_V5_FPS, AUDIO_BRIDGE_FRAMES, AVATAR_V5_WIDTH, AVATAR_V5_HEIGHT } from "../src/templates/avatar-v5/types.js";
 import { layoutClips } from "../src/templates/avatar-v5/AvatarV5Composition.js";
 import { RACHEL_SOUL_STILL_URL } from "../lib/avatar-constants.js";
@@ -220,6 +221,10 @@ async function phaseVerify(args: Args): Promise<void> {
   const whisper = await whisperTranscribe(audioPath);
   clip.whisper_transcript = whisper.text.trim();
   clip.whisper_duration_s = whisper.duration;
+  // Persist word-level timestamps for caption generation (Finding 4 —
+  // source is Seedance embedded audio, not the original ElevenLabs MP3).
+  clip.whisper_words = whisper.words.map((w) => ({ word: w.word, start: w.start, end: w.end }));
+  clip.phrases = buildPhrases(clip.whisper_words);
 
   const wer = computeWer(clip.expected_script, clip.whisper_transcript);
   clip.whisper_wer = wer.wer;
@@ -340,6 +345,7 @@ async function phaseCompose(args: Args): Promise<void> {
         video_url: `http://127.0.0.1:${port}/clip/${c.id}.mp4`,
         duration_s: c.whisper_duration_s ?? c.duration_target_s,
         crop_offset_y: cropById.get(c.id) ?? 0,
+        phrases: c.phrases ?? [],
       })),
       transitions: state.transitions_manifest.transitions.map((t) => ({
         cut_index: t.cut_index,

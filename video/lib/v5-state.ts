@@ -11,6 +11,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { Phrase, WhisperWord } from "./phrase-grouper.js";
+
 export type V5ClipState = {
   /** Stable id from avatar_config.clips[].id (e.g. "SCENE_01"). */
   id: string;
@@ -32,6 +34,14 @@ export type V5ClipState = {
   whisper_duration_s?: number;
   whisper_wer?: number;
   whisper_speech_coverage?: number;
+  /**
+   * Word-level timestamps from Whisper on the Seedance MP4 audio.
+   * Source-of-truth for caption timing — clip-local (relative to the
+   * clip's start, not the composition's global timeline).
+   */
+  whisper_words?: WhisperWord[];
+  /** Grouped 2-4 word phrases derived from whisper_words. Clip-local timing. */
+  phrases?: Phrase[];
   verify_status?: "PASS" | "FAIL_WER" | "FAIL_COVERAGE";
   verify_mode_used?: "std" | "fast";
   verify_attempts?: number;

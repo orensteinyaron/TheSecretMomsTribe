@@ -8,6 +8,8 @@
 // punch_in field on V5Clip in v5.0. See docs/specs/AVATAR_FULL_V5.md
 // "Follow-ups" section.
 
+import type { Phrase } from "../../../lib/phrase-grouper.js";
+
 export type V5Clip = {
   id: string;
   /** Seedance MP4 with embedded audio. Local path OR https URL. */
@@ -16,6 +18,11 @@ export type V5Clip = {
   duration_s: number;
   /** Pixels to translate vertically — normalizes face position across cuts. */
   crop_offset_y: number;
+  /**
+   * Phrase captions for this clip. Clip-local timing (start_s 0 = clip start).
+   * Empty array = no captions on this clip.
+   */
+  phrases?: Phrase[];
 };
 
 export type V5Transition = {
