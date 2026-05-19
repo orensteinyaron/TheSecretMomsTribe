@@ -254,9 +254,10 @@ as the swap point for v5.x (`HttpSeedanceClient` or `BytePlusClient`).
 | `init` | CLI | Load `content_queue` row, normalize `avatar_config.clips`, write initial state |
 | `tts` | CLI | Per-clip ElevenLabs MP3 → Supabase `post-images/avatar-full-v5/audio/` |
 | *(MCP)* | Session | `generate_video` per clip with motion-prompt + start_image + audio MP3 URL |
-| `record` | CLI | Capture Seedance result fields. **Aborts at >300 Higgsfield credits.** |
+| `record` | CLI | Capture Seedance result fields. **Aborts at >700 Higgsfield credits.** |
 | `verify` | CLI | Whisper WER + speech-coverage gate. Exit codes: 0=PASS, 2=retry-fast, 3=surface-to-human |
 | `face-metrics` | CLI | First+last frames → mediapipe sidecar → eye_y/face_x per endpoint |
+| **`normalize-clips`** | **CLI** | **REQUIRED — `npx tsx scripts/normalize-clips.ts <workdir>`. Per-clip scale+crop to uniform face_h + eye_y. Audio passthrough preserved. Architectural mitigation for YAR-137 Seedance fidelity drift.** Re-run `--phase=face-metrics` after this to refresh measurements on the normalized clips. |
 | `manifest` | CLI | Transitions manifest (motion-blur gating + crop offsets) |
 | `compose` | CLI | Remotion `AvatarV5Composition` → `workdir/final.mp4` |
 | `upload` | CLI | Final MP4 → `post-images/avatar-full-v5/<content_id>/<run-ts>/final.mp4` |
@@ -277,6 +278,11 @@ npx tsx scripts/render-avatar-full-v5.ts --phase=tts     --workdir=$WORKDIR
 #   then `--phase=record --clip-id=… --job-id=… --video-url=… --cost-credits=… --mode=std`
 #   then `--phase=verify --clip-id=…`  (retry on exit 2; surface on exit 3)
 npx tsx scripts/render-avatar-full-v5.ts --phase=face-metrics --workdir=$WORKDIR
+# REQUIRED — post-process normalization (YAR-137 mitigation). Scales+crops
+# each clip to uniform face_h + eye_y; audio passthrough preserved. See
+# docs/specs/AVATAR_FULL_V5.md "Post-process normalization".
+npx tsx scripts/normalize-clips.ts $WORKDIR
+npx tsx scripts/render-avatar-full-v5.ts --phase=face-metrics --workdir=$WORKDIR    # re-measure on normalized
 npx tsx scripts/render-avatar-full-v5.ts --phase=manifest --workdir=$WORKDIR
 npx tsx scripts/render-avatar-full-v5.ts --phase=compose  --workdir=$WORKDIR
 npx tsx scripts/render-avatar-full-v5.ts --phase=upload   --workdir=$WORKDIR

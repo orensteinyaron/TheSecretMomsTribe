@@ -73,6 +73,7 @@ The v5 render is **hybrid** — Claude Code session + Node helpers.
 - Whisper WER verification (`video/lib/whisper-verifier.ts`)
 - Frame extraction via ffmpeg
 - Face metrics via Python+mediapipe sidecar (`video/lib/face-metrics.ts` → `bin/face-metrics/main.py`)
+- **Post-process normalization** (`video/scripts/normalize-clips.ts`) — REQUIRED between `--phase=face-metrics` and `--phase=manifest`. See "Post-process normalization" section below.
 - Transitions manifest builder (`video/lib/transitions-manifest.ts`)
 - Motion-prompt builder (`video/lib/motion-prompt-builder.ts`)
 - Remotion composition `AvatarV5Composition` (`video/src/templates/avatar-v5/`)
@@ -80,6 +81,60 @@ The v5 render is **hybrid** — Claude Code session + Node helpers.
 - Supabase upload of final MP4 to `post-images/avatar-full-v5/<content_id>/<run-ts>/final.mp4`
 - avatar-v1 QA agent invocation (`video/qa/profiles/avatar-full.ts`)
 - `cost_log` and `prompt_executions` writes
+
+---
+
+## Post-process normalization (REQUIRED, between face-metrics and manifest)
+
+**Architectural mitigation for [YAR-137](https://linear.app/yarono/issue/YAR-137)** — Seedance start_image fidelity drift. The same Soul still produces meaningfully different opening pose/distance across renders (subject size + eye position varies up to ~150 px from identical input). Prompt language (YAR-137 spike) nudges Seedance but does not fully constrain it. The structural fix is **per-clip scale+crop in the composition pipeline**, not in the generation pipeline.
+
+### When to run
+
+After `--phase=face-metrics`, before `--phase=manifest`:
+
+```
+… → MCP generate_video → --phase=record → --phase=verify (per clip)
+… → --phase=face-metrics          (measures raw Seedance output)
+… → npx tsx scripts/normalize-clips.ts <workdir>   ← REQUIRED
+… → --phase=face-metrics          (re-measure on normalized clips)
+… → --phase=manifest → --phase=compose → … 
+```
+
+### What it does
+
+`video/scripts/normalize-clips.ts`:
+1. Picks `target_face_h = max(face_h across clips) × 1.08` — ensures every clip scales UP (no letterbox).
+2. For each PASS clip, computes:
+   - `scale = target_face_h / clip.face_h`
+   - `crop_x = clip.face_x × scale − 540` (face center at x=540)
+   - `crop_y = clip.eye_y × scale − 600` (eyeline at y=600 ≈ ⅓ from top)
+3. Runs ffmpeg `scale=W:H,crop=1080:1920:cropX:cropY` per clip.
+4. Audio passthrough via `-c:a copy` — bit-for-bit copy, Whisper-verified bytes unchanged.
+5. Originals backed up to `clips/orig/<id>.mp4` before overwriting.
+6. Wipes `state.face_metrics` and `state.transitions_manifest` so the next `--phase=face-metrics` re-measures the normalized clips.
+
+### Why this works
+
+Verified on the deepfakes acceptance render:
+
+| | Before normalization | After |
+|---|---:|---:|
+| `face_h` range across 7 clips | 127 px | 16 px |
+| `start_eye_y` range | 115 px | 2 px |
+| Cuts flagged for motion blur | 5 of 6 | 0 of 6 |
+
+Motion blur effectively becomes opt-in (per-cut override in `transitions_manifest.transitions[i].needs_motion_blur=true`) rather than the default-on safety net.
+
+### Trade-offs
+
+- **Content loss at edges**: 9–25 % of horizontal/vertical content cropped depending on per-clip scale. Acceptable for medium close-up framing where the subject already fills the upper two-thirds.
+- **Re-encode generational loss**: video re-encodes at h264 CRF 18 (small; should be invisible). Audio is bit-for-bit copy.
+- **Static crop based on START frame**: intra-clip face drift WITHIN a single clip is NOT corrected. Acceptable since the motion-prompt builder's bounded-motion language keeps intra-clip drift small.
+
+### Out of scope for v5.0
+
+- Time-varying crop (face tracking per frame). Would correct intra-clip drift too. Filed for v5.x evaluation.
+- Replacing Seedance with a model that has explicit subject-distance control. Tracked on YAR-137.
 
 ### What the SeedanceClient interface buys us
 `video/lib/seedance/SeedanceClient.ts` defines the boundary:
