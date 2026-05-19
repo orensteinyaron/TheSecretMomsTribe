@@ -34,6 +34,7 @@ export type RenderProfileConfig = {
     unmeasured_dimensions: string[];
     out_of_scope_dimensions: string[];
     gated_dimensions: string[]; // FAIL results remapped to UNMEASURED with diff preserved; see migration 20260519100000.
+    variants?: Record<string, { add_to_in_scope: string[] }>; // per-variant dim overrides (avatar-v1 only today); see migration 20260519120000.
   };
   qa_stability: {
     state: "informational" | "decisional";
