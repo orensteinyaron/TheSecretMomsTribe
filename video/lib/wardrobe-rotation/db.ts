@@ -73,50 +73,31 @@ export async function getLook(look_id: string): Promise<RachelLook | null> {
 /**
  * Returns recent look picks from content_queue rows that carry avatar_config.look_id.
  *
- * Implementation note: the Supabase JS builder does not natively support the
- * jsonb `?` key-existence operator, nor `column->>'key'` as a select alias.
- * We therefore use .rpc() with an inline SQL helper declared here as a
- * comment (no migration needed for an RPC in this file — it would require a
- * CREATE FUNCTION migration if called via .rpc(); see DONE_WITH_CONCERNS below).
- *
- * DONE_WITH_CONCERNS: because the jsonb column projection `avatar_config->>'look_id'`
- * and the key-existence predicate `avatar_config ? 'look_id'` cannot be expressed
- * through the standard .from().select() builder, we use a raw SQL approach via
- * the Supabase RPC pattern.  A tiny SQL function `get_recent_avatar_picks` must
- * exist in the DB for this to execute at runtime.  That function is defined in
- * supabase/migrations/20260519140001_get_recent_avatar_picks.sql (to be added in
- * the Task 6 follow-up).  The function signature is:
- *
- *   CREATE OR REPLACE FUNCTION get_recent_avatar_picks(pick_limit int)
- *   RETURNS TABLE(look_id text, used_at timestamptz)
- *   LANGUAGE sql STABLE AS $$
- *     SELECT avatar_config->>'look_id' AS look_id,
- *            updated_at                AS used_at
- *     FROM   content_queue
- *     WHERE  render_profile_id IN ('avatar-v1', 'avatar-full-v5')
- *       AND  avatar_config ? 'look_id'
- *     ORDER  BY updated_at DESC
- *     LIMIT  pick_limit;
- *   $$;
- *
- * Until that migration is applied, callers will receive an empty array (the
- * error is swallowed with a warning so the rest of the pipeline keeps running).
+ * Fetches the full `avatar_config` jsonb column and applies the
+ * `avatar_config ? 'look_id'` semantics in JS (typeof string check).
+ * Overfetches 3× so the in-JS filter still yields `limit` results when
+ * some rows lack a `look_id`.
  */
 export async function getRecentPicks(limit: number): Promise<RecentPick[]> {
-  const { data, error } = await supabase.rpc('get_recent_avatar_picks', {
-    pick_limit: limit,
-  });
+  const { data, error } = await supabase
+    .from('content_queue')
+    .select('avatar_config, updated_at')
+    .in('render_profile_id', ['avatar-v1', 'avatar-full-v5'])
+    .not('avatar_config', 'is', null)
+    .order('updated_at', { ascending: false })
+    .limit(limit * 3);
 
-  if (error) {
-    // RPC function may not exist yet (migration pending). Log and degrade
-    // gracefully — callers treat an empty history as "no cooldown in effect".
-    console.warn(`[getRecentPicks] RPC unavailable, returning []: ${error.message}`);
-    return [];
+  if (error) throw new Error(`[getRecentPicks] ${error.message}`);
+
+  const picks: RecentPick[] = [];
+  for (const row of (data ?? []) as Array<{ avatar_config: Record<string, unknown> | null; updated_at: string }>) {
+    const lookId = row.avatar_config?.look_id;
+    if (typeof lookId === 'string' && lookId.length > 0) {
+      picks.push({ look_id: lookId, used_at: row.updated_at });
+      if (picks.length >= limit) break;
+    }
   }
-
-  return ((data ?? []) as Array<{ look_id: string; used_at: string }>).map(
-    (row) => ({ look_id: row.look_id, used_at: row.used_at }),
-  );
+  return picks;
 }
 
 /**
