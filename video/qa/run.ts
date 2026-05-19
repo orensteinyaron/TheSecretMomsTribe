@@ -32,6 +32,7 @@ import path from "path";
 import { assertFfmpegAvailable, downloadFile } from "../lib/qa-helpers.js";
 import { loadProfileConfig } from "./base/helpers/profile-config.js";
 import { runAvatarFullQA } from "./profiles/avatar-full.js";
+import { runMovingImagesQA } from "./profiles/moving-images.js";
 import { renderQAReportMarkdown } from "./report/render-markdown.js";
 import { persistCostLog } from "./report/persist-cost-log.js";
 import type { QAInput, ClipMeta } from "./base/qa-contract.js";
@@ -145,9 +146,12 @@ async function main() {
       // TODO(PR 3): ask_rachel variant flag → ask-rachel agent.
       report = await runAvatarFullQA(input);
     }
+  } else if (args.profile === "moving-images") {
+    report = await runMovingImagesQA(input);
   } else {
-    // TODO(PR 2): moving-images, static-image, carousel agents.
-    throw new Error(`Profile '${args.profile}' is not yet wired. PR 1 ships avatar-v1 only. PR 2: moving-images. PR 3: static-image, carousel, ask-rachel, avatar-visual.`);
+    // TODO(PR 3): static-image, carousel agents (ask-rachel and avatar-visual
+    // route through avatar-v1 with variant dispatch above).
+    throw new Error(`Profile '${args.profile}' is not yet wired. PR 1: avatar-v1. PR 2: moving-images. PR 3: static-image, carousel, ask-rachel, avatar-visual.`);
   }
 
   // Persist cost telemetry.

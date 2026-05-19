@@ -4,8 +4,9 @@ Replaces the monolithic `video/scripts/qa-agent-avatar.ts` and `video/scripts/qa
 
 Spec parent: [YAR-129](https://linear.app/yarono/issue/YAR-129).
 
-## What ships in PR 1
+## What ships in PR 1 + PR 2
 
+PR 1 (merged):
 - Base QA contract (`base/qa-contract.ts`, `schemas/`).
 - 7 base dimensions implementing the cross-profile checks (`dimensions/base/*`).
 - Avatar Full profile agent + 5 net-new avatar-specific dimensions + 3 UNMEASURED stubs (`profiles/avatar-full.ts`, `dimensions/avatar-full/*`).
@@ -14,7 +15,15 @@ Spec parent: [YAR-129](https://linear.app/yarono/issue/YAR-129).
 - `agents/render-orchestrator.js` rewired to call the new entry point for Avatar Full.
 - Integration tests against the v1 broken and v3 known-good fixtures.
 
-Not in PR 1: Moving Images (PR 2), Ask Rachel / Avatar+Visual / Static Image / Carousel (PR 3), real lip-sync analysis ([YAR-130](https://linear.app/yarono/issue/YAR-130)).
+PR 2 (this PR):
+- Moving Images profile agent (`profiles/moving-images.ts`) + 4 dims (3 measured: `b_roll_relevance`, `image_coherence`, `ken_burns_smoothness`; 1 UNMEASURED stub: `phrase_caption_timing`).
+- Slide-segmentation helper (`base/helpers/slide-segmentation.ts`) that reconstructs per-slide windows from the composited mp4 + Whisper transcript — no upstream pipeline change required.
+- `agents/render-orchestrator.js` qaVideo rewired to call new entry point with `--profile moving-images`.
+- `video/scripts/qa-agent.ts` replaced with a deprecation shim.
+- Calibration harness against production fixture `d93e2bcd-5665-469f-9b53-e839a1f06b13`.
+- Migrations: `phrase_caption_timing` + `color_filter_consistency` + `transition_style_verification` declared UNMEASURED on `moving-images` (the latter two require Moving Images-specific implementations — base implementations work on raw-clip metadata which doesn't exist for slideshows).
+
+Not in PR 2: Ask Rachel / Avatar+Visual / Static Image / Carousel (PR 3), real lip-sync analysis ([YAR-130](https://linear.app/yarono/issue/YAR-130)), OCR helper for `phrase_caption_timing` graduation, Moving Images-specific color + transition impls.
 
 ## Architecture
 
@@ -127,6 +136,19 @@ A dimension graduates from UNMEASURED to in-scope via a **single SQL UPDATE** on
 | `cross_clip_drift` | Sonnet vision | one call, ref + middle frame of each clip; identify identity / hair / bg / framing drift across the set | verdict not FAIL |
 | `lip_sync` | UNMEASURED | MFCC + mouth ROI cross-correlation (YAR-130 spike) | n/a |
 | `register_adherence` | UNMEASURED | per-register marker enumeration; gated on `avatar_config.register` shipping | n/a |
+
+### Moving Images (`moving-images` profile)
+
+Base dims applying: `watermark_compliance`, `audio_integrity_final`, `caption_legibility`. Base dims declared UNMEASURED for this profile: `color_filter_consistency`, `transition_style_verification` (need Moving Images-specific impls; base impls require raw-clip metadata which slideshow renders don't produce). Plus `hook_overlay_style` UNMEASURED (graduates with v3 merge).
+
+| Dimension | Model | Method | PASS threshold |
+|---|---|---|---|
+| `b_roll_relevance` | Haiku vision | per slide segment, judge image vs spoken line | every segment ≥ 3/5 |
+| `image_coherence` | Sonnet vision | one call, gestalt across all segment images | overall ≥ 3/5 |
+| `ken_burns_smoothness` | none (det) | frame-diff timeline across content window | zero freeze runs ≥ 0.8s; no excess spikes |
+| `phrase_caption_timing` | UNMEASURED | Whisper word-timestamp vs caption render-timestamp (needs OCR helper) | n/a |
+
+**Slide segmentation:** the agent reconstructs slide windows from frame-diff peaks on the composited mp4 (no upstream pipeline change required). Threshold: diff > 3× median AND > 8 absolute. Segments with < 2 spoken words are skipped from `b_roll_relevance` (silent gaps don't carry script context).
 
 ## Sampling rules
 
