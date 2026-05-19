@@ -189,11 +189,12 @@ async function phaseRecord(args: Args): Promise<void> {
   saveState(state);
   console.log(`[record] ${clipId} attempt ${clip.verify_attempts} mode=${clip.verify_mode_used} cost=${clip.seedance_cost_credits}cr cumulative=${state.total_higgsfield_credits}cr`);
 
-  // Hard ceiling sized against ACTUAL clip_01 cost (81cr at 1080p std,
-  // not the original 50cr/clip estimate). 7 × 81 = 567cr ≈ ceiling 600cr
-  // with zero retry margin. If any clip needs a fast retry, this trips
-  // and we re-decide. Revisable per-piece. See docs/specs/AVATAR_FULL_V5.md.
-  const HARD_CEILING_CREDITS = 600;
+  // Hard ceiling sized against ACTUAL observed Phase 9 costs (81cr/clip at
+  // 1080p std). 7 × 81 = 567cr for the base render; +153cr for the YAR-137
+  // subject-distance-lock spike (clip_02 + clip_05b re-rendered with
+  // augmented prompts) → 700cr total. Revisable per-piece. See
+  // docs/specs/AVATAR_FULL_V5.md.
+  const HARD_CEILING_CREDITS = 700;
   if ((state.total_higgsfield_credits ?? 0) > HARD_CEILING_CREDITS) {
     console.error(`[ABORT] cumulative ${state.total_higgsfield_credits}cr exceeds hard ceiling ${HARD_CEILING_CREDITS}cr. Surface to human.`);
     process.exit(4);
