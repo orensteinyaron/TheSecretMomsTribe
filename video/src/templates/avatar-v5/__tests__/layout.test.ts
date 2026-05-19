@@ -112,3 +112,45 @@ test("layout is empty for empty clips", () => {
   assert.equal(entries.length, 0);
   assert.equal(total_duration_in_frames, 0);
 });
+
+// ─── Per-cut bridge_enabled flag (Phase 9 fallback lever) ───────────────
+
+test("bridge_enabled=false on a single cut produces a strict hard cut", () => {
+  const props: AvatarV5Props = {
+    clips: [fakeClip("c0", 8), fakeClip("c1", 8), fakeClip("c2", 8)],
+    transitions: [
+      { cut_index: 0, needs_motion_blur: false, bridge_enabled: false }, // hard cut
+      { cut_index: 1, needs_motion_blur: false },                        // default bridge enabled
+    ],
+    hook_text: "",
+  };
+  const { entries, total_duration_in_frames } = layoutClips(props, FPS);
+  // c0: 0..240, c1: 240..480 (NO bridge), c2: 480-4=476..716 (bridge enabled)
+  assert.equal(entries[0].from_frame, 0);
+  assert.equal(entries[1].from_frame, 240); // strict boundary
+  assert.equal(entries[2].from_frame, 476); // bridged
+  // Total = c0 + c1 + c2 - one bridge (cut 1 only)
+  assert.equal(total_duration_in_frames, 8 * FPS * 3 - AUDIO_BRIDGE_FRAMES);
+});
+
+test("bridge_enabled omitted defaults to true (backward-compatible)", () => {
+  const props: AvatarV5Props = {
+    clips: [fakeClip("c0", 8), fakeClip("c1", 8)],
+    transitions: [{ cut_index: 0, needs_motion_blur: false }], // no bridge_enabled field
+    hook_text: "",
+  };
+  const { total_duration_in_frames } = layoutClips(props, FPS);
+  assert.equal(total_duration_in_frames, 8 * FPS * 2 - AUDIO_BRIDGE_FRAMES);
+});
+
+test("all bridges disabled yields the strict-hard-cut total duration", () => {
+  const props: AvatarV5Props = {
+    clips: Array.from({ length: 6 }, (_, i) => fakeClip(`c${i}`, 8)),
+    transitions: Array.from({ length: 5 }, (_, i) => ({
+      cut_index: i, needs_motion_blur: false, bridge_enabled: false,
+    })),
+    hook_text: "",
+  };
+  const { total_duration_in_frames } = layoutClips(props, FPS);
+  assert.equal(total_duration_in_frames, 6 * 8 * FPS); // no bridge subtractions
+});

@@ -26,6 +26,13 @@ export type V5Transition = {
    * hard cut.
    */
   needs_motion_blur: boolean;
+  /**
+   * When true (default), clip N+1 starts AUDIO_BRIDGE_FRAMES before clip N's
+   * nominal end → ~133 ms audio mix at the cut. When false, strict hard cut at
+   * the boundary. Per-cut so Phase 9 acceptance review can disable specific
+   * bridges that sound rough without dropping the bridge globally.
+   */
+  bridge_enabled?: boolean;
 };
 
 export type AvatarV5Props = {

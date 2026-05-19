@@ -46,7 +46,12 @@ export function layoutClips(props: AvatarV5Props, fps: number = AVATAR_V5_FPS): 
   const entries: ClipLayoutEntry[] = [];
   let cursor = 0;
   for (let i = 0; i < props.clips.length; i++) {
-    const startsAt = i === 0 ? 0 : cursor - AUDIO_BRIDGE_FRAMES;
+    // bridge_enabled defaults to true. transitions[i-1] describes the cut
+    // BEFORE clip i (i.e. clips[i-1] → clips[i]).
+    const incomingTransition = i > 0 ? props.transitions[i - 1] : undefined;
+    const bridgeEnabled = incomingTransition ? (incomingTransition.bridge_enabled ?? true) : false;
+    const bridgeOffset = bridgeEnabled ? AUDIO_BRIDGE_FRAMES : 0;
+    const startsAt = i === 0 ? 0 : cursor - bridgeOffset;
     entries.push({
       clip_index: i,
       from_frame: Math.max(0, startsAt),
