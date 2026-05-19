@@ -232,95 +232,21 @@ npm run studio
 
 ## Avatar Full v5 (Seedance pipeline)
 
-Replaces the legacy HeyGen-based `video/scripts/generate-avatar-video.ts`.
-**Operational spec:** `/docs/specs/AVATAR_FULL_V5.md` (transport, gate
-definitions, output paths, follow-ups). **Build plan + history:**
-`/docs/superpowers/plans/2026-05-19-avatar-full-v5-seedance-pipeline.md`.
+**Shipped 2026-05-19.** Replaces the legacy HeyGen-based `video/scripts/generate-avatar-video.ts` (retirement deferred). Hybrid orchestration: a Claude Code session interleaves Higgsfield MCP `generate_video` calls (Seedance 2.0, `medias=[start_image, audio]`) with invocations of `video/scripts/render-avatar-full-v5.ts --phase=<name>`. State flows through `workdir/v5-state.json`. Phase sequence: **`init` → `tts` → (MCP `generate_video` + `record` + `verify` per clip) → `face-metrics` → `normalize-clips` → `face-metrics` (re-measure) → `manifest` → `compose` → `upload` → `qa` → `summary`**. Full spec, lessons learned, and locked component designs: **[`docs/specs/AVATAR_FULL_V5.md`](docs/specs/AVATAR_FULL_V5.md)**.
 
-### Architecture
-Hybrid orchestration. The **Claude Code session** orchestrates by interleaving
-Higgsfield MCP `generate_video` calls (Seedance 2.0, `medias=[start_image,
-audio]`) with invocations of `video/scripts/render-avatar-full-v5.ts
---phase=<name>`. State flows through `workdir/v5-state.json` (typed in
-`video/lib/v5-state.ts`).
+### Non-negotiable v5.0 invariants (do not drift; spec wins on conflict)
 
-There is no production Node SeedanceClient in v5.0 — MCP is the transport.
-The `SeedanceClient` interface exists at `video/lib/seedance/SeedanceClient.ts`
-as the swap point for v5.x (`HttpSeedanceClient` or `BytePlusClient`).
+- **`normalize-clips.ts` is MANDATORY** between `--phase=face-metrics` and `--phase=manifest`. Architectural mitigation for [YAR-137](https://linear.app/yarono/issue/YAR-137) Seedance fidelity drift — without it, opening face position/size varies ±150 px across renders from the same Soul still. Audio passthrough preserved via `-c:a copy`.
+- **`SMTHookOverlay` is canonical** at `video/src/templates/shared/SMTHookOverlay.tsx` — rotated `-2°`, edge bleed `left/right: -100 px`, lower-third (`top: 68%`), 1.0 s hard cut in/out on clip 1 only. Visual must match the `generate-hook-card.ts` SVG. Do NOT build a new hook overlay; do NOT remove rotation or bleed.
+- **`AvatarV5Captions` uses Whisper word-level timestamps from the SEEDANCE MP4 audio, NOT the original ElevenLabs MP3.** Phrase grouping at `video/lib/phrase-grouper.ts` (MAX_WORDS=4, GAP_THRESHOLD=0.3s). Style is white Inter Bold 52 px UPPERCASE with **minimal** shadow `0 2px 2px rgba(0,0,0,0.6)` for legibility (not zero shadow, not chunky decorative shadow). Mount inside each clip's `<Sequence>` so Remotion handles the global time offset.
+- **Embedded-audio passthrough via `OffthreadVideo`** — no `volume={0}`, no separate `<Audio>` track, ever. Audio bridge between clips is a 4-frame `<Sequence>` overlap, NOT an audio re-overlay.
+- **Whisper-verify every clip** post-render against the locked script. WER < 0.15 + speech_coverage ≥ 0.5. Retry escalation: std → fast → surface-to-human. Never silently accept a failed clip.
+- **Motion blur defaults to disabled.** Normalization makes per-cut deltas ≤ 2 px; the 40 px threshold no longer fires. Per-cut re-enable available via `transitions_manifest.transitions[i].needs_motion_blur=true` after eye-check.
+- **Cost ceiling 700 cr (~$9.10)** per piece. Actual observed: 81 cr / 9 s std clip at 1080p; 7-clip Avatar Full ≈ 531 cr ($6.90) with zero retries. Orchestrator's `--phase=record` auto-aborts at >700.
+- **DB-flip-on-approval.** `--phase=upload` writes the final MP4 to Supabase but does NOT touch `content_queue.render_profile_id` or `metadata.video_url`. Those flip only after human approval of the final render (manually or via a future approval UI).
 
-### Phases (`--phase=…`)
-| Phase | Owner | Purpose |
-|---|---|---|
-| `init` | CLI | Load `content_queue` row, normalize `avatar_config.clips`, write initial state |
-| `tts` | CLI | Per-clip ElevenLabs MP3 → Supabase `post-images/avatar-full-v5/audio/` |
-| *(MCP)* | Session | `generate_video` per clip with motion-prompt + start_image + audio MP3 URL |
-| `record` | CLI | Capture Seedance result fields. **Aborts at >700 Higgsfield credits.** |
-| `verify` | CLI | Whisper WER + speech-coverage gate. Exit codes: 0=PASS, 2=retry-fast, 3=surface-to-human |
-| `face-metrics` | CLI | First+last frames → mediapipe sidecar → eye_y/face_x per endpoint |
-| **`normalize-clips`** | **CLI** | **REQUIRED — `npx tsx scripts/normalize-clips.ts <workdir>`. Per-clip scale+crop to uniform face_h + eye_y. Audio passthrough preserved. Architectural mitigation for YAR-137 Seedance fidelity drift.** Re-run `--phase=face-metrics` after this to refresh measurements on the normalized clips. |
-| `manifest` | CLI | Transitions manifest (motion-blur gating + crop offsets) |
-| `compose` | CLI | Remotion `AvatarV5Composition` → `workdir/final.mp4` |
-| `upload` | CLI | Final MP4 → `post-images/avatar-full-v5/<content_id>/<run-ts>/final.mp4` |
-| `qa` | CLI | Shell out to `video/qa/run.ts` with `avatar-v1` profile (informational only) |
-| `summary` | CLI | Human-review block: per-clip WER, per-cut bridge timestamps, motion-blur cuts, total cost, Phase 9 fallback hint |
+### Open follow-ups (do NOT block on these — v5.0 ships without them)
 
-### How To Invoke
-
-In a Claude Code session that has the Higgsfield MCP loaded:
-
-```
-cd video/
-WORKDIR=$(mktemp -d /tmp/v5-XXXXX)
-npx tsx scripts/render-avatar-full-v5.ts --phase=init    --workdir=$WORKDIR --content-id=<uuid>
-npx tsx scripts/render-avatar-full-v5.ts --phase=tts     --workdir=$WORKDIR
-# For each clip:
-#   Claude calls mcp__78d93fcf-…__generate_video with seedance_2_0 + medias[start_image, audio_url]
-#   then `--phase=record --clip-id=… --job-id=… --video-url=… --cost-credits=… --mode=std`
-#   then `--phase=verify --clip-id=…`  (retry on exit 2; surface on exit 3)
-npx tsx scripts/render-avatar-full-v5.ts --phase=face-metrics --workdir=$WORKDIR
-# REQUIRED — post-process normalization (YAR-137 mitigation). Scales+crops
-# each clip to uniform face_h + eye_y; audio passthrough preserved. See
-# docs/specs/AVATAR_FULL_V5.md "Post-process normalization".
-npx tsx scripts/normalize-clips.ts $WORKDIR
-npx tsx scripts/render-avatar-full-v5.ts --phase=face-metrics --workdir=$WORKDIR    # re-measure on normalized
-npx tsx scripts/render-avatar-full-v5.ts --phase=manifest --workdir=$WORKDIR
-npx tsx scripts/render-avatar-full-v5.ts --phase=compose  --workdir=$WORKDIR
-npx tsx scripts/render-avatar-full-v5.ts --phase=upload   --workdir=$WORKDIR
-npx tsx scripts/render-avatar-full-v5.ts --phase=qa       --workdir=$WORKDIR
-npx tsx scripts/render-avatar-full-v5.ts --phase=summary  --workdir=$WORKDIR
-```
-
-### Cost ceilings
-- **Target:** under $8 / ~580 Higgsfield credits (7-clip deepfakes piece — observed actual: 81cr/clip at 1080p std).
-- **Hard ceiling:** 600 credits. Orchestrator auto-aborts and surfaces. Revisable per-piece.
-- Whisper + ffmpeg + mediapipe + Supabase + Sonnet QA add ~$0.65.
-
-### Pre-flight
-1. Higgsfield MCP loaded (verify with `models_explore`)
-2. `ELEVENLABS_API_KEY`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` set (loaded from `<SMT-root>/.env`)
-3. Python venv ready: `cd bin/face-metrics && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
-4. `ffmpeg` / `ffprobe` on PATH
-
-### Validation
-`video/scripts/validate-avatar-v5-passthrough.ts` renders a single existing
-Seedance MP4 through `AvatarV5Composition` and Whisper-compares input/output.
-Used to verify **YAR-129 Finding 4 (embedded audio passes through cleanly)**
-before spending Higgsfield credits. Costs ~$0.002 (Whisper only).
-
-### Per-bridge ear-check (Phase 9)
-`--phase=summary` lists each cut individually with its timestamp so a reviewer
-can ear-check each bridge moment specifically:
-```
-SCENE_01 → SCENE_02  at t=8.900s  [BRIDGE]  + motion blur
-SCENE_02 → SCENE_03  at t=16.733s  [BRIDGE]
-```
-If any bridge sounds rough: edit `workdir/v5-state.json`, set
-`transitions_manifest.transitions[i].bridge_enabled=false`, rerun compose +
-upload + summary. Per-cut fallback to hard cut, not all-or-nothing.
-
-### What v5.0 does NOT do
-- Flip `content_queue.status` — final video surfaces to a human-review queue.
-- Touch the legacy HeyGen `generate-avatar-video.ts` — retired in a separate PR after v5 ships one approved piece.
-- Implement punch-in (115% emphasis-line scale) — deferred to v5.1. See `docs/specs/AVATAR_FULL_V5.md` "Follow-ups".
-- Implement the register system schema extension (YAR-129 Gap 2) — deferred to v5.2.
-- Run unattended from GitHub Actions — needs HTTP transport (YAR-129 cost-architecture spike) first.
+- [YAR-130](https://linear.app/yarono/issue/YAR-130) — Lip-sync analysis spike (MFCC + mouth ROI cross-correlation). `lip_sync` dimension is UNMEASURED in avatar-v1 QA today.
+- [YAR-136](https://linear.app/yarono/issue/YAR-136) — Wardrobe rotation across the 11 locked Face of SMT looks. Required before the next Avatar Full piece (current pipeline reuses Look #1).
+- [YAR-137](https://linear.app/yarono/issue/YAR-137) — Seedance fidelity (resolved via normalization for v5.0; open follow-ups: extend `motion-prompt-builder` with distance-lock language; evaluate Kling 3.0 / BytePlus alternatives).

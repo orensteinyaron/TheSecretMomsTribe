@@ -1,12 +1,45 @@
 # Avatar Full v5 — Seedance pipeline
 
-**Status:** v5.0 in build. Replaces the legacy HeyGen-based Avatar Full pipeline (`video/scripts/generate-avatar-video.ts`). First acceptance render: `content_queue.id = aabf7fd2-f66a-4885-9675-19ab74df4acd` ("AI deepfakes are already in your kid's school. Most parents have no idea.").
+**Status: v5.0 SHIPPED 2026-05-19.** First approved Avatar Full render: `content_queue.aabf7fd2-f66a-4885-9675-19ab74df4acd` ("AI deepfakes are already in your kid's school. Most parents have no idea.") at [post-images/avatar-full-v5/aabf7fd2-…/2026-05-19T16-01-59-299Z/final.mp4](https://fvxaykkmzsbrggjgdfjj.supabase.co/storage/v1/object/public/post-images/avatar-full-v5/aabf7fd2-f66a-4885-9675-19ab74df4acd/2026-05-19T16-01-59-299Z/final.mp4). Replaces the legacy HeyGen-based Avatar Full pipeline (`video/scripts/generate-avatar-video.ts`, slated for retirement in a separate cleanup PR).
 
-**Build plan:** [`docs/superpowers/plans/2026-05-19-avatar-full-v5-seedance-pipeline.md`](../superpowers/plans/2026-05-19-avatar-full-v5-seedance-pipeline.md)
+This document is the **canonical technical spec** for the Avatar Full v5 pipeline. Every Avatar Full render from this point forward must conform to the rules below. If the rendered output ever diverges from what this doc describes, the bug is in the renderer, not the doc.
+
+**Build plan:** [`docs/superpowers/plans/2026-05-19-avatar-full-v5-seedance-pipeline.md`](../superpowers/plans/2026-05-19-avatar-full-v5-seedance-pipeline.md) (acceptance criteria marked DONE).
 
 **Authoritative inputs:**
-- Linear `YAR-129` session-learnings comment (5 findings from 2026-05-18 proof loop)
-- YAR-129 issue body (register system, `avatar_config` schema gaps — Gap 2 deferred from v5.0)
+- Linear [YAR-129](https://linear.app/yarono/issue/YAR-129) session-learnings comment (5 findings from 2026-05-18 proof loop)
+- Linear [YAR-137](https://linear.app/yarono/issue/YAR-137) (Seedance fidelity drift + post-process normalization mitigation, 2026-05-19)
+- Phase 9 acceptance-render session, 2026-05-19 (six iterations + final ship; ~$6.91 total Higgsfield + Whisper spend)
+
+---
+
+## Lessons learned (May 18 + May 19 2026 sessions)
+
+The pipeline below is the consolidation of two working sessions that surfaced and resolved 12+ defects against Seedance, Remotion, and the v3-era Avatar Full implementation. Read this section first — it's the "why" behind every rule downstream.
+
+### From 2026-05-18 (manual proof loop on the deepfakes piece — see YAR-129 session-learnings)
+
+1. **Chain pattern is architecturally incompatible with Seedance audio role.** Using a prior clip's last frame as the next clip's `start_image` (with audio supplied) caused Seedance to hallucinate audio at a ~0/3 honor rate (vs ~5/7 for Soul-canonical reference). Position continuity is now solved at composition time (normalization + hard cuts), NOT at generation time. **Never re-attempt the chain pattern.**
+2. **Framing-lock language is required in every motion prompt.** Without it, Seedance drifts camera framing across clips. `motion-prompt-builder.ts` always emits: "Medium close-up framing held throughout … Camera position is locked, no zoom in or out, no pan." Mandatory, not optional.
+3. **Use bounded-motion language, NOT pose-lock.** "Subtle natural motion within a small envelope, not large posture shifts" reads as natural. "Pose is locked" or "torso position is locked" reads as frozen/AI. Tests in `motion-prompt-builder.test.ts` assert the forbidden language never appears.
+4. **Remotion is video-only — embedded-audio passthrough, no `<Audio>` re-overlay.** v1/v2/v3 muted `OffthreadVideo` (`volume={0}`) and overlaid the original ElevenLabs MP3 via `<Audio>`. Result: lips tracked Seedance's internal audio, ears heard the offset MP3, drift on every clip. Composition layer keeps Seedance's embedded audio canonical.
+5. **Seedance audio role reliability is non-deterministic.** Same input can hallucinate. Mandatory: **post-render Whisper verify + std→fast→surface retry escalation per clip.** Threshold `WER < 0.15` AND `speech_coverage ≥ 0.5`. The verifier lives at `video/lib/whisper-verifier.ts`.
+
+### From 2026-05-19 (Phase 9 acceptance render — see YAR-137 + commit log)
+
+6. **Post-process normalization is mandatory.** Seedance produces ±150 px variation in opening face position/size from the same Soul still + same prompt (YAR-137). `normalize-clips.ts` runs AFTER `--phase=face-metrics` and BEFORE `--phase=manifest`. It scales+crops each clip to a uniform face_h + eye_y target; audio passthrough preserved via `-c:a copy`. Reduces face_h range ~127 px → ~16 px, eye_y range ~115 px → ~2 px. This is the architectural fix to fidelity drift — prompt language alone is a partial mitigation, not a substitute.
+7. **Hook overlay = locked SMTHookOverlay design with rotation + edge bleed.** The canonical visual is the **hook-card SVG** in `generate-hook-card.ts` (rotated purple band with off-frame bleed), NOT the flat edge-to-edge SMTHookOverlay variant from v3. Required: `transform: rotate(-2deg)`, `left/right: -100px` for edge bleed (so rotation corners don't expose canvas), `top: 68%` for lower-third positioning, **1.0 s hard cut in/out** on clip 1 only. Helvetica Neue bold 124 px UPPERCASE for primary, 44 px for secondary. Lives at `video/src/templates/shared/SMTHookOverlay.tsx`.
+8. **Phrase captions are part of every render.** Whisper word-level timestamps from the **Seedance MP4 embedded audio** (NOT the original ElevenLabs MP3 — Finding 4 makes that the only correct source). Grouped via `video/lib/phrase-grouper.ts` (MAX_WORDS=4, GAP_THRESHOLD=0.3s — pure port of v3's `buildPhrasesForClip`). Rendered via `video/src/templates/avatar-v5/AvatarV5Captions.tsx`: white Inter Bold 52 px UPPERCASE, `paddingBottom: 140`, **minimal drop shadow `0 2px 2px rgba(0,0,0,0.6)`** for legibility (Yaron's "no shadow" instruction meant no decorative shadow, NOT zero shadow on white-text-over-Rachel's-hair).
+9. **Tail trim — check last 0.5s of every clip for drift artifacts before compose.** Seedance occasionally drifts the subject toward `end_image` in the final ~0.2–0.4 s. Use ffmpeg `-c:v libx264 -c:a copy` (re-encodes video, preserves audio bit-for-bit) to trim to `last_whisper_word.end + 0.1 s`. Stream copy WILL drop the video stream if no keyframe is near the trim boundary — always re-encode the video on a trim.
+10. **Motion blur defaults to disabled when normalization is applied.** The 40 px eye-line threshold was tuned for raw Seedance variance; post-process normalization makes per-cut deltas ≤ 2 px, so blur fires on cuts that visually don't need it. v5 defaults `needs_motion_blur: false` on every cut. Per-cut override remains available via `transitions_manifest.transitions[i].needs_motion_blur=true`.
+11. **Audio bridge = 4-frame Sequence overlap.** Clip N+1's `<Sequence from=…>` starts 4 frames before clip N's nominal end (`AUDIO_BRIDGE_FRAMES = 4`). Both `OffthreadVideo` elements play for those 4 frames; audio mixes briefly (~133 ms) at the cut. This is the bridge — NOT a separate `<Audio>` track (which would violate Finding 4). Per-cut `bridge_enabled: false` flag exists for boundaries that sound rough.
+12. **Cost reality.** 9 s std clip at 1080p ≈ **81 Higgsfield credits** (~$1.05), not the 50 cr we projected. 7-clip Avatar Full ≈ **531 cr ($6.90)** at std baseline with zero retries. Ceiling sized at **700 cr (~$9.10)** allowing one fast-retry margin per piece. Re-encode + Whisper passes add ~$0.013. Total per-piece envelope ≈ $7.
+
+### Process learnings — propagate into every future Avatar Full design
+
+13. **Grep for prior art before building any new component.** Two defects in the Phase 9 session (SMTHookOverlay rotation+bleed and the missing phrase captions) were the same shape: components designed from partial spec readings rather than auditing what v3 actually rendered. Future Avatar component design must include a "grep v3 for existing component" step.
+14. **Cost projections need single-clip empirical data before sizing budgets.** The 50→81 cr/clip surprise made the 400 cr ceiling untenable mid-render. Future renders: probe one clip cost before sizing the full budget.
+15. **Architecture beats prompt engineering for fidelity.** YAR-137 distance-lock prompt language partially worked but didn't fully constrain. The scale+crop post-process closed the gap entirely. When in doubt between "tune the prompt" and "fix it in composition," prefer composition.
 
 ---
 
@@ -135,6 +168,110 @@ Motion blur effectively becomes opt-in (per-cut override in `transitions_manifes
 
 - Time-varying crop (face tracking per frame). Would correct intra-clip drift too. Filed for v5.x evaluation.
 - Replacing Seedance with a model that has explicit subject-distance control. Tracked on YAR-137.
+
+---
+
+## Hook overlay (SMTHookOverlay — locked design)
+
+**Component:** `video/src/templates/shared/SMTHookOverlay.tsx`
+
+Aligned with the canonical `generate-hook-card.ts` SVG (Option A — rotated purple band with off-frame bleed). The v3-era React component dropped the rotation and bleed; v5 restores them so the video overlay matches the static thumbnail.
+
+**Locked properties (do not drift — change the spec, the component, AND `generate-hook-card.ts` together or none):**
+
+| Property | Value |
+|---|---|
+| Position | `top: 68%` (block center ≈ 78 % from top, lower-third) |
+| Width | Edge bleed: `left: -100 px, right: -100 px` (block is 1280 px wide on 1080 px frame, so rotation corners never expose canvas) |
+| Rotation | `transform: rotate(-2deg)` (matches hook-card SVG `rotate(-2 540 1500)`) |
+| Background | `#63246a` (`BRAND_PURPLE`) |
+| Primary text | Helvetica Neue, 900 weight, 124 px, letter-spacing 4, UPPERCASE, `#fcfcfa` |
+| Secondary text (optional) | Helvetica Neue, 600 weight, 44 px, letter-spacing 1, UPPERCASE, `#fcfcfa`, opacity 0.95 |
+| Duration | 1.0 s (`durationSec` default) — hard cut in, hard cut out, NO fade |
+| Mount point | Clip 1 only, wrapped in a 30-frame (`AVATAR_V5_FPS × 1.0`) `<Sequence from={0}>` in `AvatarV5Composition` |
+
+**Text split for the deepfakes piece (canonical example):** `primary="DEEPFAKES"`, `secondary="ARE ALREADY IN YOUR KID'S SCHOOL"`. Driven by `avatar_config.hook_primary` + `avatar_config.hook_secondary`; falls back to `defaultHookSplit(hook_text)` in `v5-state.ts:initState` which splits on the first ". " of the full hook sentence.
+
+**ContentGen contract (future):** when ContentGen learns to emit Avatar Full pieces directly, it must emit `avatar_config.hook_primary` and `avatar_config.hook_secondary` explicitly (don't rely on the heuristic split — write the headline+qualifier intent).
+
+---
+
+## Phrase captions (AvatarV5Captions + phrase-grouper)
+
+**Component:** `video/src/templates/avatar-v5/AvatarV5Captions.tsx`
+**Grouper:** `video/lib/phrase-grouper.ts` (pure function, 10 hermetic tests in `__tests__/`)
+**Source of timestamps:** Whisper word-level output from the SEEDANCE MP4 audio. **Never use the original ElevenLabs MP3** — caption timing must track what the viewer hears, and Seedance's audio role re-encoding can introduce small offsets relative to the source MP3 (Finding 4).
+
+**Phrase grouping rules (ported verbatim from v3 `buildPhrasesForClip`):**
+- `MAX_WORDS_PER_PHRASE = 4` — hard cap; split earlier never longer
+- `PAUSE_SPLIT_THRESHOLD_S = 0.3` — strict greater-than; if the gap between two consecutive Whisper words exceeds 0.3 s, end the current phrase before the next word
+- Output: array of `{ text, start_s, end_s }` with clip-local times
+
+**Caption rendering rules (locked):**
+
+| Property | Value |
+|---|---|
+| Color | `#FFFFFF` |
+| Font | `"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif` (CSS fallback chain — do NOT use `@remotion/google-fonts/Inter` loadFont, it drags a nested Remotion into the CLI graph and triggers a version-mismatch fatal at script startup) |
+| Weight | 700 |
+| Size | 52 px |
+| Case | UPPERCASE |
+| Letter-spacing | 2 px |
+| Max-width | 950 px (forces wrap before edges; lineHeight 1.25) |
+| Position | `paddingBottom: 140` from bottom edge — above the brand-watermark area |
+| Shadow | `0 2px 2px rgba(0,0,0,0.6)` — **minimal** drop shadow for legibility on Rachel's hair or light kitchen backgrounds. Yaron's "no shadow" instruction meant "no decorative chunky shadow", NOT zero shadow. Calibrated 2026-05-19. |
+| Per-phrase fade | 3 frames in + 3 frames out |
+| Mount point | Inside each clip's `<Sequence>` (siblings to `AvatarV5Clip`), so Remotion's Sequence offset handles the global-time math automatically |
+
+**State persistence:** `--phase=verify` writes `clip.whisper_words: WhisperWord[]` and `clip.phrases: Phrase[]` to `v5-state.json`. Compose reads from `clip.phrases` and passes through to the Remotion `inputProps`.
+
+---
+
+## Audio bridge between clips (no `<Audio>` re-overlay)
+
+**Implementation:** `video/src/templates/avatar-v5/AvatarV5Composition.tsx:layoutClips`
+
+`AUDIO_BRIDGE_FRAMES = 4`. For each clip `i ≥ 1`, the clip's `<Sequence from=…>` starts 4 frames before clip `i-1`'s nominal end (unless `transitions_manifest.transitions[i-1].bridge_enabled === false`). Both `OffthreadVideo` elements play simultaneously for the 4-frame overlap; audio mixes briefly (~133 ms at 30 fps).
+
+This is the bridge — NOT a separate `<Audio>` track. Per Finding 4, any second audio source would violate the embedded-audio-passthrough invariant. The Sequence-overlap mechanism keeps both audio tracks coming from `OffthreadVideo`.
+
+**Per-cut override:** set `transitions_manifest.transitions[i].bridge_enabled = false` to make that specific cut a strict hard boundary (no overlap, no mix). Useful when a bridge sounds rough after eye-check.
+
+**Default:** all cuts have `bridge_enabled = true` (default in manifest builder).
+
+---
+
+## Tail trim — check last 0.5 s of every clip pre-compose
+
+Seedance occasionally drifts the subject toward an implicit `end_image` in the final ~0.2–0.4 s of a clip (the "settling-toward-end" artifact). For every PASS clip, eye-check the last frame against the start frame; if visible drift, trim.
+
+**Trim command (canonical):**
+```bash
+ffmpeg -y -i input.mp4 \
+  -t <target_end_seconds> \
+  -c:v libx264 -preset slow -crf 18 \
+  -c:a copy \
+  -movflags +faststart \
+  output.mp4
+```
+
+`-c:v libx264` re-encodes the video (necessary — stream-copy `-c:v copy` will drop the video stream if no keyframe is near the trim boundary, observed during clip_05b trim on 2026-05-19). `-c:a copy` preserves the Whisper-verified audio bit-for-bit.
+
+**Trim ceiling:** `target_end = last_whisper_word.end + 0.1 s` (100 ms safety margin). Going further risks cutting into the spoken line — verify with a follow-up Whisper transcribe that the final word is intact before proceeding.
+
+**Tooling:** the deepfakes clip_05b trim was done by hand in workdir during Phase 9. A reusable `--phase=tail-trim` could be added in v5.x — currently inline / manual.
+
+---
+
+## Motion blur policy
+
+**v5.0 default: motion blur DISABLED on all cuts.**
+
+Rationale: `normalize-clips.ts` makes per-cut eye-line deltas ≤ 2 px and face-center deltas ≤ 2 %. The original 40 px / 8 % thresholds in `transitions-manifest.ts` were tuned for raw Seedance variance; against normalized clips, the thresholds never fire AND the blur isn't visually needed (hard cuts read clean when face position is uniform).
+
+The manifest still computes `needs_motion_blur` from the (now-small) deltas, but the orchestrator overrides ALL transitions to `needs_motion_blur: false` by default for the compose phase.
+
+**Per-cut re-enable:** if eye-check surfaces a single rough cut, set `transitions_manifest.transitions[i].needs_motion_blur = true` in `v5-state.json` before re-composing. `AvatarV5Clip` applies a 3-frame CSS `blur(8px)` ramp on the flagged cut's outgoing/incoming frames.
 
 ### What the SeedanceClient interface buys us
 `video/lib/seedance/SeedanceClient.ts` defines the boundary:
