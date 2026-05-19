@@ -5,6 +5,13 @@ import { KaraokeSlideshow } from "./templates/v2/KaraokeSlideshow";
 import { SyncTest } from "./templates/SyncTest";
 import { AvatarComposition } from "./templates/avatar/AvatarComposition";
 import { type AvatarCompositionProps, AVATAR_FPS } from "./templates/avatar/types";
+import { AvatarV5Composition, layoutClips } from "./templates/avatar-v5/AvatarV5Composition";
+import {
+  AVATAR_V5_FPS,
+  AVATAR_V5_WIDTH,
+  AVATAR_V5_HEIGHT,
+  type AvatarV5Props,
+} from "./templates/avatar-v5/types";
 
 const FPS = 30;
 
@@ -110,6 +117,25 @@ export const RemotionRoot: React.FC = () => {
           audioDur: 5,
         }}
       />
+      {(() => {
+        const v5Props: AvatarV5Props = {
+          clips: (inputProps.clips as AvatarV5Props["clips"]) ?? [],
+          transitions: (inputProps.transitions as AvatarV5Props["transitions"]) ?? [],
+          hook_text: (inputProps.hook_text as string) ?? "",
+        };
+        const total = Math.max(1, layoutClips(v5Props, AVATAR_V5_FPS).total_duration_in_frames);
+        return (
+          <Composition
+            id="AvatarV5"
+            component={AvatarV5Composition as any}
+            durationInFrames={total}
+            fps={AVATAR_V5_FPS}
+            width={AVATAR_V5_WIDTH}
+            height={AVATAR_V5_HEIGHT}
+            defaultProps={v5Props}
+          />
+        );
+      })()}
     </>
   );
 };
