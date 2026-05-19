@@ -18,7 +18,7 @@ export { assembleLookPrompt } from './look-prompt.js';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /** Higgsfield Soul 2.0 character ID for Rachel. */
-const RACHEL_SOUL_ID = '34a349a6-d6d9-423f-8c80-e4b4c8d6e770';
+export const RACHEL_SOUL_ID = '34a349a6-d6d9-423f-8c80-e4b4c8d6e770';
 
 // ── Transport B interface ─────────────────────────────────────────────────────
 

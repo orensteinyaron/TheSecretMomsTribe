@@ -30,7 +30,7 @@ export {
 // Lifecycle flows
 export { approveLook } from './approve-look.js';
 export { retireLook } from './retire-look.js';
-export { createNewLook } from './create-new-look.js';
+export { createNewLook, RACHEL_SOUL_ID } from './create-new-look.js';
 export type { GenerateImagesFn } from './create-new-look.js';
 
 // Prompt assembly (exposed for testing + potential reuse)
