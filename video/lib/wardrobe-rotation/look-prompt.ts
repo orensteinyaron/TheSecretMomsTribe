@@ -21,7 +21,7 @@ export const PROMPT_TAIL =
  * - "hair" alone is fine (hair accessory); "hair color/brown/wavy" is flagged.
  */
 export const FORBIDDEN_RE =
-  /(skin (tone|texture)|freckle|scar near|olive skin|brown eyes|hair (color|brown|wavy)|teen-?(ager)?|young (woman|adult)|female|age (3|4)\d|36-year|crow.{0,5}feet|visible pore|dark circle)/i;
+  /(skin (tone|texture)|complexion|sun-?kissed|\btan(ned)?\b|freckle|scar near|olive skin|brown eyes|hair (color|brown|wavy)|teen-?(ager)?|young (woman|adult)|female|age (3|4)\d|36-year|crow.{0,5}feet|visible pore|dark circle)/i;
 
 /**
  * Assembles the Soul 2.0 generation prompt from wardrobe + setting.
