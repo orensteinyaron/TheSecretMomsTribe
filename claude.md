@@ -81,6 +81,8 @@ the existing `node agents/orchestrator.js` invocation continues to work.
 
 ## Claude Code Skills (lives under `/skills/`)
 
+Distinct from Agent Skills (above): those load into agents at runtime via skill_loader.js; these are Claude Code session skills under /skills/, invoked conversationally.
+
 These are invoked by Claude in a conversational/render context (not by the
 agent pipeline) — each is a self-contained Claude Code skill with frontmatter
 that auto-triggers on matching phrases.
