@@ -10,7 +10,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { RachelLook, RachelLookStatus, RecentPick } from './types.js';
-import { nextLookIdFrom } from './generate-look-id.js';
+import { nextIdFrom } from './flows/generate-id.js';
 
 // ── Client ────────────────────────────────────────────────────────────────────
 
@@ -165,5 +165,5 @@ export async function generateNextLookId(): Promise<string> {
   if (error) throw new Error(`[generateNextLookId] ${error.message}`);
 
   const currentMax = data ? (data as { look_id: string }).look_id : null;
-  return nextLookIdFrom(currentMax);
+  return nextIdFrom('look', currentMax);
 }
