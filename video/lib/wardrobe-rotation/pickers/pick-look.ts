@@ -1,10 +1,10 @@
-import type { RecentPick } from './types.ts';
+import type { RecentLookPick } from '../types.js';
 
-export const WARDROBE_COOLDOWN = 2;
+export const LOOK_COOLDOWN = 3;
 
-export function pickNextLook(activeLooks: string[], recentlyUsed: RecentPick[]): string {
+export function pickLook(activeLooks: string[], recentlyUsed: RecentLookPick[]): string {
   if (activeLooks.length === 0) {
-    throw new Error('pickNextLook: no active looks available');
+    throw new Error('pickLook: no active looks available');
   }
   const sortedActive = [...activeLooks].sort();
   if (recentlyUsed.length === 0) return sortedActive[0];
@@ -14,7 +14,7 @@ export function pickNextLook(activeLooks: string[], recentlyUsed: RecentPick[]):
   );
   const blocked = new Set<string>();
   for (const p of sortedRecent) {
-    if (blocked.size >= WARDROBE_COOLDOWN) break;
+    if (blocked.size >= LOOK_COOLDOWN) break;
     blocked.add(p.look_id);
   }
   const candidates = sortedActive.filter((id) => !blocked.has(id));
