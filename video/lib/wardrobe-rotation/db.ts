@@ -1,29 +1,33 @@
 /**
  * Supabase DB layer for the `rachel_looks` table.
  *
- * Matches the agents/lib/supabase.js client-construction pattern:
- * - Single eager createClient at module scope
- * - Reads SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY from env, exits on missing
+ * Uses a lazy-initialized client (getSupabase()) so that importing this module
+ * does not call process.exit — env vars are validated on first use, throwing
+ * instead, which host processes and test runners can recover from.
  * - Errors surface as thrown exceptions (no error-tuple returns)
  */
 
 import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { RachelLook, RachelLookStatus, RecentPick } from './types.js';
 import { nextLookIdFrom } from './generate-look-id.js';
 
 // ── Client ────────────────────────────────────────────────────────────────────
 
-const url = process.env.SUPABASE_URL;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let _supabase: SupabaseClient | null = null;
 
-if (!url || !key) {
-  console.error('[wardrobe-rotation/db] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
-  process.exit(1);
+function getSupabase(): SupabaseClient {
+  if (_supabase) return _supabase;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error(
+      '[wardrobe-rotation/db] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars',
+    );
+  }
+  _supabase = createClient(url, key, { auth: { persistSession: false } });
+  return _supabase;
 }
-
-const supabase = createClient(url, key, {
-  auth: { persistSession: false },
-});
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
@@ -31,7 +35,7 @@ const supabase = createClient(url, key, {
  * Returns all active looks ordered by look_id.
  */
 export async function listActiveLooks(): Promise<RachelLook[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('rachel_looks')
     .select('*')
     .eq('status', 'active')
@@ -45,7 +49,7 @@ export async function listActiveLooks(): Promise<RachelLook[]> {
  * Returns all looks, optionally filtered by status, ordered by look_id.
  */
 export async function listLooks(status?: RachelLookStatus): Promise<RachelLook[]> {
-  let query = supabase.from('rachel_looks').select('*').order('look_id');
+  let query = getSupabase().from('rachel_looks').select('*').order('look_id');
 
   if (status !== undefined) {
     query = query.eq('status', status);
@@ -60,7 +64,7 @@ export async function listLooks(status?: RachelLookStatus): Promise<RachelLook[]
  * Returns a single look by look_id, or null if not found.
  */
 export async function getLook(look_id: string): Promise<RachelLook | null> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('rachel_looks')
     .select('*')
     .eq('look_id', look_id)
@@ -79,7 +83,7 @@ export async function getLook(look_id: string): Promise<RachelLook | null> {
  * some rows lack a `look_id`.
  */
 export async function getRecentPicks(limit: number): Promise<RecentPick[]> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('content_queue')
     .select('avatar_config, updated_at')
     .in('render_profile_id', ['avatar-v1', 'avatar-full-v5'])
@@ -102,12 +106,14 @@ export async function getRecentPicks(limit: number): Promise<RecentPick[]> {
 
 /**
  * Inserts a new look and returns the inserted row.
+ * approved_at/retired_at are set by updateLookStatus during state transitions,
+ * never on insert.
  * Lets DB defaults handle created_at.
  */
 export async function insertLook(
   look: Omit<RachelLook, 'created_at' | 'approved_at' | 'retired_at'>,
 ): Promise<RachelLook> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('rachel_looks')
     .insert(look)
     .select('*')
@@ -134,7 +140,7 @@ export async function updateLookStatus(
     patch.retired_at = new Date().toISOString();
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('rachel_looks')
     .update(patch)
     .eq('look_id', look_id)
@@ -149,7 +155,7 @@ export async function updateLookStatus(
  * Fetches the current MAX(look_id) and returns the next id via nextLookIdFrom().
  */
 export async function generateNextLookId(): Promise<string> {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('rachel_looks')
     .select('look_id')
     .order('look_id', { ascending: false })
