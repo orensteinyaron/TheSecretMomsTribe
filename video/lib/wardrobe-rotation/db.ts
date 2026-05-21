@@ -447,7 +447,13 @@ export async function getRecentLocationPicks(limit: number): Promise<RecentLocat
 
   if (candidateIds.length === 0) return [];
 
-  // Step 3: fetch tiers from rachel_locations for all candidate ids
+  // Step 3: fetch tiers from rachel_locations for all candidate ids.
+  // Note: NOT filtered by status — retired locations still need to count
+  // against the recency ratio (a primary used 3× last week then retired
+  // should still bias the next pick toward secondary). The invariant this
+  // depends on is that rows in rachel_locations are NEVER deleted; status
+  // transitions only. If a referential gap is detected (Step 5 warning),
+  // someone bypassed the retire flow and deleted a row directly.
   const { data: locationRows, error: locationError } = await getSupabase()
     .from('rachel_locations')
     .select('location_id, tier')
@@ -468,7 +474,17 @@ export async function getRecentLocationPicks(limit: number): Promise<RecentLocat
     if (typeof locationId !== 'string' || locationId.length === 0) continue;
 
     const tier = tierMap.get(locationId);
-    if (tier === undefined) continue; // location deleted or not in rachel_locations — skip defensively
+    if (tier === undefined) {
+      // True referential orphan — content_queue references a location_id that
+      // doesn't exist in rachel_locations at all. Locations should never be
+      // deleted (retire is a status change, see Step 3 comment). Log loudly
+      // but continue — better to under-count one pick than to throw the
+      // entire ratio computation.
+      console.warn(
+        `[getRecentLocationPicks] referential orphan: content_queue row references location_id '${locationId}' not found in rachel_locations. Skipping. Investigate — rows should never be deleted.`,
+      );
+      continue;
+    }
 
     picks.push({ location_id: locationId, tier, used_at: row.updated_at });
     if (picks.length >= limit) break;

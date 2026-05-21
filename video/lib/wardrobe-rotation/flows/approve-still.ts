@@ -15,14 +15,19 @@ import {
  * the other 5 are auto-retired here.
  *
  * Caveat: this is a multi-statement sequence, NOT a real DB transaction. If
- * a later statement fails, the earlier ones have already committed. Spec
- * accepts this risk for PR-A; document the ordering so it's debuggable.
+ * a later statement fails, the earlier ones have already committed.
  *
- * Statement order:
- *   1. Promote the still (still_id → active)
- *   2. Auto-promote parent look if pending
- *   3. Auto-promote parent location if pending
+ * Statement order (designed for idempotent retry):
+ *   1. Auto-promote parent look if pending
+ *   2. Auto-promote parent location if pending
+ *   3. Promote the still (pending → active)
  *   4. Retire sibling pending stills for the same (look_id, location_id) combo
+ *
+ * Why this order: if step 3 fails after 1+2 succeeded, the still is still
+ * pending; retrying approveStill(same id) repeats steps 1-2 as no-ops (parents
+ * already active) and completes step 3. If step 4 partially fails, the next
+ * retry re-lists pending siblings (now fewer) and retires them. No orphan
+ * states require manual SQL recovery.
  */
 export async function approveStill(still_id: string): Promise<RachelStill> {
   const still = await getStill(still_id);
@@ -35,20 +40,20 @@ export async function approveStill(still_id: string): Promise<RachelStill> {
     );
   }
 
-  // 1. Promote the still.
-  const approvedStill = await updateStillStatus(still_id, 'active');
-
-  // 2. If parent look is pending, auto-promote it.
+  // 1. If parent look is pending, auto-promote it. (Idempotent: skipped if already active.)
   const parentLook = await getLook(still.look_id);
   if (parentLook && parentLook.status === 'pending') {
     await updateLookStatus(still.look_id, 'active');
   }
 
-  // 3. If parent location is pending, auto-promote it.
+  // 2. If parent location is pending, auto-promote it. (Idempotent: skipped if already active.)
   const parentLocation = await getLocation(still.location_id);
   if (parentLocation && parentLocation.status === 'pending') {
     await updateLocationStatus(still.location_id, 'active');
   }
+
+  // 3. Promote the still itself.
+  const approvedStill = await updateStillStatus(still_id, 'active');
 
   // 4. Retire OTHER pending stills for the same (look_id, location_id) combo.
   const siblingPending = await listStills({
