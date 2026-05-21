@@ -91,7 +91,7 @@ that auto-triggers on matching phrases.
 |---|---|---|
 | `full-avatar-profile` | `skills/full-avatar-profile/SKILL.md` | Production pipeline for Avatar Full video format — script → Soul 2.0 stills → Seedance clips → stitch → QA |
 | `content-lifecycle` | `skills/content-lifecycle/SKILL.md` | Piece lifecycle management — backfills, lifecycle transitions, status conventions |
-| `avatar-full-wardrobe-rotation` | `skills/avatar-full-wardrobe-rotation/SKILL.md` | LRU wardrobe rotation for Rachel (cooldown=2) + create/approve/retire flows for new Soul 2.0 looks |
+| `avatar-full-wardrobe-rotation` | `skills/avatar-full-wardrobe-rotation/SKILL.md` | Two-axis rotation for Rachel: looks (cooldown=3) × locations (tier-aware 5/7 primary) → per-combination Soul stills, with canon-locked bootstrap + approve/retire flows |
 
 ---
 
