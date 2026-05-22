@@ -12,7 +12,6 @@ export type {
   RecentLookPick,
   RecentLocationPick,
   CanonLookBrief,
-  CanonLocationBrief,
 } from './types.js';
 
 // ── Canon dicts ──────────────────────────────────────────────────────────────
