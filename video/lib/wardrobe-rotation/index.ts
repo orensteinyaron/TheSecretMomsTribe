@@ -16,7 +16,6 @@ export type {
 
 // ── Canon dicts ──────────────────────────────────────────────────────────────
 export { CANON_LOOKS, CANON_LOOK_NUMBERS_DEFINED } from './canon/canon-looks.js';
-export { CANON_LOCATIONS, CANON_LOCATION_NUMBERS_DEFINED } from './canon/canon-locations.js';
 
 // ── Pickers (pure) ───────────────────────────────────────────────────────────
 export { pickLook, LOOK_COOLDOWN } from './pickers/pick-look.js';
