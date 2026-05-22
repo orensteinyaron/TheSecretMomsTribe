@@ -46,6 +46,8 @@ export { assembleLookPrompt, PROMPT_TAIL } from './prompt/look-prompt.js';
 export { FORBIDDEN_RE } from './prompt/forbidden-identity-regex.js';
 
 // ── DB layer ─────────────────────────────────────────────────────────────────
+// Location DB queries have moved to ../location/db.ts (YAR-136 PR-C C5).
+// They will be re-exported from the location barrel in C9.
 export {
   listActiveLooks,
   listLooks,
@@ -53,12 +55,6 @@ export {
   insertLook,
   updateLookStatus,
   generateNextLookId,
-  listActiveLocations,
-  listLocations,
-  getLocation,
-  insertLocation,
-  updateLocationStatus,
-  generateNextLocationId,
   listActiveStills,
   listStills,
   getStill,

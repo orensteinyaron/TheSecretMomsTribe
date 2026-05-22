@@ -1,8 +1,12 @@
 /**
- * Supabase DB layer for the three-table two-axis wardrobe-rotation schema:
- *   rachel_looks     — styling axis (wardrobe + hair + accessories)
- *   rachel_locations — setting axis (setting + lighting + framing + tier)
- *   rachel_stills    — per-combination Soul still cache (look × location)
+ * Supabase DB layer for the wardrobe-rotation schema (looks + stills).
+ *
+ *   rachel_looks  — styling axis (wardrobe + hair + accessories)
+ *   rachel_stills — per-combination Soul still cache (look × location)
+ *
+ * Location queries (rachel_locations) live in ../location/db.ts as of YAR-136
+ * PR-C — the location surface owns its own bootstrap-approve/anchored-still
+ * flows and earned a dedicated module.
  *
  * Uses a lazy-initialized client (getSupabase()) so that importing this module
  * does not call process.exit — env vars are validated on first use, throwing
@@ -12,7 +16,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
-  RachelLook, RachelLocation, RachelStill,
+  RachelLook, RachelStill,
   RachelLookStatus, LocationTier,
   RecentLookPick, RecentLocationPick,
 } from './types.js';
@@ -142,115 +146,6 @@ export async function generateNextLookId(): Promise<string> {
 
   const currentMax = data ? (data as { look_id: string }).look_id : null;
   return nextIdFrom('look', currentMax);
-}
-
-// ── Location queries ──────────────────────────────────────────────────────────
-
-/**
- * Returns all active locations ordered by location_id.
- */
-export async function listActiveLocations(): Promise<RachelLocation[]> {
-  const { data, error } = await getSupabase()
-    .from('rachel_locations')
-    .select('*')
-    .eq('status', 'active')
-    .order('location_id');
-
-  if (error) throw new Error(`[listActiveLocations] ${error.message}`);
-  return (data ?? []) as RachelLocation[];
-}
-
-/**
- * Returns all locations, optionally filtered by status, ordered by location_id.
- */
-export async function listLocations(status?: RachelLookStatus): Promise<RachelLocation[]> {
-  let query = getSupabase().from('rachel_locations').select('*').order('location_id');
-
-  if (status !== undefined) {
-    query = query.eq('status', status);
-  }
-
-  const { data, error } = await query;
-  if (error) throw new Error(`[listLocations] ${error.message}`);
-  return (data ?? []) as RachelLocation[];
-}
-
-/**
- * Returns a single location by location_id, or null if not found.
- */
-export async function getLocation(location_id: string): Promise<RachelLocation | null> {
-  const { data, error } = await getSupabase()
-    .from('rachel_locations')
-    .select('*')
-    .eq('location_id', location_id)
-    .maybeSingle();
-
-  if (error) throw new Error(`[getLocation] ${error.message}`);
-  return data as RachelLocation | null;
-}
-
-/**
- * Inserts a new location and returns the inserted row.
- * approved_at/retired_at are set by updateLocationStatus during state transitions,
- * never on insert.
- * Lets DB defaults handle created_at.
- */
-export async function insertLocation(
-  loc: Omit<RachelLocation, 'created_at' | 'approved_at' | 'retired_at'>,
-): Promise<RachelLocation> {
-  const { data, error } = await getSupabase()
-    .from('rachel_locations')
-    .insert(loc)
-    .select('*')
-    .single();
-
-  if (error) throw new Error(`[insertLocation] ${error.message}`);
-  return data as RachelLocation;
-}
-
-/**
- * Updates the status of a location, setting approved_at or retired_at as needed.
- * Timestamps are computed JS-side (Date.now()), which is acceptable for our
- * use case. Returns the updated row.
- */
-export async function updateLocationStatus(
-  location_id: string,
-  status: RachelLookStatus,
-): Promise<RachelLocation> {
-  const patch: Partial<RachelLocation> & { status: RachelLookStatus } = { status };
-
-  if (status === 'active') {
-    patch.approved_at = new Date().toISOString();
-  } else if (status === 'retired') {
-    patch.retired_at = new Date().toISOString();
-  }
-
-  const { data, error } = await getSupabase()
-    .from('rachel_locations')
-    .update(patch)
-    .eq('location_id', location_id)
-    .select('*')
-    .single();
-
-  if (error) throw new Error(`[updateLocationStatus] ${error.message}`);
-  return data as RachelLocation;
-}
-
-/**
- * Fetches the current MAX(location_id) and returns the next id via nextIdFrom().
- */
-export async function generateNextLocationId(): Promise<string> {
-  const { data, error } = await getSupabase()
-    .from('rachel_locations')
-    .select('location_id')
-    .order('location_id', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw new Error(`[generateNextLocationId] ${error.message}`);
-
-  const currentMax = data ? (data as { location_id: string }).location_id : null;
-  return nextIdFrom('location', currentMax);
 }
 
 // ── Still queries ─────────────────────────────────────────────────────────────
