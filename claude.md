@@ -79,6 +79,22 @@ the existing `node agents/orchestrator.js` invocation continues to work.
 
 ---
 
+## Claude Code Skills (lives under `/skills/`)
+
+Distinct from Agent Skills (above): those load into agents at runtime via skill_loader.js; these are Claude Code session skills under /skills/, invoked conversationally.
+
+These are invoked by Claude in a conversational/render context (not by the
+agent pipeline) — each is a self-contained Claude Code skill with frontmatter
+that auto-triggers on matching phrases.
+
+| Skill | Path | Purpose |
+|---|---|---|
+| `full-avatar-profile` | `skills/full-avatar-profile/SKILL.md` | Production pipeline for Avatar Full video format — script → Soul 2.0 stills → Seedance clips → stitch → QA |
+| `content-lifecycle` | `skills/content-lifecycle/SKILL.md` | Piece lifecycle management — backfills, lifecycle transitions, status conventions |
+| `avatar-full-wardrobe-rotation` | `skills/avatar-full-wardrobe-rotation/SKILL.md` | Two-axis rotation for Rachel: looks (cooldown=3) × locations (tier-aware 5/7 primary) → per-combination Soul stills, with canon-locked bootstrap + approve/retire flows |
+
+---
+
 ## Project Map
 | Area | Location |
 |---|---|
