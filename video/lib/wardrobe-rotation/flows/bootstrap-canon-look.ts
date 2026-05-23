@@ -51,9 +51,10 @@ export type GenerateImagesFn = (input: GenerateImagesInput) => Promise<Generated
 
 /**
  * Higgsfield Soul 2.0 character ID for Rachel (the Face of SMT).
- * Exported for callers constructing the DI callback.
+ * Canonical definition lives in video/lib/avatar-constants.ts; re-exported here
+ * to keep the wardrobe-rotation barrel's existing public API stable.
  */
-export const RACHEL_SOUL_ID = '34a349a6-d6d9-423f-8c80-e4b4c8d6e770';
+export { RACHEL_SOUL_ID } from '../../avatar-constants.js';
 
 /** Total candidates generated per bootstrap (2 calls: count=4 + count=2). */
 export const TOTAL_BOOTSTRAP_CANDIDATES = 6;
