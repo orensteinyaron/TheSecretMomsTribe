@@ -146,6 +146,26 @@ Plan → `tasks/todo.md` → Build → Verify → Update `tasks/lessons.md`
 ## Current Phase: 1 — Research Agent + Approval UI
 Next: Content Generation Agent → Publishing Agent → Learning Agent + AI Product
 
+---
+
+## Known Issues
+
+### Higgsfield `generate_image` — `count` parameter silently capped at 1
+**Observed:** Every `mcp__78d93fcf-...__generate_image` call delivers `batch_size: 1` regardless of the `count` value passed (1, 3, 4 — all return one candidate). Confirmed across PR-A revision and PR-C smoke runs.
+
+**Mitigation in code:** `LOCATION_BOOTSTRAP_CANDIDATES` and `ANCHORED_STILL_CANDIDATES` in `video/lib/location/flows/constants.ts` are set to 1. The candidate-array shape is preserved through the flow / result types so a future Higgsfield fix that honours `count=N` requires only flipping the constant. Raising the constant without a transport fix would cause `generateAnchoredStill`'s count-mismatch assertion to throw at runtime.
+
+**Status:** Pending Higgsfield support ticket (Yaron). Do NOT raise the constants until the ticket is resolved.
+
+### Higgsfield `show_generations` — submitted `nano_banana_pro` displays as `nano_banana_2`
+**Observed:** Requests submitted with `model: 'nano_banana_pro'` appear in the `show_generations` history view labelled `nano_banana_2`. Same behaviour for the kitchen canonical generated in PR-A revision and the PR-C smoke runs — so it is not a new regression.
+
+**Open question:** Display-only quirk vs. silent model downgrade at submission time? Output quality has been acceptable in both PRs, so functionally we have proceeded — but the labelling discrepancy is unexplained.
+
+**Status:** Pending Higgsfield support ticket (Yaron). Do NOT rename the model name string in the SKILL runtime or elsewhere until the ticket is resolved. Canonical comment block in `video/lib/location/flows/constants.ts`.
+
+---
+
 # ── VIDEO PIPELINE (add to CLAUDE.md) ──────────────────────
 
 ## Video Pipeline

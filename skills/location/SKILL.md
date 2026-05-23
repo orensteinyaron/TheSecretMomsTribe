@@ -49,7 +49,7 @@ rachel_looks           rachel_locations               rachel_stills
 
 ## Sub-flow A — `bootstrapLocation(input, generateNanoBananaPro)`
 
-**Add a new canon-locked location to the active pool.** Two-step: this flow generates 3 candidate Rachel-in-location canonicals; Yaron picks one; `approveLocation` (Sub-flow E) completes the bootstrap by writing the chosen URL + flipping status to `active`.
+**Add a new canon-locked location to the active pool.** Two-step: this flow generates 1 candidate Rachel-in-location canonical (see "Known Higgsfield quirks" below — `count` is silently capped at 1); Yaron reviews; `approveLocation` (Sub-flow E) completes the bootstrap by writing the chosen URL + flipping status to `active`.
 
 **Inputs:**
 
@@ -70,14 +70,14 @@ interface BootstrapLocationInput {
    - Pending row (pre-seeded by migration) → proceed.
    - Missing row → insert as `pending` so the flow stays idempotent.
 5. Assemble the canonical-bootstrap prompt via `assembleCanonicalBootstrapPrompt(brief)` — applies `FORBIDDEN_RE` to the dynamic fields. Throws before any MCP call on forbidden identity terms.
-6. ONE `nano_banana_pro` call with `count=3`, `aspect_ratio='9:16'`, `resolution='2k'`, and `medias: [{ value: aesthetic_reference_url, role: 'image' }]`.
-7. Return `{ location_id, candidate_canonicals: [{ job_id, url }, ...] }` — **transient**, no DB persistence of candidates.
+6. ONE `nano_banana_pro` call with `count=LOCATION_BOOTSTRAP_CANDIDATES` (currently 1), `aspect_ratio='9:16'`, `resolution='2k'`, and `medias: [{ value: aesthetic_reference_url, role: 'image' }]`.
+7. Return `{ location_id, candidate_canonicals: [{ job_id, url }, ...] }` — **transient**, no DB persistence of candidates. Array shape kept for forward compatibility.
 
-**Cost:** ~$0.04 (1 nano_banana_pro call, count=3).
+**Cost:** ~$0.015 (1 nano_banana_pro call, count=1).
 
 **CRITICAL — approval gate:**
 
-> **Generating candidates does NOT add the canonical to the location.** The location row remains `pending` and has no `reference_image_url` set until Yaron reviews the 3 candidates and calls `approveLocation(location_id, chosen_url, chosen_job_id)`. That call writes the URL atomically with the status flip. An "active location without a canonical" is forbidden by the schema.
+> **Generating a candidate does NOT add the canonical to the location.** The location row remains `pending` and has no `reference_image_url` set until Yaron reviews the candidate and calls `approveLocation(location_id, chosen_url, chosen_job_id)`. That call writes the URL atomically with the status flip. An "active location without a canonical" is forbidden by the schema.
 
 **Code:** `video/lib/location/flows/bootstrap-location.ts`.
 
@@ -95,16 +95,16 @@ This is the render-time on-demand flow. Use when `pickCombination` returns `need
 2. Validate `location.reference_image_url` is set (bootstrap complete). If null → throw with a hint to run `bootstrapLocation` first.
 3. Defensive: refuse if an active still already exists for this `(look_id, location_id)` combo (retire it first if you want to regenerate).
 4. Assemble the short anchored-still prompt via `assembleAnchoredStillPrompt(look)` — applies `FORBIDDEN_RE` to the dynamic look fields.
-5. ONE `nano_banana_pro` call with `count=3`, `aspect_ratio='9:16'`, `resolution='2k'`, and `medias: [{ value: location.reference_image_url, role: 'image' }]`.
-6. Insert all 3 candidates into `rachel_stills` as `status='pending'`, with `reference_image_url_used = location.reference_image_url` snapshotted onto each row. That snapshot is the audit trail for `updateLocationReference` rotations.
-7. Auto-approve the first (arrival-order) candidate via `updateStillStatus(first, 'active')`. Retire the other two.
+5. ONE `nano_banana_pro` call with `count=ANCHORED_STILL_CANDIDATES` (currently 1, see Known Higgsfield quirks), `aspect_ratio='9:16'`, `resolution='2k'`, and `medias: [{ value: location.reference_image_url, role: 'image' }]`.
+6. Insert each candidate into `rachel_stills` as `status='pending'`, with `reference_image_url_used = location.reference_image_url` snapshotted onto each row. That snapshot is the audit trail for `updateLocationReference` rotations.
+7. Auto-approve the first (arrival-order) candidate via `updateStillStatus(first, 'active')`. Retire any siblings (no-op with count=1).
 8. Return `{ still_id, soul_still_id, soul_still_url, reference_image_url_used, retired_still_ids }`.
 
 **Auto-approve rationale:** render-time generation is blocking, so the orchestrator can't wait for human review. Yaron can swap stills afterward via the wardrobe-rotation still-lifecycle flows.
 
-**Caveat:** the 3 inserts + status flips are NOT a single DB transaction. A crash mid-flow may leave partial rows — same risk model as PR-A `generateStill`.
+**Caveat:** the inserts + status flips are NOT a single DB transaction. A crash mid-flow may leave partial rows — same risk model as PR-A `generateStill`.
 
-**Cost:** ~$0.04 (1 nano_banana_pro call, count=3).
+**Cost:** ~$0.015 (1 nano_banana_pro call, count=1).
 
 **Code:** `video/lib/location/flows/generate-anchored-still.ts`.
 
@@ -120,13 +120,13 @@ This is the render-time on-demand flow. Use when `pickCombination` returns `need
 
 **Regenerate the canonical for an already-active location.** Two-step, same shape as Sub-flow A.
 
-**`updateLocationReference`** behaves exactly like `bootstrapLocation` (generates 3 candidates against the same canon brief + a fresh `aesthetic_reference_url`), but operates on an already-active row instead of a pending one. The location's current `reference_image_url` is **not** touched yet; the candidates are transient.
+**`updateLocationReference`** behaves exactly like `bootstrapLocation` (generates `LOCATION_BOOTSTRAP_CANDIDATES` candidates — currently 1 — against the same canon brief + a fresh `aesthetic_reference_url`), but operates on an already-active row instead of a pending one. The location's current `reference_image_url` is **not** touched yet; the candidates are transient.
 
 **`confirmReferenceUpdate`** writes the chosen `reference_image_url` + `reference_image_id` atomically. Status stays `active`. The old URL is **overwritten** on the location row.
 
 **Historical preservation:** the `reference_image_url_used` snapshot column on `rachel_stills` is untouched — every existing anchored still retains the URL it was rendered against. Retiring stills generated against the old canonical (if you want a clean cut-over) is a separate operation, out of scope for this flow.
 
-**Cost:** ~$0.04 (1 nano_banana_pro call, count=3).
+**Cost:** ~$0.015 (1 nano_banana_pro call, count=1).
 
 **Code:** `video/lib/location/flows/update-location-reference.ts`.
 
@@ -173,7 +173,7 @@ Both floors are checked via the pure `assertCanRetireLocation` guard (lives in `
 mcp__78d93fcf-...__generate_image({
   model: 'nano_banana_pro',
   prompt: '<from assembleCanonicalBootstrapPrompt(brief)>',
-  count: 3,
+  count: 1,                                    // see Known Higgsfield quirks
   aspect_ratio: '9:16',
   resolution: '2k',
   medias: [{ value: aesthetic_reference_url, role: 'image' }],
@@ -186,22 +186,27 @@ mcp__78d93fcf-...__generate_image({
 mcp__78d93fcf-...__generate_image({
   model: 'nano_banana_pro',
   prompt: '<from assembleAnchoredStillPrompt(look)>',  // SHORT, only swap wardrobe
-  count: 3,
+  count: 1,                                            // see Known Higgsfield quirks
   aspect_ratio: '9:16',
   resolution: '2k',
   medias: [{ value: location.reference_image_url, role: 'image' }],
 })
 ```
 
-Both flows accept the `nano_banana_pro` transport as a DI callable (`NanoBananaProFn`) so the MCP call is injected by the executing Claude session rather than hardcoded in the library.
+Both flows accept the `nano_banana_pro` transport as a DI callable (`NanoBananaProFn`) so the MCP call is injected by the executing Claude session rather than hardcoded in the library. See `video/lib/location/flows/constants.ts` for the canonical comment block describing the Higgsfield quirks that govern `count` and `model` here.
+
+## Known Higgsfield quirks (as of 2026-05-23)
+
+1. **`count` is silently capped at 1.** Higgsfield's `generate_image` MCP delivers `batch_size: 1` regardless of the value passed. `LOCATION_BOOTSTRAP_CANDIDATES` and `ANCHORED_STILL_CANDIDATES` (in `constants.ts`) are set to 1 to match this reality. Do not raise them without confirming with a fresh Higgsfield support ticket — raising the constant without a transport fix would cause the `generateAnchoredStill` count-mismatch assertion to throw at runtime.
+2. **`show_generations` history view displays `nano_banana_2`** for requests submitted with `model: 'nano_banana_pro'`. Unclear whether this is a display-only quirk or a silent downgrade at submission time. Do NOT rename the model name string — both PR-A revision and PR-C used this exact submission shape and produced acceptable quality. Pending Higgsfield support ticket.
 
 ## Cost reference
 
 | Operation | nano_banana_pro calls | Approx. cost |
 |---|---|---|
-| `bootstrapLocation(input, ...)` | 1 (count=3) | ~$0.04 |
-| `generateAnchoredStill(look, loc, ...)` | 1 (count=3) | ~$0.04 |
-| `updateLocationReference(input, ...)` | 1 (count=3) | ~$0.04 |
+| `bootstrapLocation(input, ...)` | 1 (count=1) | ~$0.015 |
+| `generateAnchoredStill(look, loc, ...)` | 1 (count=1) | ~$0.015 |
+| `updateLocationReference(input, ...)` | 1 (count=1) | ~$0.015 |
 | `getLocationReference(loc_id)` | 0 | $0 |
 | `approveLocation(...)` | 0 | $0 |
 | `retireLocation(loc_id)` | 0 | $0 |

@@ -87,7 +87,7 @@ function makeMockDeps(opts: {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-test('happy path: returns location_01 + 3 candidates; generator called once', async () => {
+test('happy path: returns location_01 + 1 candidate; generator called once', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
   const { deps, insertLocationCalls } = makeMockDeps({
     existingRow: makeLocationRow({ status: 'pending', reference_image_url: null }),
@@ -100,7 +100,7 @@ test('happy path: returns location_01 + 3 candidates; generator called once', as
   );
 
   assert.equal(result.location_id, 'location_01');
-  assert.equal(result.candidate_canonicals.length, 3);
+  assert.equal(result.candidate_canonicals.length, LOCATION_BOOTSTRAP_CANDIDATES);
   assert.equal(genCalls.length, 1);
   assert.equal(genCalls[0]!.count, LOCATION_BOOTSTRAP_CANDIDATES);
   // Pending row already exists — insertLocation must NOT be called.
@@ -193,7 +193,7 @@ test('idempotency: pending row exists (pre-seed) → proceeds; insertLocation NO
     deps,
   );
 
-  assert.equal(result.candidate_canonicals.length, 3);
+  assert.equal(result.candidate_canonicals.length, LOCATION_BOOTSTRAP_CANDIDATES);
   assert.equal(insertLocationCalls.length, 0, 'insertLocation should not run when pending row exists');
   assert.equal(genCalls.length, 1);
 });
@@ -233,7 +233,7 @@ test('defensive: no row exists → insertLocation called with full canon-brief s
   assert.equal(genCalls.length, 1);
 });
 
-test('transport contract: prompt non-empty + count=3 + aspect_ratio=9:16 + resolution=2k + medias[0] = {role:image,value:URL}', async () => {
+test('transport contract: prompt non-empty + count=LOCATION_BOOTSTRAP_CANDIDATES + aspect_ratio=9:16 + resolution=2k + medias[0] = {role:image,value:URL}', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
   const { deps } = makeMockDeps({
     existingRow: makeLocationRow({ status: 'pending' }),
@@ -249,7 +249,7 @@ test('transport contract: prompt non-empty + count=3 + aspect_ratio=9:16 + resol
   assert.equal(genCalls.length, 1);
   const input = genCalls[0]!;
   assert.ok(input.prompt.length > 0, 'prompt must be non-empty');
-  assert.equal(input.count, 3);
+  assert.equal(input.count, LOCATION_BOOTSTRAP_CANDIDATES);
   assert.equal(input.aspect_ratio, '9:16');
   assert.equal(input.resolution, '2k');
   assert.equal(input.medias.length, 1);
@@ -274,6 +274,6 @@ test('location_02 also works (sanity for second canon slot)', async () => {
   );
 
   assert.equal(result.location_id, 'location_02');
-  assert.equal(result.candidate_canonicals.length, 3);
+  assert.equal(result.candidate_canonicals.length, LOCATION_BOOTSTRAP_CANDIDATES);
   assert.equal(genCalls.length, 1);
 });
