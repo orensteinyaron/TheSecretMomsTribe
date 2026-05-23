@@ -10,6 +10,7 @@ import type {
   NanoBananaProInput,
   NanoBananaProImage,
 } from '../flows/constants.ts';
+import { LOCATION_BOOTSTRAP_CANDIDATES } from '../flows/constants.ts';
 import type { RachelLocation, RachelLookStatus } from '../../wardrobe-rotation/types.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ function makeMockDeps(opts: { row: RachelLocation | null }): MockDepsResult {
 
 // ── updateLocationReference tests ─────────────────────────────────────────────
 
-test('updateLocationReference happy path: active row → returns 3 candidates; transport called once', async () => {
+test('updateLocationReference happy path: active row → returns LOCATION_BOOTSTRAP_CANDIDATES candidates; transport called once', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
   const { deps } = makeMockDeps({
     row: makeLocationRow({ status: 'active', reference_image_url: OLD_CANONICAL_URL }),
@@ -98,7 +99,7 @@ test('updateLocationReference happy path: active row → returns 3 candidates; t
 
   // Shape matches BootstrapLocationResult.
   assert.equal(result.location_id, 'location_01');
-  assert.equal(result.candidate_canonicals.length, 3);
+  assert.equal(result.candidate_canonicals.length, LOCATION_BOOTSTRAP_CANDIDATES);
   for (const c of result.candidate_canonicals) {
     assert.ok(c.job_id.startsWith('new_job_'));
     assert.ok(c.url.startsWith('https://higgsfield.example/new_cand_'));
@@ -106,7 +107,7 @@ test('updateLocationReference happy path: active row → returns 3 candidates; t
 
   // One transport call with the expected shape.
   assert.equal(genCalls.length, 1);
-  assert.equal(genCalls[0]!.count, 3);
+  assert.equal(genCalls[0]!.count, LOCATION_BOOTSTRAP_CANDIDATES);
   assert.equal(genCalls[0]!.aspect_ratio, '9:16');
   assert.equal(genCalls[0]!.resolution, '2k');
   assert.equal(genCalls[0]!.medias[0]!.value, 'https://example.com/kitchen.jpg');

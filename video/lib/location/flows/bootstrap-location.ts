@@ -1,6 +1,11 @@
 /**
- * bootstrapLocation — generate 3 Rachel-in-location canonical candidates for a
+ * bootstrapLocation — generate Rachel-in-location canonical candidate(s) for a
  * canon-defined location slot via Higgsfield nano_banana_pro.
+ *
+ * Currently returns 1 candidate per call (LOCATION_BOOTSTRAP_CANDIDATES = 1)
+ * because Higgsfield silently caps count at 1 — see constants.ts. The
+ * candidates_canonicals field remains an array so a future Higgsfield fix
+ * that honours count=N doesn't require restructuring the result shape.
  *
  * Human entry point: call this when Yaron wants to introduce (or regenerate
  * candidates for) a canonical location reference image. The aesthetic
@@ -21,7 +26,7 @@
  *        - pending (pre-seeded)  → proceed, no insert.
  *        - missing (defensive)   → insertLocation pending row.
  *   5. Assemble canonical-bootstrap prompt (may throw on forbidden term).
- *   6. ONE nano_banana_pro call with count=3.
+ *   6. ONE nano_banana_pro call with count=LOCATION_BOOTSTRAP_CANDIDATES.
  *   7. Return candidates. No persistence of candidates.
  *
  * Transport: DI — callers pass `generateNanoBananaPro` assembled via the
@@ -63,7 +68,7 @@ const DEFAULT_DEPS: BootstrapLocationDeps = {
  *
  * @param input - { location_number, aesthetic_reference_url }
  * @param generateNanoBananaPro - DI transport for Higgsfield nano_banana_pro.
- *   Called once with count=LOCATION_BOOTSTRAP_CANDIDATES (3).
+ *   Called once with count=LOCATION_BOOTSTRAP_CANDIDATES (1).
  * @param deps - DB DI hooks. Defaults to the real db.ts functions.
  * @returns { location_id, candidate_canonicals } — candidates are transient.
  * @throws if location_number is not in CANON_LOCATION_NUMBERS_DEFINED.
@@ -145,7 +150,7 @@ export async function bootstrapLocation(
   // 5. Assemble prompt. May throw on forbidden identity term.
   const prompt = assembleCanonicalBootstrapPrompt(brief);
 
-  // 6. One nano_banana_pro call with count=3.
+  // 6. One nano_banana_pro call with count=LOCATION_BOOTSTRAP_CANDIDATES.
   const candidates = await generateNanoBananaPro({
     prompt,
     count: LOCATION_BOOTSTRAP_CANDIDATES,

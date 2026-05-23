@@ -5,11 +5,17 @@
  * `medias` reference.
  *
  * Mirrors the PR-A revision `generateStill` shape (auto-approve the FIRST
- * returned candidate, retire the rest, defensive active-still guard) but
- * uses nano_banana_pro + medias instead of Soul 2.0 + soul_id. The
+ * returned candidate, retire any siblings, defensive active-still guard)
+ * but uses nano_banana_pro + medias instead of Soul 2.0 + soul_id. The
  * canonical URL is snapshotted into each inserted still's
  * `reference_image_url_used` audit column at generation time so the
  * provenance survives any later `updateLocationReference` rotation.
+ *
+ * With ANCHORED_STILL_CANDIDATES = 1 (Higgsfield count cap, see
+ * constants.ts) there is currently only one candidate per call, so the
+ * "retire siblings" step is a no-op. The shape is kept (insert all → flip
+ * first to active → retire rest) so a future Higgsfield fix that honours
+ * count=N requires no logic change.
  *
  * Caveat: NOT a real DB transaction. Partial inserts may remain on later
  * failure — same risk model as the PR-A flow.
@@ -64,8 +70,8 @@ const DEFAULT_DEPS: GenerateAnchoredStillDeps = {
  * (look, location) combination using nano_banana_pro with the location's
  * locked canonical (reference_image_url) as the medias anchor.
  *
- * Mirrors PR-A revision generateStill (auto-approve first, retire rest)
- * but uses nano_banana_pro + medias instead of soul_2 + soul_id.
+ * Mirrors PR-A revision generateStill (auto-approve first, retire any
+ * siblings) but uses nano_banana_pro + medias instead of soul_2 + soul_id.
  *
  * The snapshot of location.reference_image_url is written to each
  * inserted still's reference_image_url_used column at insertion time —
@@ -147,7 +153,9 @@ export async function generateAnchoredStill(
     );
   }
 
-  // 7. Insert all 3 as pending with reference_image_url_used snapshot.
+  // 7. Insert all candidates as pending with reference_image_url_used snapshot.
+  //    Currently length 1 (Higgsfield count cap, see constants.ts); shape kept
+  //    as a loop so a future fix that honours count=N requires no change.
   const insertedStills: RachelStill[] = [];
   for (const cand of candidates) {
     const inserted = await deps.insertStill({
@@ -161,7 +169,8 @@ export async function generateAnchoredStill(
     insertedStills.push(inserted);
   }
 
-  // 8. Auto-approve the first; retire the other two.
+  // 8. Auto-approve the first; retire any siblings. With count=1 the rest
+  //    array is empty and no retires fire.
   const [first, ...rest] = insertedStills;
   const approved = await deps.updateStillStatus(first.still_id, 'active');
   const retiredIds: string[] = [];

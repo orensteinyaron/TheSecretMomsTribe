@@ -169,7 +169,7 @@ function makeMockDeps(opts: {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-test('happy path: approves first candidate, retires the rest, snapshots canonical URL', async () => {
+test('happy path: approves the candidate, retires any siblings, snapshots canonical URL', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
   const { deps, insertStillCalls, updateStillStatusCalls } = makeMockDeps({
     look: makeLook({ status: 'active' }),
@@ -183,18 +183,20 @@ test('happy path: approves first candidate, retires the rest, snapshots canonica
   assert.equal(result.soul_still_id, 'job_1');
   assert.equal(result.soul_still_url, 'https://higgsfield.example/cand_1.jpg');
   assert.equal(result.reference_image_url_used, CANONICAL_URL);
-  assert.equal(result.retired_still_ids.length, 2);
-  assert.deepEqual(result.retired_still_ids, ['still_uuid_2', 'still_uuid_3']);
+  // With ANCHORED_STILL_CANDIDATES = 1 there are no siblings to retire.
+  assert.equal(result.retired_still_ids.length, 0);
+  assert.deepEqual(result.retired_still_ids, []);
 
-  // Three inserts, one approve, two retires.
-  assert.equal(insertStillCalls.length, 3);
+  // One insert, one approve, zero retires (count=1 cap).
+  assert.equal(insertStillCalls.length, ANCHORED_STILL_CANDIDATES);
   const approves = updateStillStatusCalls.filter((c) => c.status === 'active');
   const retires = updateStillStatusCalls.filter((c) => c.status === 'retired');
   assert.equal(approves.length, 1);
-  assert.equal(retires.length, 2);
+  assert.equal(retires.length, 0);
   assert.equal(approves[0]!.still_id, 'still_uuid_1');
 
-  // Transport contract: prompt non-empty, count=3, medias[0] = canonical with role=image.
+  // Transport contract: prompt non-empty, count=ANCHORED_STILL_CANDIDATES,
+  // medias[0] = canonical with role=image.
   assert.equal(genCalls.length, 1);
   const input = genCalls[0]!;
   assert.ok(input.prompt.length > 0, 'prompt must be non-empty');
@@ -321,7 +323,7 @@ test('active still already exists: throws "active still already exists"; generat
   assert.equal(listStillsCalls[0]?.status, 'active');
 });
 
-test('transport returns wrong count: throws "expected 3 candidates, got 2"', async () => {
+test('transport returns wrong count: throws "expected 1 candidates, got 2"', async () => {
   const { fn: generator } = makeMockGenerator({ countOverride: 2 });
   const { deps, insertStillCalls } = makeMockDeps({
     look: makeLook({ status: 'active' }),
@@ -331,7 +333,7 @@ test('transport returns wrong count: throws "expected 3 candidates, got 2"', asy
   await assert.rejects(
     () => generateAnchoredStill('look_01', 'location_01', generator, deps),
     (err: Error) => {
-      assert.match(err.message, /expected 3 candidates, got 2/);
+      assert.match(err.message, /expected 1 candidates, got 2/);
       return true;
     },
   );
@@ -339,7 +341,7 @@ test('transport returns wrong count: throws "expected 3 candidates, got 2"', asy
   assert.equal(insertStillCalls.length, 0);
 });
 
-test('all 3 inserts receive the canonical URL in reference_image_url_used', async () => {
+test('every insert receives the canonical URL in reference_image_url_used', async () => {
   const { fn: generator } = makeMockGenerator();
   const { deps, insertStillCalls } = makeMockDeps({
     look: makeLook({ status: 'active' }),
@@ -348,7 +350,7 @@ test('all 3 inserts receive the canonical URL in reference_image_url_used', asyn
 
   await generateAnchoredStill('look_01', 'location_01', generator, deps);
 
-  assert.equal(insertStillCalls.length, 3);
+  assert.equal(insertStillCalls.length, ANCHORED_STILL_CANDIDATES);
   for (const insert of insertStillCalls) {
     assert.equal(insert.reference_image_url_used, CANONICAL_URL);
     assert.equal(insert.look_id, 'look_01');
@@ -356,14 +358,12 @@ test('all 3 inserts receive the canonical URL in reference_image_url_used', asyn
     assert.equal(insert.status, 'pending');
     assert.equal(insert.created_by, 'skill_v1');
   }
-  // The three inserts must carry distinct soul_still_id / soul_still_url values
-  // (mapped 1:1 from the transport's candidates by index).
+  // Inserts carry the soul_still_id / soul_still_url values mapped 1:1 from
+  // the transport's candidates by index. With ANCHORED_STILL_CANDIDATES = 1
+  // this is just the first candidate; the shape is kept so a future count-cap
+  // fix doesn't require changing the assertion.
   const soulIds = insertStillCalls.map((i) => i.soul_still_id);
-  assert.deepEqual(soulIds, ['job_1', 'job_2', 'job_3']);
+  assert.deepEqual(soulIds, ['job_1']);
   const soulUrls = insertStillCalls.map((i) => i.soul_still_url);
-  assert.deepEqual(soulUrls, [
-    'https://higgsfield.example/cand_1.jpg',
-    'https://higgsfield.example/cand_2.jpg',
-    'https://higgsfield.example/cand_3.jpg',
-  ]);
+  assert.deepEqual(soulUrls, ['https://higgsfield.example/cand_1.jpg']);
 });
