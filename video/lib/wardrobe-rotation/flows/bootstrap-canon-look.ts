@@ -23,16 +23,12 @@
  * @module flows/bootstrap-canon-look
  */
 
-import type { CanonLookBrief, CanonLocationBrief, RachelStill } from '../types.js';
+import type { CanonLookBrief, RachelStill } from '../types.js';
+import type { CanonLocationBrief } from '../../location/types.js';
 import { CANON_LOOKS, CANON_LOOK_NUMBERS_DEFINED } from '../canon/canon-looks.js';
 import { assembleLookPrompt } from '../prompt/look-prompt.js';
-import {
-  getLocation,
-  getLook,
-  insertLook,
-  insertStill,
-  listActiveLocations,
-} from '../db.js';
+import { getLook, insertLook, insertStill } from '../db.js';
+import { getLocation, listActiveLocations } from '../../location/db.js';
 
 // ── DI transport types ────────────────────────────────────────────────────────
 

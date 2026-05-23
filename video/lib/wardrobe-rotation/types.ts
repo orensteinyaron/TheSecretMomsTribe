@@ -23,13 +23,21 @@ export interface RachelLook {
 }
 
 export interface RachelLocation {
-  location_id: string;         // 'location_01', 'location_02', ...
-  setting: string;
-  lighting: string;
-  framing: string;
+  location_id: string;               // 'location_01', 'location_02', ...
+  name: string;                      // 'kitchen', 'home_studio'
+  camera_angle: string;
+  camera_distance: string;
+  rachel_position: string;
+  background_composition: string;
+  lighting_setup: string;
+  props: string[];
+  wall_color: string;
+  floor_material: string;
+  reference_image_url: string | null; // NULL until bootstrap approval
+  reference_image_id: string | null;
   tier: LocationTier;
   notes: string | null;
-  status: RachelLookStatus;    // same lifecycle as looks
+  status: RachelLookStatus;           // same lifecycle as looks
   created_at: string;
   approved_at: string | null;
   retired_at: string | null;
@@ -38,11 +46,12 @@ export interface RachelLocation {
 }
 
 export interface RachelStill {
-  still_id: string;            // uuid
+  still_id: string;                   // uuid
   look_id: string;
   location_id: string;
   soul_still_id: string;
   soul_still_url: string;
+  reference_image_url_used: string;   // snapshot of location.reference_image_url at generation time
   status: RachelLookStatus;
   created_at: string;
   approved_at: string | null;
@@ -68,10 +77,4 @@ export interface CanonLookBrief {
   best_for: string;
 }
 
-export interface CanonLocationBrief {
-  tier: LocationTier;
-  setting: string;
-  lighting: string;
-  framing: string;
-  best_for: string;
-}
+// CanonLocationBrief has moved to video/lib/location/types.ts

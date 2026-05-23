@@ -12,12 +12,10 @@ export type {
   RecentLookPick,
   RecentLocationPick,
   CanonLookBrief,
-  CanonLocationBrief,
 } from './types.js';
 
 // ── Canon dicts ──────────────────────────────────────────────────────────────
 export { CANON_LOOKS, CANON_LOOK_NUMBERS_DEFINED } from './canon/canon-looks.js';
-export { CANON_LOCATIONS, CANON_LOCATION_NUMBERS_DEFINED } from './canon/canon-locations.js';
 
 // ── Pickers (pure) ───────────────────────────────────────────────────────────
 export { pickLook, LOOK_COOLDOWN } from './pickers/pick-look.js';
@@ -48,6 +46,8 @@ export { assembleLookPrompt, PROMPT_TAIL } from './prompt/look-prompt.js';
 export { FORBIDDEN_RE } from './prompt/forbidden-identity-regex.js';
 
 // ── DB layer ─────────────────────────────────────────────────────────────────
+// Location DB queries have moved to ../location/db.ts (YAR-136 PR-C C5).
+// They will be re-exported from the location barrel in C9.
 export {
   listActiveLooks,
   listLooks,
@@ -55,12 +55,6 @@ export {
   insertLook,
   updateLookStatus,
   generateNextLookId,
-  listActiveLocations,
-  listLocations,
-  getLocation,
-  insertLocation,
-  updateLocationStatus,
-  generateNextLocationId,
   listActiveStills,
   listStills,
   getStill,
@@ -73,16 +67,14 @@ export {
 } from './db.js';
 
 // ── Lifecycle flows ──────────────────────────────────────────────────────────
+// Location-axis flows moved to ../location/index.ts (YAR-136 PR-C C9).
 export { approveLook } from './flows/approve-look.js';
-export { approveLocation } from './flows/approve-location.js';
 export { approveStill } from './flows/approve-still.js';
 export { retireLook } from './flows/retire-look.js';
-export { retireLocation } from './flows/retire-location.js';
 export { retireStill } from './flows/retire-still.js';
 
-// ── Bootstrap + render-time flows ────────────────────────────────────────────
-// Types are defined in bootstrap-canon-look and re-used by bootstrap-canon-location.
-// Export types + constants only from the canonical source to avoid duplicate exports.
+// ── Bootstrap flow (look axis only) ──────────────────────────────────────────
+// Location bootstrap + anchored-still generation moved to ../location/index.ts.
 export {
   bootstrapCanonLook,
   RACHEL_SOUL_ID,
@@ -95,21 +87,6 @@ export type {
   GeneratedImage,
   BootstrapResult,
 } from './flows/bootstrap-canon-look.js';
-export {
-  bootstrapCanonLocation,
-  NEUTRAL_LOOK_FOR_LOCATION_BOOTSTRAP,
-} from './flows/bootstrap-canon-location.js';
-// NOTE: RACHEL_SOUL_ID and TOTAL_BOOTSTRAP_CANDIDATES are NOT re-exported from
-// bootstrap-canon-location to avoid duplicate export identifiers in this barrel.
-
-export {
-  generateStill,
-  ON_DEMAND_STILL_CANDIDATES,
-} from './flows/generate-still.js';
-export type { GenerateStillResult } from './flows/generate-still.js';
-
-export { getCanonStatus } from './flows/get-canon-status.js';
-export type { CanonStatus, CanonSlotStatus } from './flows/get-canon-status.js';
 
 // ── ID generator (pure) ──────────────────────────────────────────────────────
 export { nextIdFrom } from './flows/generate-id.js';

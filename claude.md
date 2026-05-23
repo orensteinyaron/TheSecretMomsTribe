@@ -91,7 +91,8 @@ that auto-triggers on matching phrases.
 |---|---|---|
 | `full-avatar-profile` | `skills/full-avatar-profile/SKILL.md` | Production pipeline for Avatar Full video format — script → Soul 2.0 stills → Seedance clips → stitch → QA |
 | `content-lifecycle` | `skills/content-lifecycle/SKILL.md` | Piece lifecycle management — backfills, lifecycle transitions, status conventions |
-| `avatar-full-wardrobe-rotation` | `skills/avatar-full-wardrobe-rotation/SKILL.md` | Two-axis rotation for Rachel: looks (cooldown=3) × locations (tier-aware 5/7 primary) → per-combination Soul stills, with canon-locked bootstrap + approve/retire flows |
+| `avatar-full-wardrobe-rotation` | `skills/avatar-full-wardrobe-rotation/SKILL.md` | Look axis + picker orchestration for Rachel: looks (cooldown=3) × locations (tier-aware 5/7 primary) → `pickCombination`. Look lifecycle (bootstrap + approve + retire). Look/still axis only — location lifecycle lives in the `location` skill. |
+| `location` | `skills/location/SKILL.md` | Location axis for Rachel: structured set definitions (camera, position, background, lighting, props, walls + floor) + Rachel-in-location canonical reference images via nano_banana_pro. Wardrobe-swap stills anchor against the locked canonical via `medias[role:image]` so the same kitchen/studio appears identically across every render. Sub-flows: `bootstrapLocation`, `generateAnchoredStill`, `getLocationReference`, `updateLocationReference`, `approveLocation`, `retireLocation`. |
 
 ---
 

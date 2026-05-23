@@ -1,4 +1,5 @@
-import type { CanonLookBrief, CanonLocationBrief } from '../types.js';
+import type { CanonLookBrief } from '../types.js';
+import type { CanonLocationBrief } from '../../location/types.js';
 import { FORBIDDEN_RE } from './forbidden-identity-regex.js';
 
 export const PROMPT_TAIL =
