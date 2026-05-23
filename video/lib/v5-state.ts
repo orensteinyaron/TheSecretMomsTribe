@@ -71,6 +71,20 @@ export type V5State = {
   /** Optional secondary line, smaller. */
   hook_secondary?: string;
   register: string;
+  /**
+   * Wardrobe-rotation × location combination chosen by phaseInit via
+   * pickCombination. Persisted on the state so downstream phases (compose,
+   * qa) can reference the same start_image_url the session passed to
+   * Seedance, without re-reading content_queue.avatar_config.
+   */
+  look_id: string;
+  location_id: string;
+  still_id: string;
+  /**
+   * Soul-locked still URL used as Seedance `start_image` for every clip.
+   * Sourced from rachel_stills.soul_still_url for the chosen still_id.
+   */
+  start_image_url: string;
   clips: V5ClipState[];
   // Per-clip face metrics (start + end frame), populated by --phase=face-metrics.
   face_metrics?: Record<string, { start?: FaceMetricsEndpoint; end?: FaceMetricsEndpoint; errors?: string[] }>;
@@ -134,6 +148,10 @@ export function initState(opts: {
   hook_secondary?: string;
   register: string;
   clips: Array<{ id: string; expected_script: string; duration_target_s: number }>;
+  look_id: string;
+  location_id: string;
+  still_id: string;
+  start_image_url: string;
 }): V5State {
   const split = (opts.hook_primary || opts.hook_secondary)
     ? { primary: opts.hook_primary ?? "", secondary: opts.hook_secondary }
@@ -144,6 +162,10 @@ export function initState(opts: {
     hook_text: opts.hook_text,
     hook_primary: split.primary,
     register: opts.register,
+    look_id: opts.look_id,
+    location_id: opts.location_id,
+    still_id: opts.still_id,
+    start_image_url: opts.start_image_url,
     clips: opts.clips.map((c) => ({
       id: c.id,
       expected_script: c.expected_script,

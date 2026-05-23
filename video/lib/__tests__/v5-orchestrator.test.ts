@@ -24,12 +24,26 @@ function runCli(workdir: string, extraArgs: string[]): { status: number; stdout:
   return { status: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
+// PR-B added 4 required combination fields to initState (look_id, location_id,
+// still_id, start_image_url) that phaseInit resolves via pickCombination. These
+// orchestrator tests don't exercise that resolution — they target CLI dispatch,
+// state mutation, and summary math — so they pass deterministic placeholders.
+const TEST_COMBO = {
+  look_id: "look_01",
+  location_id: "location_01",
+  still_id: "still_test",
+  start_image_url: "https://example.com/test-still.png",
+} as const;
+function testInitState(opts: Parameters<typeof initState>[0]) {
+  return initState({ ...TEST_COMBO, ...opts });
+}
+
 // ─── State helpers ──────────────────────────────────────────────────────
 
 test("initState shape: clips have expected fields, no verify yet", () => {
   const workdir = makeWorkdir();
   try {
-    const s = initState({
+    const s = testInitState({
       content_id: "c1",
       workdir,
       hook_text: "hook",
@@ -64,7 +78,7 @@ test("loadState throws when state file is missing", () => {
 test("--phase=record accumulates credits and USD into state totals", () => {
   const workdir = makeWorkdir();
   try {
-    const s = initState({
+    const s = testInitState({
       content_id: "c1", workdir, hook_text: "h", register: "concerned_insider",
       clips: [{ id: "S1", expected_script: "x", duration_target_s: 8 }],
     });
@@ -95,7 +109,7 @@ test("--phase=record aborts (exit 4) when cumulative > 700 credits", () => {
   // re-rendered clip_02 + clip_05b.
   const workdir = makeWorkdir();
   try {
-    const s = initState({
+    const s = testInitState({
       content_id: "c1", workdir, hook_text: "h", register: "concerned_insider",
       clips: [{ id: "S1", expected_script: "x", duration_target_s: 8 }],
     });
@@ -120,7 +134,7 @@ test("--phase=record aborts (exit 4) when cumulative > 700 credits", () => {
 test("--phase=summary prints bridge timestamps at the correct moments", () => {
   const workdir = makeWorkdir();
   try {
-    const s = initState({
+    const s = testInitState({
       content_id: "c1", workdir, hook_text: "the hook", register: "concerned_insider",
       clips: [
         { id: "S1", expected_script: "a", duration_target_s: 9 },
@@ -170,7 +184,7 @@ test("--phase=summary prints bridge timestamps at the correct moments", () => {
 test("CLI rejects unknown --phase=", () => {
   const workdir = makeWorkdir();
   try {
-    const s = initState({
+    const s = testInitState({
       content_id: "c", workdir, hook_text: "h", register: "concerned_insider",
       clips: [{ id: "S1", expected_script: "x", duration_target_s: 8 }],
     });
@@ -186,7 +200,7 @@ test("CLI rejects unknown --phase=", () => {
 test("CLI rejects missing required arg with clear error", () => {
   const workdir = makeWorkdir();
   try {
-    const s = initState({
+    const s = testInitState({
       content_id: "c", workdir, hook_text: "h", register: "concerned_insider",
       clips: [{ id: "S1", expected_script: "x", duration_target_s: 8 }],
     });
