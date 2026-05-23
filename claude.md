@@ -245,8 +245,16 @@ npm run studio
 - **Cost ceiling 700 cr (~$9.10)** per piece. Actual observed: 81 cr / 9 s std clip at 1080p; 7-clip Avatar Full ≈ 531 cr ($6.90) with zero retries. Orchestrator's `--phase=record` auto-aborts at >700.
 - **DB-flip-on-approval.** `--phase=upload` writes the final MP4 to Supabase but does NOT touch `content_queue.render_profile_id` or `metadata.video_url`. Those flip only after human approval of the final render (manually or via a future approval UI).
 
+### PR-B (YAR-136) — wardrobe × location combination per render
+
+**Shipped 2026-05-23.** `phaseInit` now resolves a wardrobe × location combination via `pickCombination` (from the [wardrobe-rotation skill](video/lib/wardrobe-rotation/)), runs Soul-2.0 pass-through on the nano_banana_pro anchored still ([video/lib/location/flows/generate-anchored-still.ts](video/lib/location/flows/generate-anchored-still.ts)) so identity is locked to canonical Rachel, and persists `look_id` / `location_id` / `still_id` back to `content_queue.avatar_config` with a re-SELECT post-write verify. The resolved Soul-locked URL lives on `v5-state.json` as `state.start_image_url` — `phaseQa` and the hook-card script consume it from there (no more hardcoded constant).
+
+**`rachel_stills.soul_still_url` semantics changed:** the column now stores Soul-2.0 identity-locked outputs, not raw nano_banana_pro composition anchors. All 4 active rows backfilled at PR-B merge time via [scripts/backfill-soul-pass-through.ts](scripts/backfill-soul-pass-through.ts).
+
+**RACHEL_SOUL_STILL_ID / RACHEL_SOUL_STILL_URL constants are deleted.** `RACHEL_SOUL_ID` (the Higgsfield Soul character UUID) lives in [video/lib/avatar-constants.ts](video/lib/avatar-constants.ts) and is re-exported from `wardrobe-rotation/index.ts`.
+
 ### Open follow-ups (do NOT block on these — v5.0 ships without them)
 
 - [YAR-130](https://linear.app/yarono/issue/YAR-130) — Lip-sync analysis spike (MFCC + mouth ROI cross-correlation). `lip_sync` dimension is UNMEASURED in avatar-v1 QA today.
-- [YAR-136](https://linear.app/yarono/issue/YAR-136) — Wardrobe rotation across the 11 locked Face of SMT looks. Required before the next Avatar Full piece (current pipeline reuses Look #1).
+- [YAR-136](https://linear.app/yarono/issue/YAR-136) — PR-A (wardrobe), PR-C (location), PR-B (renderer integration) all shipped. Open: YAR-139 (bootstrap looks 03-11 + locations 03-08), YAR-140 (Seedance background drift mid-clip).
 - [YAR-137](https://linear.app/yarono/issue/YAR-137) — Seedance fidelity (resolved via normalization for v5.0; open follow-ups: extend `motion-prompt-builder` with distance-lock language; evaluate Kling 3.0 / BytePlus alternatives).
