@@ -3,3 +3,7 @@ node_modules/
 data/*.json
 .claude/settings.local.json
 app/dist/
+
+# Avatar Full v5 face-metrics sidecar — venv + lazily-downloaded model.
+bin/face-metrics/.venv/
+bin/face-metrics/models/

@@ -1,5 +1,34 @@
 # Agent Skills Changelog
 
+## v2.1.0 — 2026-05-19
+
+ADDITIVE. New Stage 4: Rendering section in `SMT_PIPELINE_CONTRACT.md`
+documents the per-render-profile pipelines downstream of ContentGen + caption
+polish. Avatar Full v5.0 (`render_profile_slug=avatar-v1`) is the first
+profile with a locked phase sequence anchored in `video/scripts/
+render-avatar-full-v5.ts`.
+
+Phase sequence:
+```
+init → tts → (MCP generate_video + record + verify per clip)
+     → face-metrics → normalize-clips (REQUIRED) → face-metrics (re-measure)
+     → manifest → compose → upload → qa → summary
+```
+
+The `normalize-clips` step is the architectural fix for YAR-137 Seedance
+fidelity drift — per-clip ffmpeg scale+crop to uniform face_h + eye_y, audio
+passthrough preserved.
+
+Stages 1-3.5 unchanged. No agent prompts changed; existing regression tests
+still pass.
+
+Authoritative spec: `docs/specs/AVATAR_FULL_V5.md` — includes a "Lessons
+learned (May 18 + May 19 2026)" section documenting 15+ findings the
+pipeline encodes (chain pattern is incompatible, framing-lock language
+mandatory, embedded-audio passthrough, normalization mandatory, locked hook
+overlay design, Whisper-from-Seedance captions, motion blur defaults
+disabled, observed cost reality 81 cr / 9 s std clip, etc.).
+
 ## v1.0.0 — 2026-05-11
 
 Initial extraction of orchestrator + agent system prompts into SKILL.md files under the smt_* namespace. Triggered by May 11 fabricated AI Magic incident.

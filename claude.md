@@ -110,6 +110,8 @@ that auto-triggers on matching phrases.
 | Publishing Agent (code + instructions) | `agents/publish.js` + `agents/publish.instructions.md` |
 | Learning Agent | `agents/learning.js` |
 | Approval UI (placeholder) | `ui/approval/` |
+| **Avatar/Video constants (Soul Rachel, voice id, v5 defaults)** | `video/lib/avatar-constants.ts` — canonical source; do not hardcode the Rachel CDN URL anywhere else |
+| **Avatar Full v5 spec (in build)** | `docs/specs/AVATAR_FULL_V5.md` + plan at `docs/superpowers/plans/2026-05-19-avatar-full-v5-seedance-pipeline.md` |
 | Task tracking | `tasks/todo.md` |
 | Lessons learned | `tasks/lessons.md` |
 | Scraping scripts | `scripts/scrape-instagram.js`, `scripts/scrape-tiktok.js` |
@@ -225,3 +227,26 @@ npm run studio
 - [ ] Build carousel template (IG carousel → image sequence)
 - [ ] Wire into GitHub Actions (batch generate after content approval)
 - [ ] Add video to approval UI (preview before publishing)
+
+---
+
+## Avatar Full v5 (Seedance pipeline)
+
+**Shipped 2026-05-19.** Replaces the legacy HeyGen-based `video/scripts/generate-avatar-video.ts` (retirement deferred). Hybrid orchestration: a Claude Code session interleaves Higgsfield MCP `generate_video` calls (Seedance 2.0, `medias=[start_image, audio]`) with invocations of `video/scripts/render-avatar-full-v5.ts --phase=<name>`. State flows through `workdir/v5-state.json`. Phase sequence: **`init` → `tts` → (MCP `generate_video` + `record` + `verify` per clip) → `face-metrics` → `normalize-clips` → `face-metrics` (re-measure) → `manifest` → `compose` → `upload` → `qa` → `summary`**. Full spec, lessons learned, and locked component designs: **[`docs/specs/AVATAR_FULL_V5.md`](docs/specs/AVATAR_FULL_V5.md)**.
+
+### Non-negotiable v5.0 invariants (do not drift; spec wins on conflict)
+
+- **`normalize-clips.ts` is MANDATORY** between `--phase=face-metrics` and `--phase=manifest`. Architectural mitigation for [YAR-137](https://linear.app/yarono/issue/YAR-137) Seedance fidelity drift — without it, opening face position/size varies ±150 px across renders from the same Soul still. Audio passthrough preserved via `-c:a copy`.
+- **`SMTHookOverlay` is canonical** at `video/src/templates/shared/SMTHookOverlay.tsx` — rotated `-2°`, edge bleed `left/right: -100 px`, lower-third (`top: 68%`), 1.0 s hard cut in/out on clip 1 only. Visual must match the `generate-hook-card.ts` SVG. Do NOT build a new hook overlay; do NOT remove rotation or bleed.
+- **`AvatarV5Captions` uses Whisper word-level timestamps from the SEEDANCE MP4 audio, NOT the original ElevenLabs MP3.** Phrase grouping at `video/lib/phrase-grouper.ts` (MAX_WORDS=4, GAP_THRESHOLD=0.3s). Style is white Inter Bold 52 px UPPERCASE with **minimal** shadow `0 2px 2px rgba(0,0,0,0.6)` for legibility (not zero shadow, not chunky decorative shadow). Mount inside each clip's `<Sequence>` so Remotion handles the global time offset.
+- **Embedded-audio passthrough via `OffthreadVideo`** — no `volume={0}`, no separate `<Audio>` track, ever. Audio bridge between clips is a 4-frame `<Sequence>` overlap, NOT an audio re-overlay.
+- **Whisper-verify every clip** post-render against the locked script. WER < 0.15 + speech_coverage ≥ 0.5. Retry escalation: std → fast → surface-to-human. Never silently accept a failed clip.
+- **Motion blur defaults to disabled.** Normalization makes per-cut deltas ≤ 2 px; the 40 px threshold no longer fires. Per-cut re-enable available via `transitions_manifest.transitions[i].needs_motion_blur=true` after eye-check.
+- **Cost ceiling 700 cr (~$9.10)** per piece. Actual observed: 81 cr / 9 s std clip at 1080p; 7-clip Avatar Full ≈ 531 cr ($6.90) with zero retries. Orchestrator's `--phase=record` auto-aborts at >700.
+- **DB-flip-on-approval.** `--phase=upload` writes the final MP4 to Supabase but does NOT touch `content_queue.render_profile_id` or `metadata.video_url`. Those flip only after human approval of the final render (manually or via a future approval UI).
+
+### Open follow-ups (do NOT block on these — v5.0 ships without them)
+
+- [YAR-130](https://linear.app/yarono/issue/YAR-130) — Lip-sync analysis spike (MFCC + mouth ROI cross-correlation). `lip_sync` dimension is UNMEASURED in avatar-v1 QA today.
+- [YAR-136](https://linear.app/yarono/issue/YAR-136) — Wardrobe rotation across the 11 locked Face of SMT looks. Required before the next Avatar Full piece (current pipeline reuses Look #1).
+- [YAR-137](https://linear.app/yarono/issue/YAR-137) — Seedance fidelity (resolved via normalization for v5.0; open follow-ups: extend `motion-prompt-builder` with distance-lock language; evaluate Kling 3.0 / BytePlus alternatives).

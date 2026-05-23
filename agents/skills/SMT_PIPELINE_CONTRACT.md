@@ -9,6 +9,7 @@ owner: Yaron Orenstein
 # SMT Pipeline Contract v2.0.0
 
 ## Changelog
+- **v2.1.0 (2026-05-19):** ADDITIVE. New Stage 4: Rendering section documents the per-render-profile pipelines downstream of ContentGen + caption polish. Avatar Full v5.0 (`render_profile_slug=avatar-v1`) is the first profile with a locked phase sequence (init → tts → record/verify per clip → face-metrics → **normalize-clips (REQUIRED)** → face-metrics → manifest → compose → upload → qa → summary). Documents the v5.0 invariants (embedded-audio passthrough, Whisper-verify-every-clip, SMTHookOverlay canonical, captions from Seedance MP4 not ElevenLabs MP3, motion blur defaults disabled, DB-flip-on-approval). Spec: `docs/specs/AVATAR_FULL_V5.md`. No agent prompts change; no breaking validation. Stages 1-3.5 unchanged.
 - **v2.0.0 (2026-05-17):** BREAKING. `post_format` enum deprecated. Format is now `render_profile_slug` (one of `avatar-v1`, `moving-images`, `static-image`, `carousel`). Per-channel state (captions, schedule, posting) moves to a new `scheduled_posts` table. Legacy fields (`post_format`, `scheduled_at_ig`, `scheduled_at_tt`, `published_at_ig`, `published_at_tt`, `published_url_ig`, `published_url_tt`, `channel_override`) are hard-rejected by `gate_validators.rejectLegacyFormatFields`. See `docs/specs/CHANNEL_MODEL_V1.md`.
 - **v1.0.0 (2026-05-11):** initial contract — pillar routing law, AI Magic strict gate, defensive verbatim quote check.
 
@@ -213,6 +214,44 @@ The orchestrator persists the piece atomically:
 
 ### Stage 3.5: Caption polish (Haiku, downstream of Stage 3)
 For each piece × each channel, Haiku generates a platform-native caption from the base caption + hook + content metadata. The output is written to `scheduled_posts.caption` for that (content_id, channel) row. Failure here is non-fatal — the publish agent falls back to `content_queue.caption` if the per-channel caption is null.
+
+### Stage 4: Rendering — per render-profile pipelines (post-ContentGen)
+
+Stages 1-3.5 produce a `content_queue` row with `render_profile_slug` set; Stage 4 is the per-profile renderer that turns the row into a final MP4/PNG asset. The renderer is OUT-of-scope for the Orchestrator skill (which currently terminates at the ContentGen + caption-polish handoff), but its handoff schema is part of the contract so future automation can pick it up.
+
+**Render profiles and their entry points:**
+
+| `render_profile_slug` | Pipeline | Entry point | Spec |
+|---|---|---|---|
+| `avatar-v1` | **Avatar Full v5 (Seedance)** | `video/scripts/render-avatar-full-v5.ts --phase=<name>` driven from a Claude Code session w/ Higgsfield MCP loaded | [`docs/specs/AVATAR_FULL_V5.md`](../../docs/specs/AVATAR_FULL_V5.md) |
+| `moving-images` | Slideshow with Pexels b-roll + TTS | `video/scripts/generate-video.ts` | (no v5-style spec; pre-dates the per-profile skill split) |
+| `static-image` | Single PNG generated via DALL-E | `video/scripts/generate-hook-card.ts` (variant) | inline |
+| `carousel` | Multi-slide image set | TBD — not yet implemented | — |
+
+**Avatar Full v1 canonical phase sequence** (v5.0, shipped 2026-05-19):
+
+```
+init → tts → (MCP generate_video + record + verify per clip)
+     → face-metrics → normalize-clips → face-metrics (re-measure)
+     → manifest → compose → upload → qa → summary
+```
+
+The **`normalize-clips` step is REQUIRED** between the first `face-metrics` pass and `manifest`. It is the architectural mitigation for [YAR-137](https://linear.app/yarono/issue/YAR-137) Seedance fidelity drift — without it, opening face position/size varies ±150 px across renders from the same Soul still. See AVATAR_FULL_V5.md "Post-process normalization (REQUIRED)" for the full rationale.
+
+**v5.0 non-negotiable invariants** (do not drift — change the spec, the code, AND this contract together or none):
+- Embedded-audio passthrough via `OffthreadVideo` — no `<Audio>` re-overlay, ever
+- Whisper-verify every clip post-render against the locked script (WER < 0.15, coverage ≥ 0.5)
+- Retry escalation per clip: std → fast → surface-to-human
+- `SMTHookOverlay` canonical: rotated -2°, ±100 px edge bleed, lower-third, 1.0 s hard cut, clip 1 only
+- `AvatarV5Captions` derived from Whisper word-level timestamps on the **Seedance MP4** (not the ElevenLabs MP3)
+- Motion blur defaults to disabled (normalization makes it visually unneeded)
+- DB writes are gated on human approval: `--phase=upload` writes the final MP4 to Supabase but does NOT touch `content_queue.render_profile_id` or `metadata.video_url`. Those flip only after human approval.
+
+**Cost envelope (per Avatar Full piece, observed actuals):** ~531 Higgsfield credits + ~$0.013 Whisper ≈ **$7 total**. Ceiling 700 cr (`--phase=record` auto-aborts above).
+
+**Open follow-ups (do not block on these):** [YAR-130](https://linear.app/yarono/issue/YAR-130) lip-sync analysis spike; [YAR-136](https://linear.app/yarono/issue/YAR-136) wardrobe rotation across 11 locked looks (required before the SECOND Avatar Full piece — current pipeline reuses Look #1); [YAR-137](https://linear.app/yarono/issue/YAR-137) Seedance fidelity follow-ups (motion-prompt distance-lock language; model alternatives evaluation).
+
+**Future automation:** when a renderer-orchestrator skill ships (peer to `smt_orchestrator`), it will pick up `content_queue` rows where `render_profile_slug='avatar-v1'` and `status='approved'`, execute the phase sequence above, and surface the result to a human-review queue. The Skills v2.0.0 architecture supports this addition without breaking the existing Research → Strategist → ContentGen contract.
 
 ### Fail-closed: legacy field rejection
 Any output from any agent containing `post_format`, `scheduled_at_ig`, `scheduled_at_tt`, `published_at_ig`, `published_at_tt`, `published_url_ig`, `published_url_tt`, or `channel_override` is hard-rejected by `gate_validators.rejectLegacyFormatFields`. The orchestrator writes the raw output to `content_queue_rejected` and escalates. This catches any LLM regression to the v1.0.0 shape.

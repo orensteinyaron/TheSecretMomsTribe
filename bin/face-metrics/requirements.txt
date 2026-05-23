@@ -1,0 +1,12 @@
+# Avatar Full v5 face-metrics sidecar — pinned dependencies.
+#
+# Python: 3.14 (see .python-version). Mediapipe 0.10.x has cp314 wheels
+# but no longer exposes the legacy mp.solutions API on 3.14; this
+# sidecar uses mp.tasks.vision.FaceLandmarker instead and downloads
+# the face_landmarker.task model on first run.
+#
+# Wheels available for Python 3.10 - 3.14 per PyPI as of 2026-05-19;
+# bumping the Python pin requires re-validating mediapipe wheels exist.
+
+mediapipe==0.10.35
+opencv-python-headless==4.13.0.92
