@@ -39,6 +39,25 @@ function getSupabase(): SupabaseClient {
   return _supabase;
 }
 
+/**
+ * Resolves the render_profile UUIDs for the Avatar Full pipeline slugs.
+ * content_queue.render_profile_id is UUID-typed and FKs to render_profiles(id);
+ * filtering by slug strings directly throws "invalid input syntax for type uuid".
+ * Cached on first call.
+ */
+const AVATAR_RENDER_PROFILE_SLUGS = ['avatar-v1', 'avatar-full-v5'] as const;
+let _avatarRenderProfileIds: string[] | null = null;
+async function getAvatarRenderProfileIds(): Promise<string[]> {
+  if (_avatarRenderProfileIds !== null) return _avatarRenderProfileIds;
+  const { data, error } = await getSupabase()
+    .from('render_profiles')
+    .select('id, slug')
+    .in('slug', AVATAR_RENDER_PROFILE_SLUGS as unknown as string[]);
+  if (error) throw new Error(`[getAvatarRenderProfileIds] ${error.message}`);
+  _avatarRenderProfileIds = (data ?? []).map((r) => r.id as string);
+  return _avatarRenderProfileIds;
+}
+
 // ── Look queries ──────────────────────────────────────────────────────────────
 
 /**
@@ -284,10 +303,12 @@ export async function countActiveStillsForCombo(
  * some rows lack a `look_id`.
  */
 export async function getRecentLookPicks(limit: number): Promise<RecentLookPick[]> {
+  const avatarProfileIds = await getAvatarRenderProfileIds();
+  if (avatarProfileIds.length === 0) return [];
   const { data, error } = await getSupabase()
     .from('content_queue')
     .select('avatar_config, updated_at')
-    .in('render_profile_id', ['avatar-v1', 'avatar-full-v5'])
+    .in('render_profile_id', avatarProfileIds)
     .not('avatar_config', 'is', null)
     .order('updated_at', { ascending: false })
     .limit(limit * 3);
@@ -316,11 +337,13 @@ export async function getRecentLookPicks(limit: number): Promise<RecentLookPick[
  *    is no longer in rachel_locations (defensive — shouldn't happen).
  */
 export async function getRecentLocationPicks(limit: number): Promise<RecentLocationPick[]> {
+  const avatarProfileIds = await getAvatarRenderProfileIds();
+  if (avatarProfileIds.length === 0) return [];
   // Step 1: fetch overfetched content_queue rows
   const { data: queueRows, error: queueError } = await getSupabase()
     .from('content_queue')
     .select('avatar_config, updated_at')
-    .in('render_profile_id', ['avatar-v1', 'avatar-full-v5'])
+    .in('render_profile_id', avatarProfileIds)
     .not('avatar_config', 'is', null)
     .order('updated_at', { ascending: false })
     .limit(limit * 3);
