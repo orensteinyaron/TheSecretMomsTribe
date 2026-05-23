@@ -2,8 +2,8 @@ import type { RachelStill } from '../types.js';
 import {
   getStill, updateStillStatus, listStills,
   getLook, updateLookStatus,
-  getLocation, updateLocationStatus,
 } from '../db.js';
+import { getLocation, updateLocationStatus } from '../../location/db.js';
 
 /**
  * Transitions a still from 'pending' → 'active'. Also handles bootstrap:
