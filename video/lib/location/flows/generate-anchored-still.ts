@@ -23,13 +23,26 @@
  * @module flows/generate-anchored-still
  */
 
-import type { RachelStill } from '../../wardrobe-rotation/types.js';
+import type { RachelStill, RachelLook, RachelLocation } from '../../wardrobe-rotation/types.js';
 import { assembleAnchoredStillPrompt } from '../prompt/anchored-still-prompt.js';
 import { getLocation } from '../db.js';
 import {
   getLook, insertStill, updateStillStatus, listStills,
 } from '../../wardrobe-rotation/db.js';
-import { ANCHORED_STILL_CANDIDATES, type NanoBananaProFn } from './constants.js';
+import { RACHEL_SOUL_ID } from '../../wardrobe-rotation/flows/bootstrap-canon-look.js';
+import { ANCHORED_STILL_CANDIDATES, type NanoBananaProFn, type Soul2Fn } from './constants.js';
+
+/**
+ * Assembles the Soul-pass-through prompt. Soul 2.0 internally applies
+ * `enhance_prompt: true` — empirically validated (Soul job cf934cfd) that with
+ * a Rachel-in-location reference supplied as medias[role:image] + soul_id, the
+ * enhance_prompt rewrite preserves composition and just polishes the identity
+ * layer. So we keep the prompt minimal: name the wardrobe so it survives the
+ * rewrite, name the location for context, otherwise let medias dominate.
+ */
+function assembleSoulPassThroughPrompt(look: RachelLook, location: RachelLocation): string {
+  return `Woman in ${look.wardrobe}, standing in a ${location.name}, looking at camera with a warm friendly expression, mid-shot, soft natural light, 9:16 portrait`;
+}
 
 // ── Result + DI deps ──────────────────────────────────────────────────────────
 
@@ -92,6 +105,7 @@ export async function generateAnchoredStill(
   look_id: string,
   location_id: string,
   generateNanoBananaPro: NanoBananaProFn,
+  generateSoul2: Soul2Fn,
   deps: GenerateAnchoredStillDeps = DEFAULT_DEPS,
 ): Promise<GenerateAnchoredStillResult> {
   // 1. Validate look exists + active.
@@ -139,7 +153,9 @@ export async function generateAnchoredStill(
   // 5. Assemble the anchored-still prompt (SHORT — wardrobe only).
   const prompt = assembleAnchoredStillPrompt(look);
 
-  // 6. Generate N candidates via nano_banana_pro + medias anchor.
+  // 6. Generate N candidates via nano_banana_pro + medias anchor. These are
+  //    composition anchors only (wardrobe + location + framing) — they carry
+  //    inferred-from-reference faces, not Rachel's locked Soul identity.
   const candidates = await generateNanoBananaPro({
     prompt,
     count: ANCHORED_STILL_CANDIDATES,
@@ -153,15 +169,42 @@ export async function generateAnchoredStill(
     );
   }
 
-  // 7. Insert all candidates as pending with reference_image_url_used snapshot.
-  //    Currently length 1 (Higgsfield count cap, see constants.ts); shape kept
-  //    as a loop so a future fix that honours count=N requires no change.
-  const insertedStills: RachelStill[] = [];
+  // 7. Soul-pass-through (PR-B): feed each nano output into Soul 2.0 with
+  //    Rachel's locked soul_id, using the nano output as the medias reference.
+  //    The Soul output preserves composition (wardrobe + location + framing
+  //    from the nano anchor) but locks the face to canonical Rachel.
+  //    Validated empirically via Soul job cf934cfd against canonical Rachel.
+  //
+  //    Runs BEFORE persistence so a Soul transport failure aborts without
+  //    leaving orphan rows.
+  const soulPrompt = assembleSoulPassThroughPrompt(look, location);
+  const soulLocked: Array<{ job_id: string; url: string }> = [];
   for (const cand of candidates) {
+    const soulOuts = await generateSoul2({
+      prompt: soulPrompt,
+      soul_id: RACHEL_SOUL_ID,
+      aspect_ratio: '9:16',
+      count: 1,
+      medias: [{ value: cand.url, role: 'image' }],
+    });
+    if (soulOuts.length !== 1) {
+      throw new Error(
+        `generateAnchoredStill: Soul-pass-through expected 1 output, got ${soulOuts.length}`,
+      );
+    }
+    soulLocked.push(soulOuts[0]!);
+  }
+
+  // 8. Insert all (now Soul-locked) candidates as pending with
+  //    reference_image_url_used snapshot. The persisted soul_still_id /
+  //    soul_still_url are the Soul-2.0 outputs, NOT the transient nano
+  //    composition anchors.
+  const insertedStills: RachelStill[] = [];
+  for (const soulCand of soulLocked) {
     const inserted = await deps.insertStill({
       look_id, location_id,
-      soul_still_id: cand.job_id,
-      soul_still_url: cand.url,
+      soul_still_id: soulCand.job_id,
+      soul_still_url: soulCand.url,
       reference_image_url_used: referenceUrl,
       status: 'pending',
       created_by: 'skill_v1',

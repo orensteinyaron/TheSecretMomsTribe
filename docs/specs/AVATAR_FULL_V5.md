@@ -70,12 +70,14 @@ Avatar Full v5 always submits:
     "duration": 8,
     "mode": "std",
     "medias": [
-      { "role": "start_image", "value": "<Soul-canonical Rachel CDN URL>" },
+      { "role": "start_image", "value": "<state.start_image_url from v5-state.json>" },
       { "role": "audio", "value": "<per-clip ElevenLabs MP3 URL>" }
     ]
   }
 }
 ```
+
+**PR-B (YAR-136):** `start_image` is no longer the single canonical Rachel still. `phaseInit` resolves a wardrobe × location combination via `pickCombination` (wardrobe-rotation skill) and writes the chosen `look_id` / `location_id` / `still_id` back to `content_queue.avatar_config`. `state.start_image_url` is the resulting `rachel_stills.soul_still_url`, which is a Soul-2.0 identity-locked Rachel image (nano_banana_pro composition anchor + Soul-pass-through — see [video/lib/location/flows/generate-anchored-still.ts](video/lib/location/flows/generate-anchored-still.ts)). Every render now uses a different wardrobe + location combination; identity is locked to canonical Rachel via Soul. Audio flow unchanged.
 
 `mode` escalates `std → fast → surface-to-human` per Whisper WER gate (Finding 5).
 

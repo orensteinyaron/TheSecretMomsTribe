@@ -76,7 +76,7 @@ Each character record contains:
    - `aspect_ratio: 9:16`, `resolution: 720p`, `mode: std`
    - Submit sequentially (proxy-friendly), poll until all complete
 5. **Run QA agent** — patched identity-markers QA on all clips. If any clip scores <3 on identity-markers OR shows hard-fail hallucinations (forehead wrinkles, dropped moles, missing markers), pause and surface to user before stitching
-6. **Generate hook card PNG** — call `generate-hook-card.ts` with character's soul_still_media_id as background and `script.hook_overlay` as text. Output: 1080×1920 PNG
+6. **Generate hook card PNG** — call `generate-hook-card.ts --still-url=<state.start_image_url>` (PR-B made `--still-url` required; pass the same Soul-locked URL the v5 phaseInit picked for this render, available at `state.start_image_url` in `v5-state.json`). Output: 1080×1920 PNG
 7. **Stitch clips** — call `stitch-avatar.ts` with:
    - Ordered scene list
    - 200ms xfade + acrossfade between clips

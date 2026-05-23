@@ -62,3 +62,32 @@ export interface NanoBananaProImage {
 
 /** DI transport callable. */
 export type NanoBananaProFn = (input: NanoBananaProInput) => Promise<NanoBananaProImage[]>;
+
+/**
+ * Input for the Higgsfield Soul 2.0 DI transport (`model: 'soul_2'`).
+ *
+ * Soul-pass-through (PR-B): after nano_banana_pro produces a wardrobe + location
+ * composition anchor, we feed that anchor as `medias[role:image]` into Soul 2.0
+ * with Rachel's locked `soul_id`. The output preserves composition but locks
+ * the face to canonical Rachel. Validated empirically vs raw-nano start_image
+ * — see /Users/yarono/.claude/plans/expressive-waddling-bee.md.
+ *
+ * Soul 2.0 internally applies `enhance_prompt: true`; we accept that because
+ * the medias anchor carries enough composition signal to dominate the rewrite.
+ */
+export interface Soul2Input {
+  prompt: string;
+  soul_id: string;
+  aspect_ratio: '9:16';
+  medias: MediasReference[]; // exactly 1 image — the nano anchor
+  count: 1;                  // always 1 — we want a single locked output
+}
+
+/** Output: one record (count is always 1). */
+export interface Soul2Image {
+  job_id: string;
+  url: string;
+}
+
+/** DI transport callable. */
+export type Soul2Fn = (input: Soul2Input) => Promise<Soul2Image[]>;

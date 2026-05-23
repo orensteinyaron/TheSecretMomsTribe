@@ -6,6 +6,9 @@ import type {
   NanoBananaProFn,
   NanoBananaProInput,
   NanoBananaProImage,
+  Soul2Fn,
+  Soul2Input,
+  Soul2Image,
 } from '../flows/constants.ts';
 import { ANCHORED_STILL_CANDIDATES } from '../flows/constants.ts';
 import type {
@@ -100,6 +103,25 @@ function makeMockGenerator(opts?: { countOverride?: number }): {
   return { fn, calls };
 }
 
+/**
+ * Mock Soul 2.0 transport. Default behavior: take the medias[0] URL, return a
+ * deterministic Soul-locked URL keyed by it. Records calls for assertion.
+ */
+function makeMockSoul2(): { fn: Soul2Fn; calls: Soul2Input[] } {
+  const calls: Soul2Input[] = [];
+  const fn: Soul2Fn = async (input) => {
+    calls.push(input);
+    const ref = input.medias[0]!.value;
+    const out: Soul2Image[] = [{
+      job_id: `soul_job_${calls.length}`,
+      url: `https://higgsfield.example/soul_locked_${calls.length}.jpg`,
+    }];
+    void ref;
+    return out;
+  };
+  return { fn, calls };
+}
+
 interface MockDepsResult {
   deps: GenerateAnchoredStillDeps;
   getLookCalls: string[];
@@ -171,17 +193,22 @@ function makeMockDeps(opts: {
 
 test('happy path: approves the candidate, retires any siblings, snapshots canonical URL', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
+  const { fn: soul2 } = makeMockSoul2();
   const { deps, insertStillCalls, updateStillStatusCalls } = makeMockDeps({
     look: makeLook({ status: 'active' }),
     location: makeLocation({ status: 'active', reference_image_url: CANONICAL_URL }),
   });
 
-  const result = await generateAnchoredStill('look_01', 'location_01', generator, deps);
+  const result = await generateAnchoredStill('look_01', 'location_01', generator, soul2, deps);
 
-  // Result shape: first candidate becomes the active still.
+  // Result shape: first candidate becomes the active still. After PR-B Soul-
+  // pass-through, the persisted soul_still_id / soul_still_url are the Soul
+  // 2.0 outputs (identity-locked Rachel), NOT the nano_banana_pro composition
+  // anchor — even though the nano output is what got passed to Soul as the
+  // medias reference.
   assert.equal(result.still_id, 'still_uuid_1');
-  assert.equal(result.soul_still_id, 'job_1');
-  assert.equal(result.soul_still_url, 'https://higgsfield.example/cand_1.jpg');
+  assert.equal(result.soul_still_id, 'soul_job_1');
+  assert.equal(result.soul_still_url, 'https://higgsfield.example/soul_locked_1.jpg');
   assert.equal(result.reference_image_url_used, CANONICAL_URL);
   // With ANCHORED_STILL_CANDIDATES = 1 there are no siblings to retire.
   assert.equal(result.retired_still_ids.length, 0);
@@ -210,13 +237,14 @@ test('happy path: approves the candidate, retires any siblings, snapshots canoni
 
 test('look not found: throws with "not found"; generator NOT called', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
+  const { fn: soul2 } = makeMockSoul2();
   const { deps, insertStillCalls } = makeMockDeps({
     look: null,
     location: makeLocation({ status: 'active' }),
   });
 
   await assert.rejects(
-    () => generateAnchoredStill('look_99', 'location_01', generator, deps),
+    () => generateAnchoredStill('look_99', 'location_01', generator, soul2, deps),
     (err: Error) => {
       assert.match(err.message, /look_id 'look_99' not found/);
       return true;
@@ -228,13 +256,14 @@ test('look not found: throws with "not found"; generator NOT called', async () =
 
 test('look not active: throws "expected active"; generator NOT called', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
+  const { fn: soul2 } = makeMockSoul2();
   const { deps } = makeMockDeps({
     look: makeLook({ status: 'pending' }),
     location: makeLocation({ status: 'active' }),
   });
 
   await assert.rejects(
-    () => generateAnchoredStill('look_01', 'location_01', generator, deps),
+    () => generateAnchoredStill('look_01', 'location_01', generator, soul2, deps),
     (err: Error) => {
       assert.match(err.message, /is 'pending'/);
       assert.match(err.message, /expected 'active'/);
@@ -246,13 +275,14 @@ test('look not active: throws "expected active"; generator NOT called', async ()
 
 test('location not found: throws "not found"; generator NOT called', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
+  const { fn: soul2 } = makeMockSoul2();
   const { deps } = makeMockDeps({
     look: makeLook({ status: 'active' }),
     location: null,
   });
 
   await assert.rejects(
-    () => generateAnchoredStill('look_01', 'location_99', generator, deps),
+    () => generateAnchoredStill('look_01', 'location_99', generator, soul2, deps),
     (err: Error) => {
       assert.match(err.message, /location_id 'location_99' not found/);
       return true;
@@ -263,13 +293,14 @@ test('location not found: throws "not found"; generator NOT called', async () =>
 
 test('location not active: throws "expected active"', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
+  const { fn: soul2 } = makeMockSoul2();
   const { deps } = makeMockDeps({
     look: makeLook({ status: 'active' }),
     location: makeLocation({ status: 'pending', reference_image_url: null }),
   });
 
   await assert.rejects(
-    () => generateAnchoredStill('look_01', 'location_01', generator, deps),
+    () => generateAnchoredStill('look_01', 'location_01', generator, soul2, deps),
     (err: Error) => {
       assert.match(err.message, /is 'pending'/);
       assert.match(err.message, /expected 'active'/);
@@ -281,13 +312,14 @@ test('location not active: throws "expected active"', async () => {
 
 test('location missing reference_image_url: throws "has no reference_image_url"; generator NOT called', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
+  const { fn: soul2 } = makeMockSoul2();
   const { deps, insertStillCalls } = makeMockDeps({
     look: makeLook({ status: 'active' }),
     location: makeLocation({ status: 'active', reference_image_url: null }),
   });
 
   await assert.rejects(
-    () => generateAnchoredStill('look_01', 'location_01', generator, deps),
+    () => generateAnchoredStill('look_01', 'location_01', generator, soul2, deps),
     (err: Error) => {
       assert.match(err.message, /has no reference_image_url/);
       assert.match(err.message, /bootstrapLocation/);
@@ -300,6 +332,7 @@ test('location missing reference_image_url: throws "has no reference_image_url";
 
 test('active still already exists: throws "active still already exists"; generator NOT called', async () => {
   const { fn: generator, calls: genCalls } = makeMockGenerator();
+  const { fn: soul2 } = makeMockSoul2();
   const { deps, insertStillCalls, listStillsCalls } = makeMockDeps({
     look: makeLook({ status: 'active' }),
     location: makeLocation({ status: 'active', reference_image_url: CANONICAL_URL }),
@@ -307,7 +340,7 @@ test('active still already exists: throws "active still already exists"; generat
   });
 
   await assert.rejects(
-    () => generateAnchoredStill('look_01', 'location_01', generator, deps),
+    () => generateAnchoredStill('look_01', 'location_01', generator, soul2, deps),
     (err: Error) => {
       assert.match(err.message, /active still already exists/);
       assert.match(err.message, /Retire it first/);
@@ -325,13 +358,14 @@ test('active still already exists: throws "active still already exists"; generat
 
 test('transport returns wrong count: throws "expected 1 candidates, got 2"', async () => {
   const { fn: generator } = makeMockGenerator({ countOverride: 2 });
+  const { fn: soul2 } = makeMockSoul2();
   const { deps, insertStillCalls } = makeMockDeps({
     look: makeLook({ status: 'active' }),
     location: makeLocation({ status: 'active', reference_image_url: CANONICAL_URL }),
   });
 
   await assert.rejects(
-    () => generateAnchoredStill('look_01', 'location_01', generator, deps),
+    () => generateAnchoredStill('look_01', 'location_01', generator, soul2, deps),
     (err: Error) => {
       assert.match(err.message, /expected 1 candidates, got 2/);
       return true;
@@ -343,12 +377,13 @@ test('transport returns wrong count: throws "expected 1 candidates, got 2"', asy
 
 test('every insert receives the canonical URL in reference_image_url_used', async () => {
   const { fn: generator } = makeMockGenerator();
+  const { fn: soul2 } = makeMockSoul2();
   const { deps, insertStillCalls } = makeMockDeps({
     look: makeLook({ status: 'active' }),
     location: makeLocation({ status: 'active', reference_image_url: CANONICAL_URL }),
   });
 
-  await generateAnchoredStill('look_01', 'location_01', generator, deps);
+  await generateAnchoredStill('look_01', 'location_01', generator, soul2, deps);
 
   assert.equal(insertStillCalls.length, ANCHORED_STILL_CANDIDATES);
   for (const insert of insertStillCalls) {
@@ -358,12 +393,70 @@ test('every insert receives the canonical URL in reference_image_url_used', asyn
     assert.equal(insert.status, 'pending');
     assert.equal(insert.created_by, 'skill_v1');
   }
-  // Inserts carry the soul_still_id / soul_still_url values mapped 1:1 from
-  // the transport's candidates by index. With ANCHORED_STILL_CANDIDATES = 1
-  // this is just the first candidate; the shape is kept so a future count-cap
-  // fix doesn't require changing the assertion.
+  // Inserts carry the Soul-2.0 (identity-locked) outputs as soul_still_id /
+  // soul_still_url — the nano_banana_pro candidate is the composition anchor
+  // that feeds Soul, but only the Soul output is persisted. With
+  // ANCHORED_STILL_CANDIDATES = 1 this is just the first Soul output; the
+  // shape is kept so a future count-cap fix doesn't require changing this.
   const soulIds = insertStillCalls.map((i) => i.soul_still_id);
-  assert.deepEqual(soulIds, ['job_1']);
+  assert.deepEqual(soulIds, ['soul_job_1']);
   const soulUrls = insertStillCalls.map((i) => i.soul_still_url);
-  assert.deepEqual(soulUrls, ['https://higgsfield.example/cand_1.jpg']);
+  assert.deepEqual(soulUrls, ['https://higgsfield.example/soul_locked_1.jpg']);
+});
+
+// ── PR-B: Soul-pass-through ──────────────────────────────────────────────────
+
+test('Soul-pass-through: nano output is fed to Soul 2.0 with RACHEL_SOUL_ID; Soul output is persisted', async () => {
+  const { fn: generator } = makeMockGenerator();
+  const { fn: soul2, calls: soulCalls } = makeMockSoul2();
+  const { deps, insertStillCalls } = makeMockDeps({
+    look: makeLook({ status: 'active' }),
+    location: makeLocation({ status: 'active', reference_image_url: CANONICAL_URL }),
+  });
+
+  const result = await generateAnchoredStill('look_01', 'location_01', generator, soul2, deps);
+
+  // Soul transport was invoked exactly once with the right contract.
+  assert.equal(soulCalls.length, 1);
+  const soulInput = soulCalls[0]!;
+  assert.equal(soulInput.soul_id, '34a349a6-d6d9-423f-8c80-e4b4c8d6e770', 'must use locked Rachel soul_id');
+  assert.equal(soulInput.aspect_ratio, '9:16');
+  assert.equal(soulInput.count, 1);
+  assert.equal(soulInput.medias.length, 1);
+  assert.equal(soulInput.medias[0]!.role, 'image');
+  // The nano output is what gets passed as the Soul reference (composition anchor).
+  assert.equal(soulInput.medias[0]!.value, 'https://higgsfield.example/cand_1.jpg');
+  assert.ok(soulInput.prompt.length > 0, 'prompt must be non-empty');
+
+  // Persisted soul_still_url / soul_still_id come from Soul, NOT nano.
+  assert.equal(insertStillCalls.length, 1);
+  assert.equal(insertStillCalls[0]!.soul_still_url, 'https://higgsfield.example/soul_locked_1.jpg');
+  assert.equal(insertStillCalls[0]!.soul_still_id, 'soul_job_1');
+
+  // Same in the result.
+  assert.equal(result.soul_still_url, 'https://higgsfield.example/soul_locked_1.jpg');
+  assert.equal(result.soul_still_id, 'soul_job_1');
+});
+
+test('Soul-pass-through fires AFTER nano, BEFORE insert (no DB write if Soul fails)', async () => {
+  const { fn: generator } = makeMockGenerator();
+  const soul2: Soul2Fn = async () => {
+    throw new Error('boom from Soul 2.0');
+  };
+  const { deps, insertStillCalls, updateStillStatusCalls } = makeMockDeps({
+    look: makeLook({ status: 'active' }),
+    location: makeLocation({ status: 'active', reference_image_url: CANONICAL_URL }),
+  });
+
+  await assert.rejects(
+    () => generateAnchoredStill('look_01', 'location_01', generator, soul2, deps),
+    (err: Error) => {
+      assert.match(err.message, /boom from Soul 2\.0/);
+      return true;
+    },
+  );
+
+  // No rows were written if Soul failed — proves Soul runs before insertStill.
+  assert.equal(insertStillCalls.length, 0, 'must not persist when Soul fails');
+  assert.equal(updateStillStatusCalls.length, 0, 'must not approve when Soul fails');
 });

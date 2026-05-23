@@ -18,8 +18,14 @@
   "type": "module",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
+    "@remotion/bundler": "^4.0.465",
+    "@remotion/renderer": "^4.0.465",
     "@supabase/supabase-js": "^2.101.1",
     "apify-client": "^2.22.3",
+    "dotenv": "^17.4.2",
+    "openai": "^6.39.0",
+    "react": "^19.2.6",
+    "remotion": "^4.0.465",
     "sharp": "^0.34.5"
   }
 }

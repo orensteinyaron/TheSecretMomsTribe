@@ -66,7 +66,14 @@ import { measureFrames } from "../lib/face-metrics.js";
 import { buildPhrases } from "../lib/phrase-grouper.js";
 import { AVATAR_V5_FPS, AUDIO_BRIDGE_FRAMES, AVATAR_V5_WIDTH, AVATAR_V5_HEIGHT } from "../src/templates/avatar-v5/types.js";
 import { layoutClips } from "../src/templates/avatar-v5/AvatarV5Composition.js";
-import { RACHEL_SOUL_STILL_URL } from "../lib/avatar-constants.js";
+import { pickAndPersistCombination, type PickAndPersistDeps } from "../lib/v5-init-combination.js";
+import {
+  listActiveLooks,
+  listActiveStills,
+  getRecentLookPicks,
+  getRecentLocationPicks,
+} from "../lib/wardrobe-rotation/index.js";
+import { listActiveLocations } from "../lib/location/index.js";
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────
 
@@ -107,6 +114,62 @@ async function uploadToPostImages(bucketPath: string, localPath: string, content
 
 // ─── Phase: init ─────────────────────────────────────────────────────────
 
+/**
+ * Production deps for the wardrobe × location combination resolution. Wraps
+ * the skill DB layer + a Supabase merge-update for content_queue.avatar_config.
+ *
+ * generateAnchoredStill is intentionally a throw — the v5 Node script cannot
+ * safely invoke Higgsfield MCP from Node (the playbook owns those calls). If
+ * pickCombination returns needs_generation: true, the operator must
+ * bootstrap the missing still from the session via the location skill,
+ * then re-run --phase=init.
+ */
+function productionCombinationDeps(): PickAndPersistDeps {
+  return {
+    listActiveLooks,
+    listActiveLocations,
+    listActiveStills,
+    getRecentLookPicks,
+    getRecentLocationPicks,
+    generateAnchoredStill: async (look_id, location_id) => {
+      throw new Error(
+        `pickCombination returned needs_generation: true for look=${look_id}/location=${location_id}, ` +
+          `but the v5 Node renderer cannot bootstrap stills (Higgsfield MCP is session-scoped). ` +
+          `Run the location skill's generateAnchoredStill flow from the Claude Code session, ` +
+          `then re-run --phase=init.`,
+      );
+    },
+    updateAvatarConfig: async (content_id, patch) => {
+      const { data: cur, error: selErr } = await supa()
+        .from("content_queue")
+        .select("avatar_config")
+        .eq("id", content_id)
+        .single();
+      if (selErr || !cur) throw new Error(`updateAvatarConfig: read failed for ${content_id}: ${selErr?.message ?? "no row"}`);
+      const merged = { ...((cur.avatar_config as Record<string, unknown> | null) ?? {}), ...patch };
+      const { error: updErr } = await supa()
+        .from("content_queue")
+        .update({ avatar_config: merged })
+        .eq("id", content_id);
+      if (updErr) throw new Error(`updateAvatarConfig: write failed for ${content_id}: ${updErr.message}`);
+    },
+    readAvatarConfig: async (content_id) => {
+      const { data, error } = await supa()
+        .from("content_queue")
+        .select("avatar_config")
+        .eq("id", content_id)
+        .single();
+      if (error || !data) throw new Error(`readAvatarConfig: ${content_id}: ${error?.message ?? "no row"}`);
+      const cfg = (data.avatar_config as Record<string, unknown> | null) ?? {};
+      return {
+        look_id: cfg.look_id as string | undefined,
+        location_id: cfg.location_id as string | undefined,
+        still_id: cfg.still_id as string | undefined,
+      };
+    },
+  };
+}
+
 async function phaseInit(args: Args): Promise<void> {
   const contentId = requireArg(args, "content-id");
   const workdir = requireArg(args, "workdir");
@@ -132,6 +195,14 @@ async function phaseInit(args: Args): Promise<void> {
     if (!c.expected_script) throw new Error(`avatar_config.clips[${c.id}].expected_script is empty`);
   }
 
+  // PR-B: pick wardrobe × location combination, materialize start_image, and
+  // persist all three IDs back to content_queue.avatar_config with post-write
+  // verify (May 2026 "every persistent write needs a post-check" principle).
+  const combination = await pickAndPersistCombination(contentId, productionCombinationDeps());
+  console.log(
+    `[init] picked look=${combination.look_id} location=${combination.location_id} still=${combination.still_id}`,
+  );
+
   const state = initState({
     content_id: contentId,
     workdir,
@@ -140,10 +211,15 @@ async function phaseInit(args: Args): Promise<void> {
     hook_secondary: avCfg.hook_secondary ? String(avCfg.hook_secondary) : undefined,
     register: String(avCfg.register ?? "concerned_insider"),
     clips,
+    look_id: combination.look_id,
+    location_id: combination.location_id,
+    still_id: combination.still_id,
+    start_image_url: combination.start_image_url,
   });
   saveState(state);
   console.log(`[init] state at ${statePath(workdir)}`);
   console.log(`[init] ${clips.length} clip(s), register=${state.register}, hook="${state.hook_text.slice(0, 60)}…"`);
+  console.log(`[init] start_image_url=${combination.start_image_url}`);
 }
 
 // ─── Phase: tts ──────────────────────────────────────────────────────────
@@ -460,7 +536,7 @@ async function phaseQa(args: Args): Promise<void> {
   const metadataPath = path.join(workdir, "qa-metadata.json");
   const metadata = {
     asset_id: state.content_id,
-    reference_image_url: RACHEL_SOUL_STILL_URL,
+    reference_image_url: state.start_image_url,
     clips: state.clips
       .filter((c) => c.verify_status === "PASS")
       .map((c, i, all) => ({

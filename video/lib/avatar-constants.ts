@@ -1,19 +1,19 @@
-// Soul-canonical Rachel + Avatar Full pipeline defaults.
+// Avatar Full pipeline constants.
 //
-// Single source of truth — referenced by:
-//   - video/scripts/generate-hook-card.ts (hook card background)
-//   - video/lib/seedance/* (start_image for Seedance generation)
-//   - video/lib/elevenlabs-per-clip.ts (voice id)
-//   - video/scripts/render-avatar-full-v5.ts (defaults)
+// Referenced by:
+//   - video/lib/elevenlabs-per-clip.ts (RACHEL_ELEVENLABS_VOICE_ID)
+//   - video/scripts/render-avatar-full-v5.ts (AVATAR_V5_DEFAULTS)
+//   - video/lib/location/flows/generate-anchored-still.ts (RACHEL_SOUL_ID via re-export from wardrobe-rotation)
+//   - video/lib/wardrobe-rotation/flows/bootstrap-canon-look.ts (re-exports RACHEL_SOUL_ID)
 //
-// The Soul still ID + URL are the canonical Rachel reference as backfilled
-// in docs/specs/PIECE_3BCAFC78_BACKFILL_V1.md and used by QA for identity
-// consistency scoring.
+// PR-B (YAR-136): removed RACHEL_SOUL_STILL_ID and RACHEL_SOUL_STILL_URL.
+// Those were the single canonical Rachel reference; every v5 render now
+// resolves its own start_image_url via pickCombination + Soul-pass-through
+// (see video/lib/v5-init-combination.ts) and stores the result in
+// rachel_stills.soul_still_url per (look_id, location_id) combo.
 
-export const RACHEL_SOUL_STILL_ID = "f757b09c-d94d-4ade-a076-4a1a496c641e";
-
-export const RACHEL_SOUL_STILL_URL =
-  "https://d2ol7oe51mr4n9.cloudfront.net/user_3DGDY5uQO2VTYDyY6tkVHLr8qE8/f757b09c-d94d-4ade-a076-4a1a496c641e.png";
+/** Higgsfield Soul 2.0 character ID for Rachel. Source of identity lock. */
+export const RACHEL_SOUL_ID = "34a349a6-d6d9-423f-8c80-e4b4c8d6e770";
 
 export const RACHEL_ELEVENLABS_VOICE_ID = "tRhabdS7JjlQ0lVEImuM";
 
