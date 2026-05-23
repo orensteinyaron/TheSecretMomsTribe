@@ -5,11 +5,15 @@
  *   Option A — bold solid block (rotated purple band, white display sans)
  *   Option B — editorial overlay (white serif italic with soft drop shadow)
  *
- * Both share the same Rachel still as background and the same hook text.
- * Hardcoded inputs for v1; flags later.
+ * Both share the same still as background and the same hook text.
  *
  * Usage:
- *   npx tsx scripts/generate-hook-card.ts
+ *   npx tsx scripts/generate-hook-card.ts --still-url=<https-url>
+ *
+ * --still-url is required. PR-B removed the hardcoded RACHEL_SOUL_STILL_URL
+ * default: every render must pass an explicit URL so the hook card matches
+ * the wardrobe × location combination picked by phaseInit
+ * (state.start_image_url).
  *
  * Output: 2 PNG paths printed to stdout.
  */
@@ -22,7 +26,24 @@ import path from "path";
 import os from "os";
 import sharp from "sharp";
 
-import { RACHEL_SOUL_STILL_URL as RACHEL_STILL_URL } from "../lib/avatar-constants.js";
+// ---- CLI args ----
+
+function parseStillUrlArg(argv: string[]): string {
+  for (const a of argv) {
+    if (a.startsWith("--still-url=")) {
+      const v = a.slice("--still-url=".length);
+      if (!v) throw new Error("--still-url=<https-url> is required (got empty value)");
+      if (!/^https?:\/\//.test(v)) throw new Error(`--still-url must be an http(s) URL, got: ${v}`);
+      return v;
+    }
+  }
+  throw new Error(
+    "--still-url=<https-url> is required. Pass the Soul-locked still URL " +
+      "(rachel_stills.soul_still_url or v5-state.json:start_image_url).",
+  );
+}
+
+const RACHEL_STILL_URL = parseStillUrlArg(process.argv);
 
 // ---- Hardcoded inputs (parameterise later) ----
 
