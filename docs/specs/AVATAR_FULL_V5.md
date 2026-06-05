@@ -187,14 +187,31 @@ Aligned with the canonical `generate-hook-card.ts` SVG (Option A — rotated pur
 | Width | Edge bleed: `left: -100 px, right: -100 px` (block is 1280 px wide on 1080 px frame, so rotation corners never expose canvas) |
 | Rotation | `transform: rotate(-2deg)` (matches hook-card SVG `rotate(-2 540 1500)`) |
 | Background | `#63246a` (`BRAND_PURPLE`) |
-| Primary text | Helvetica Neue, 900 weight, 124 px, letter-spacing 4, UPPERCASE, `#fcfcfa` |
+| Primary text | Helvetica Neue, 900 weight, **auto-sized** via `hookPrimaryFontSize()` (124 / 108 / 92 px by length tier), letter-spacing 4, UPPERCASE, `#fcfcfa` |
 | Secondary text (optional) | Helvetica Neue, 600 weight, 44 px, letter-spacing 1, UPPERCASE, `#fcfcfa`, opacity 0.95 |
+| Text safe-width | both lines `maxWidth = 90 % × frame width` (`HOOK_SAFE_WIDTH_FRAC`) + `overflowWrap` — **text never bleeds off-frame** (only the purple block does) |
+
+**Text never clips (added after the dcd87826 e2e):** the dominant line's font size is a pure, tested function of the headline's length — `hookPrimaryFontSize()` in `video/lib/hook-overlay-fit.ts` (tiers: ≤12 chars → 124 px, ≤18 → 108, else 92). Both text lines are clamped to 90 % of the frame width. This is the **single source of sizing** shared by the React component AND the `generate-hook-card.ts` SVG (which sources the same fn + caps its `textLength` at the safe width). The earlier fixed `124 px` with no width bound let a wide line ("BEST PARENTING") render into the −100 px bleed and clip at both edges.
 | Duration | 1.0 s (`durationSec` default) — hard cut in, hard cut out, NO fade |
 | Mount point | Clip 1 only, wrapped in a 30-frame (`AVATAR_V5_FPS × 1.0`) `<Sequence from={0}>` in `AvatarV5Composition` |
 
 **Text split for the deepfakes piece (canonical example):** `primary="DEEPFAKES"`, `secondary="ARE ALREADY IN YOUR KID'S SCHOOL"`. Driven by `avatar_config.hook_primary` + `avatar_config.hook_secondary`; falls back to `defaultHookSplit(hook_text)` in `v5-state.ts:initState` which splits on the first ". " of the full hook sentence.
 
 **ContentGen contract (future):** when ContentGen learns to emit Avatar Full pieces directly, it must emit `avatar_config.hook_primary` and `avatar_config.hook_secondary` explicitly (don't rely on the heuristic split — write the headline+qualifier intent).
+
+---
+
+## Clip duration budget (audio-matched, never crammed)
+
+**Module:** `video/lib/clip-duration.ts` (pure, tested) + `video/lib/audio-trim.ts`. Added after the dcd87826 e2e, where clips authored with 5–9 s `duration_target_s` estimates had 8–15.5 s of real TTS audio. Seedance renders **exactly** the requested `duration` and crams the audio in (speed-up, garbled voice); audio > 15 s **hard-fails** the job.
+
+**Rule: the measured TTS audio length is the source of truth for clip duration. The LLM `duration_target_s` is advisory only.** Constants: `SEEDANCE_MAX_CLIP_S=15`, `CHARS_PER_SECOND=14` (eleven_v3 calibration), `CLIP_TAIL_S=1`, `MAX_AUDIO_S=13.5`, `TRIM_TOLERANCE_S=1.0`, `PLAN_TARGET_S=12.0` (conservative split target).
+
+Cascade (matches the human policy: *plan to fit → trim a small miss → split otherwise*):
+1. **`phaseInit` plans to fit** — `planClips()` splits any clip whose `estimateAudioSeconds(script) > 12 s` into sentence-boundary sub-clips with stable suffixed ids (`clip_03` → `clip_03a`, `clip_03b`). Downstream phases reference `clip.id` generically, so suffixes need no other change.
+2. **`phaseTts` measures + salvages** — after each MP3, `probeDurationSeconds` → `needsSilenceTrim`: *fits* keep; *trimmable* (≤ `MAX_AUDIO_S + TRIM_TOLERANCE_S`) → `trimSilenceToFit` (ffmpeg `silenceremove`, leading/trailing) then re-measure; *mustSplit* (gross miss past the plan margin) → throw a clear calibration error. Persists `clip.tts_audio_s` + `clip.submit_duration_s = seedanceDurationForAudio()` = `min(15, ceil(audio)+1)` (the `+1` tail also keeps the inter-clip audio bridge from cutting the last word).
+3. **Submission reads `submit_duration_s`** — the per-clip Seedance `duration` MUST come from `clip.submit_duration_s`, never `duration_target_s`.
+4. **`phaseVerify` anti-cram backstop** — if a rendered clip's audio is < 90 % of `tts_audio_s`, it's marked `FAIL_CRAMMED` and routed through the standard retry/surface escalation — never silently shipped.
 
 ---
 
