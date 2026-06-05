@@ -75,13 +75,18 @@ export async function pickAndPersistCombination(
   content_id: string,
   deps: PickAndPersistDeps,
 ): Promise<PickAndPersistResult> {
-  const [activeLooks, activeLocations, activeStills, recentLookPicks, recentLocationPicks] = await Promise.all([
-    deps.listActiveLooks(),
-    deps.listActiveLocations(),
-    deps.listActiveStills(),
-    deps.getRecentLookPicks(PICK_RECENCY_LIMIT),
-    deps.getRecentLocationPicks(PICK_RECENCY_LIMIT),
-  ]);
+  const [activeLooks, activeLocations, activeStills, recentLookPicks, recentLocationPicks, existing] =
+    await Promise.all([
+      deps.listActiveLooks(),
+      deps.listActiveLocations(),
+      deps.listActiveStills(),
+      deps.getRecentLookPicks(PICK_RECENCY_LIMIT),
+      deps.getRecentLocationPicks(PICK_RECENCY_LIMIT),
+      // YAR-146: read any pre-pinned look_id/location_id from avatar_config so
+      // the picker honors them and LRU-fills only the null dimension(s). The
+      // post-write re-SELECT verify below is a SEPARATE read of the same field.
+      deps.readAvatarConfig(content_id),
+    ]);
 
   const pick = pickCombination({
     activeLooks,
@@ -89,6 +94,8 @@ export async function pickAndPersistCombination(
     activeStills,
     recentLookPicks,
     recentLocationPicks,
+    pinnedLookId: existing.look_id,
+    pinnedLocationId: existing.location_id,
   });
 
   let still_id: string;
