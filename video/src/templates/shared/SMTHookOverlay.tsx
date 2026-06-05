@@ -1,6 +1,10 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
 import { BRAND_PURPLE } from "../v2/types";
+import {
+  hookPrimaryFontSize,
+  HOOK_SAFE_WIDTH_FRAC,
+} from "../../../lib/hook-overlay-fit.js";
 
 /**
  * Locked SMT hook overlay style for Avatar Full + future video formats.
@@ -52,11 +56,19 @@ export const SMTHookOverlay: React.FC<SMTHookOverlayProps> = ({
   rotationDeg = -2,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width } = useVideoConfig();
   const t = frame / fps;
 
   // Hard cut in/out — no fade.
   if (t < startSec || t >= startSec + durationSec) return null;
+
+  // Keep the TEXT inside the visible frame (the purple block bleeds off-edge
+  // by design via EDGE_BLEED_PX, but text must never clip). Size the dominant
+  // line down for longer hooks so a wide line like "BEST PARENTING" wraps
+  // within the safe area instead of overflowing into the bleed zone. Sizing
+  // rule lives in the tested pure module `lib/hook-overlay-fit`.
+  const safeTextWidth = Math.round(width * HOOK_SAFE_WIDTH_FRAC);
+  const primaryFontSize = hookPrimaryFontSize(primary);
 
   return (
     <AbsoluteFill
@@ -89,12 +101,14 @@ export const SMTHookOverlay: React.FC<SMTHookOverlayProps> = ({
           style={{
             fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif',
             fontWeight: 900,
-            fontSize: 124,
+            fontSize: primaryFontSize,
             letterSpacing: 4,
             color: "#fcfcfa",
             textTransform: "uppercase",
             lineHeight: 1,
             textAlign: "center",
+            maxWidth: safeTextWidth,
+            overflowWrap: "break-word",
           }}
         >
           {primary}
@@ -110,6 +124,8 @@ export const SMTHookOverlay: React.FC<SMTHookOverlayProps> = ({
               textTransform: "uppercase",
               textAlign: "center",
               opacity: 0.95,
+              maxWidth: safeTextWidth,
+              overflowWrap: "break-word",
             }}
           >
             {secondary}

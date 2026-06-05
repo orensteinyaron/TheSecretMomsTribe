@@ -219,6 +219,31 @@ Same face, same person, multiple outfits so she's not in the same top every vide
 
 **Scripting rule:** Commas and em-dashes in the script = pauses in the audio. Build natural breath and hesitation in ("okay wait—", "I mean..."). Emotional range is required — NOT happy all the time. Serious on serious lines. Smile only at payoff moments.
 
+### Hook Overlay Style
+
+The on-screen hook treatment is **Option A — bold solid block**, shared by the
+video overlay (`SMTHookOverlay.tsx`) and the static thumbnail
+(`generate-hook-card.ts`):
+
+- **Purple block** (`#63246a`) bleeds edge-to-edge — it extends ~100 px past
+  both frame edges so the −2° rotation corners never expose the canvas. The
+  **block bleeding is intentional**.
+- **Dominant line:** bold all-caps white sans, auto-sized by hook length so the
+  **text never clips**. Tiers (visible-char count, whitespace excluded):
+  **≤12 chars → 124 px**, **≤18 → 108 px**, **else → 92 px** (124 px is the
+  locked size for short, punchy hooks; longer hooks step down). The text is
+  constrained to **90 % of frame width** (`HOOK_SAFE_WIDTH_FRAC`) and wraps
+  inside that safe area — so while the purple block reaches the edges, the
+  letters stay within the visible frame.
+- **Optional secondary line:** smaller (44 px), same safe-width constraint.
+- **Position:** lower-third (top ~68 %), clear of the bottom-right watermark.
+- **Motion:** 1.0 s hard cut in/out (no fade) on clip 1 only.
+
+The single source of truth for the sizing rule is the tested pure module
+`video/lib/hook-overlay-fit.ts` (`hookPrimaryFontSize`, `HOOK_SAFE_WIDTH_FRAC`).
+**Lock:** if this visual changes, update this section AND `SMTHookOverlay.tsx`
+AND `generate-hook-card.ts` together — never one without the others.
+
 ### Setting, lighting, on-screen styling
 
 - **Setting:** Home-adjacent. Kitchen, car, couch, front step. Never a studio, never a "content corner."
@@ -312,3 +337,5 @@ This document is the source of truth for Rachel as a character. Downstream artif
 - **2026-04-17 — V1 locked.** Name: Rachel. Three kids (5, 11, 15 — oldest a teen boy). Tiered naming policy (never in short-form; named in bio, podcast/collabs, and **Ask Rachel format**). Visual identity, look reasoning, generation prompt (preserved verbatim with regeneration rule), wardrobe rotation, voice spec, Rachel format distribution (Avatar Full 55% / Ask Rachel 30% / Avatar+Visual 15%), and canonical asset references documented. Two public asset URLs (reference face + voice sample) reserved in Supabase — pending upload. Cross-reference to `CONTENT_STRATEGY_V1.md` established.
 
 - **2026-04-17 — V1.1.** Added "You should [invest/buy/put your money in]…" to Rachel's banned phrases list, enforcing the first-person-only rule for the new Financial pillar. Cross-reference to `CONTENT_STRATEGY_V1.md` §3a.
+
+- **2026-06-06 — V1.2.** Documented the **Hook Overlay Style** section (purple block bleeds to edge; dominant line auto-sizes 124/108/92 by length and is constrained to 90 % safe width so text never clips). Sizing rule extracted to the tested pure module `video/lib/hook-overlay-fit.ts` and shared by `SMTHookOverlay.tsx` + `generate-hook-card.ts`.

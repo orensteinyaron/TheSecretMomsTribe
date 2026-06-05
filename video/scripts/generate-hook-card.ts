@@ -25,6 +25,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import sharp from "sharp";
+import { hookPrimaryFontSize, HOOK_SAFE_WIDTH_FRAC } from "../lib/hook-overlay-fit.js";
 
 // ---- CLI args ----
 
@@ -101,11 +102,19 @@ function svgOptionA(): string {
   const handle = escapeXml(HANDLE);
   // Band: middle third, rotated -2° around canvas centre.
   // Wider than canvas (overshoot ±100px) so rotation corners don't expose
-  // the background through the edges.
-  // textLength + lengthAdjust forces the text to fit the band width exactly;
-  // librsvg can't always find Impact, but glyph squeeze keeps the long
-  // headline contained regardless of which display sans it falls back to.
-  const bandTextWidth = 920;  // band is 1080 wide; leave ~80px padding either side
+  // the background through the edges — the BLOCK bleeds by design.
+  //
+  // The TEXT must never reach the bleed edge. Two guards, matching the
+  // SMTHookOverlay component (both source the shared sizing rule):
+  //   1. Font size steps down by hook length via hookPrimaryFontSize().
+  //   2. textLength is capped at the safe width (HOOK_SAFE_WIDTH_FRAC × W),
+  //      and lengthAdjust=spacingAndGlyphs forces the rendered headline to
+  //      fit that width regardless of which display sans librsvg falls back
+  //      to (Impact isn't always available). So even a long headline at the
+  //      smallest tier is squeezed within the safe area, never clipped.
+  const primaryFontSize = hookPrimaryFontSize(HOOK_TEXT);
+  const safeTextWidth = Math.round(W * HOOK_SAFE_WIDTH_FRAC); // 972 on 1080
+  const bandTextWidth = Math.min(920, safeTextWidth); // ~80px padding either side, never past safe width
   // Band sits in the bottom-third — centered around y≈1500 — so it lands
   // below Rachel's face/sweater rather than over it.
   return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
@@ -113,7 +122,7 @@ function svgOptionA(): string {
     <rect x="-100" y="1320" width="1280" height="360" fill="${BRAND_PURPLE}"/>
     <text x="540" y="1525"
           font-family="'Helvetica Neue', Impact, 'Arial Black', sans-serif"
-          font-size="95"
+          font-size="${primaryFontSize}"
           font-weight="900"
           font-stretch="condensed"
           fill="${OFF_WHITE}"
