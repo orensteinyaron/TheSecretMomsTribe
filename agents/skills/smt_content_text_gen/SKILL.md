@@ -131,7 +131,7 @@ Apply `face_of_smt_v1.md`. Specifically:
 - Contractions always.
 - Three kids: 5, 11, 15.
 - End with cliffhanger, not generic CTA.
-- Voice ID: `9JqF6OmJtGjHTDODKG2c`.
+- Voice ID: `tRhabdS7JjlQ0lVEImuM`.
 
 ## Pillar-specific generation rules
 
@@ -190,7 +190,7 @@ Apply `face_of_smt_v1.md`. Specifically:
   "slides": [{"slide_number": 1, "text": "...", "type": "hook | content | cta", "image_prompt": "..."}, ...],
   "ai_magic_output": "<verbatim original_prompt + original_output, ONLY for ai_magic pillar, NEVER fabricated>",
   "image_prompt": { "prompt": "...", "axes": { "shot_type": "...", "lighting": "...", "palette": "...", "subject": "...", "mood": "...", "rachel_mode": "rachel_in_frame | broll" } },
-  "avatar_config": { "format": "full_avatar | avatar_visual", "voice_id": "9JqF6OmJtGjHTDODKG2c", "duration_target": 30, "clips": [...] },
+  "avatar_config": { "format": "full_avatar | avatar_visual", "voice_id": "tRhabdS7JjlQ0lVEImuM", "duration_target": 30, "clips": [...] },
   "audio_suggestion": "<TikTok only, null for IG>",
   "generation_context": {
     "model": "<model id>",
@@ -261,7 +261,7 @@ This is the section the May 11 incident proved we need most.
   "ai_magic_output": "PROMPT: Write a polite email to my 3rd grader's teacher asking about the field trip refund.\n\nOUTPUT: Hi Ms. Rivera, I hope this finds you well. I'm writing about the field trip on Oct 12 that Marcus had to miss...",
   "caption": "The teacher email I've been avoiding. Done in 12 seconds. Tool: ChatGPT.",
   "hashtags": ["#aimom", "#chatgptforparents", "#momhack", "#schoolage", "#workingmom"],
-  "avatar_config": { "format": "avatar_visual", "voice_id": "9JqF6OmJtGjHTDODKG2c", "duration_target": 30, "clips": [...] }
+  "avatar_config": { "format": "avatar_visual", "voice_id": "tRhabdS7JjlQ0lVEImuM", "duration_target": 30, "clips": [...] }
 }
 ```
 
@@ -309,7 +309,7 @@ If the Strategist had correctly routed signal_id `6d65fbae-...` as `parenting_in
   "caption": "The reframe single moms need. Save this before bedtime tonight. 🤍",
   "avatar_config": {
     "format": "full_avatar",
-    "voice_id": "9JqF6OmJtGjHTDODKG2c",
+    "voice_id": "tRhabdS7JjlQ0lVEImuM",
     "duration_target": 25,
     "clips": [
       {"type": "avatar", "script": "Okay listen — your 4-year-old just asked where her daddy is. Don't panic. Don't lie. Here's the move.", "purpose": "hook"},

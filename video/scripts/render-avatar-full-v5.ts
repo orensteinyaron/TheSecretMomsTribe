@@ -215,6 +215,7 @@ async function phaseInit(args: Args): Promise<void> {
     location_id: combination.location_id,
     still_id: combination.still_id,
     start_image_url: combination.start_image_url,
+    voice_id: avCfg.voice_id ? String(avCfg.voice_id) : undefined,
   });
   saveState(state);
   console.log(`[init] state at ${statePath(workdir)}`);
@@ -233,6 +234,7 @@ async function phaseTts(args: Args): Promise<void> {
   const mp3s = await generatePerClipMp3s({
     clips: state.clips.map((c) => ({ id: c.id, expected_script: c.expected_script })),
     workdir: audioDir,
+    voice_id: state.voice_id,
   });
   for (const m of mp3s) {
     const clip = state.clips.find((c) => c.id === m.clip_id);

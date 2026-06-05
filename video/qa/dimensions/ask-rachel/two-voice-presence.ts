@@ -1,6 +1,6 @@
 // two_voice_presence — Ask Rachel format uses two voices: an unseen
 // interviewer (from a 2–3-voice ElevenLabs pool per FACE_OF_SMT V1 §6) and
-// Rachel (voice_id 9JqF6OmJtGjHTDODKG2c).
+// Rachel (voice_id tRhabdS7JjlQ0lVEImuM).
 //
 // The dim verifies that the final audio contains both voices. Two
 // implementation paths:

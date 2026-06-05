@@ -260,7 +260,7 @@ AVATAR_CONFIG SCHEMA:
   "format": "full_avatar" | "avatar_visual",
   "avatar_look": "(pick one)",
   "avatar_background": "(pick one)",
-  "voice_id": "9JqF6OmJtGjHTDODKG2c",
+  "voice_id": "tRhabdS7JjlQ0lVEImuM",
   "duration_target": 30,
   "clips": [
     {"type": "avatar", "script": "spoken text", "purpose": "hook", "duration_estimate": 5},
@@ -433,7 +433,7 @@ async function validateBatch(posts) {
       if (!ac.avatar_background) {
         ac.avatar_background = AVATAR_BACKGROUNDS[Math.floor(Math.random() * AVATAR_BACKGROUNDS.length)];
       }
-      ac.voice_id = ac.voice_id || '9JqF6OmJtGjHTDODKG2c';
+      ac.voice_id = ac.voice_id || 'tRhabdS7JjlQ0lVEImuM';
 
       if (ac.format === 'full_avatar') {
         for (const clip of ac.clips) {
