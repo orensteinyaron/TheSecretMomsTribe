@@ -17,7 +17,7 @@ export type Register =
   | "dry_reflective";
 
 const FRAMING_LOCK = [
-  "Medium close-up framing held throughout — the woman's head fills the upper two-thirds of the frame, her shoulders and the kitchen counter remain visible in the lower third.",
+  "Medium close-up framing held throughout — the woman's head and shoulders fill the upper two-thirds of the frame, her upper body visible in the lower third.",
   "Camera position is locked, no zoom in or out, no pan.",
 ].join(" ");
 

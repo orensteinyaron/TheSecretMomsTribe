@@ -95,3 +95,34 @@ test("escapes a double-quote in the script excerpt to keep prompt grammar intact
   assert.match(p, /wait/);
   assert.ok(!p.includes('""'), "escape result should not produce stray empty quoted pairs");
 });
+
+// ─── YAR-147: FRAMING_LOCK must not mention any environment objects ──────
+
+test("YAR-147: FRAMING_LOCK contains no environment nouns (scene carried by start_image only)", () => {
+  // Use concerned_insider — an arbitrary valid register; the bug is in FRAMING_LOCK which
+  // is shared across all registers. We check one register to pin the regression.
+  const p = buildMotionPrompt({ register: "concerned_insider", script_excerpt: "x" });
+
+  const environmentWords = [
+    /kitchen/i,
+    /counter/i,
+    /cabinet/i,
+    /backsplash/i,
+    /island/i,
+    /\bwall\b/i,
+    /\bfloor\b/i,
+    /fridge/i,
+    /stove/i,
+    /window/i,
+    /countertop/i,
+  ];
+
+  for (const re of environmentWords) {
+    assert.doesNotMatch(p, re, `FRAMING_LOCK must not contain environment noun matching ${re}`);
+  }
+
+  // Framing intent must survive the fix.
+  assert.match(p, /medium close-up/i, "framing: 'medium close-up' must remain");
+  assert.match(p, /upper two-thirds/i, "framing: 'upper two-thirds' must remain");
+  assert.match(p, /camera position is locked/i, "framing: 'camera position is locked' must remain");
+});

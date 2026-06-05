@@ -85,6 +85,12 @@ export type V5State = {
    * Sourced from rachel_stills.soul_still_url for the chosen still_id.
    */
   start_image_url: string;
+  /**
+   * ElevenLabs voice id, sourced from content_queue.avatar_config.voice_id.
+   * undefined → the renderer (generatePerClipMp3s) falls back to
+   * RACHEL_ELEVENLABS_VOICE_ID. Threaded through phaseInit → phaseTts.
+   */
+  voice_id?: string;
   clips: V5ClipState[];
   // Per-clip face metrics (start + end frame), populated by --phase=face-metrics.
   face_metrics?: Record<string, { start?: FaceMetricsEndpoint; end?: FaceMetricsEndpoint; errors?: string[] }>;
@@ -152,6 +158,7 @@ export function initState(opts: {
   location_id: string;
   still_id: string;
   start_image_url: string;
+  voice_id?: string;
 }): V5State {
   const split = (opts.hook_primary || opts.hook_secondary)
     ? { primary: opts.hook_primary ?? "", secondary: opts.hook_secondary }
@@ -175,5 +182,6 @@ export function initState(opts: {
     total_usd: 0,
   };
   if (split.secondary !== undefined) state.hook_secondary = split.secondary;
+  if (opts.voice_id !== undefined) state.voice_id = opts.voice_id;
   return state;
 }

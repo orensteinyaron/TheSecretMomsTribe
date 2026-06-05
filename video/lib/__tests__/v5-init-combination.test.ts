@@ -115,7 +115,11 @@ function makeDeps(opts: {
     },
     readAvatarConfig: async (content_id) => {
       state.readCalls.push(content_id);
-      if (opts.poisonReadback) return opts.poisonReadback;
+      // poisonReadback simulates POST-WRITE corruption only — it must not
+      // affect the pre-pick pin read (which would otherwise look like a pinned
+      // id, masking the post-write verify path under test). Apply it only once
+      // a write has happened.
+      if (opts.poisonReadback && state.updateCalls.length > 0) return opts.poisonReadback;
       return {
         look_id: state.avatar_config.look_id as string | undefined,
         location_id: state.avatar_config.location_id as string | undefined,
@@ -153,9 +157,11 @@ test("happy path: picks existing combo, writes back, post-verify passes, returns
     still_id: "still_abc",
   });
 
-  // Post-write verify happened.
-  assert.equal(state.readCalls.length, 1);
+  // readAvatarConfig is called twice: once BEFORE the pick (to read pins),
+  // once AFTER the write (post-write verify). Both target the same content_id.
+  assert.equal(state.readCalls.length, 2);
   assert.equal(state.readCalls[0], "content_xyz");
+  assert.equal(state.readCalls[1], "content_xyz");
 
   // Original avatar_config keys preserved.
   assert.equal(state.avatar_config.hook, "h");
@@ -246,6 +252,76 @@ test("stale still_id from picker: pickCombination returned still_id not in activ
       return true;
     },
   );
+});
+
+test("YAR-146: pre-pinned location_id flows into pickCombination and is honored end-to-end", async () => {
+  // avatar_config carries a pinned location (kitchen) but no look. The look
+  // must LRU-fill (→ look_01 with empty history), the location must stay pinned.
+  const stillUrl = "https://cdn.example/look_01_location_01_soul.png";
+  const looks = [makeLook("look_01"), makeLook("look_02")];
+  const locations = [makeLocation("location_01"), makeLocation("location_05")];
+  const stills = [makeStill("look_01", "location_01", "still_kitchen", stillUrl)];
+
+  const seededConfig: Record<string, unknown> = {
+    clips: [{ id: "S1" }],
+    location_id: "location_01",
+  };
+  const updateCalls: Array<{ content_id: string; patch: Record<string, string> }> = [];
+  let readCount = 0;
+  let pinnedLookSeen: string | undefined;
+  let pinnedLocationSeen: string | undefined;
+
+  // Wrap pickCombination indirectly: assert via the resolved result + the
+  // persisted patch. The pin proves location LRU was skipped (location_05 is
+  // also active, but the pinned location_01 must win).
+  const deps: PickAndPersistDeps = {
+    listActiveLooks: async () => looks,
+    listActiveLocations: async () => locations,
+    listActiveStills: async () => stills,
+    getRecentLookPicks: async () => [],
+    getRecentLocationPicks: async () => [],
+    generateAnchoredStill: async () => {
+      throw new Error("not expected — active still exists for pinned combo");
+    },
+    updateAvatarConfig: async (content_id, patch) => {
+      updateCalls.push({ content_id, patch });
+      Object.assign(seededConfig, patch);
+    },
+    readAvatarConfig: async () => {
+      readCount += 1;
+      // First read = the pre-pick pin read. Capture pins here only; the second
+      // read is the post-write verify (look_id will be populated by then).
+      if (readCount === 1) {
+        pinnedLookSeen = seededConfig.look_id as string | undefined;
+        pinnedLocationSeen = seededConfig.location_id as string | undefined;
+      }
+      return {
+        look_id: seededConfig.look_id as string | undefined,
+        location_id: seededConfig.location_id as string | undefined,
+        still_id: seededConfig.still_id as string | undefined,
+      };
+    },
+  };
+
+  const result = await pickAndPersistCombination("content_xyz", deps);
+
+  // Look LRU-filled, location stayed pinned.
+  assert.equal(result.look_id, "look_01", "look should LRU-fill (null pin)");
+  assert.equal(result.location_id, "location_01", "pinned location must be honored");
+  assert.equal(result.still_id, "still_kitchen");
+  assert.equal(result.start_image_url, stillUrl);
+
+  // The pin came from the pre-pick read of avatar_config.
+  assert.equal(pinnedLocationSeen, "location_01");
+  assert.equal(pinnedLookSeen, undefined, "look_id was absent before the pick");
+
+  // Persisted patch reflects the resolved combination.
+  assert.equal(updateCalls.length, 1);
+  assert.deepEqual(updateCalls[0]!.patch, {
+    look_id: "look_01",
+    location_id: "location_01",
+    still_id: "still_kitchen",
+  });
 });
 
 test("PICK_RECENCY_LIMIT matches the documented 7-pick cooldown window", () => {

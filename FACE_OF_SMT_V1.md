@@ -210,7 +210,7 @@ Same face, same person, multiple outfits so she's not in the same top every vide
 | Attribute | Value |
 |-----------|-------|
 | Provider | ElevenLabs |
-| Voice ID | `9JqF6OmJtGjHTDODKG2c` |
+| Voice ID | `tRhabdS7JjlQ0lVEImuM` (LOCKED) |
 | Model | `eleven_multilingual_v2` |
 | Output format | `mp3_44100_128` |
 | Character | Warm, mid-30s American English, natural pacing |
@@ -246,7 +246,7 @@ See `CONTENT_STRATEGY_V1.md` for pillar → format routing and the Ask Rachel vs
 | Asset | ID / Reference | URL | Access |
 |-------|---------------|-----|--------|
 | HeyGen avatar group | `d0c5042f7fa7400e8d2453fdc3daf853` | https://app.heygen.com/avatar/my-avatars?groupId=d0c5042f7fa7400e8d2453fdc3daf853&tab=private | HeyGen login required |
-| ElevenLabs voice | `9JqF6OmJtGjHTDODKG2c` | https://elevenlabs.io/app/voice-lab | ElevenLabs login required |
+| ElevenLabs voice | `tRhabdS7JjlQ0lVEImuM` | https://elevenlabs.io/app/voice-lab | ElevenLabs login required |
 | Reference face image (public) | *not yet generated* | `https://fvxaykkmzsbrggjgdfjj.supabase.co/storage/v1/object/public/smt-assets/character/rachel-reference.png` *(path reserved, file pending upload)* | Public (once uploaded) |
 | Voice sample (public) | *not yet generated* | `https://fvxaykkmzsbrggjgdfjj.supabase.co/storage/v1/object/public/smt-assets/character/rachel-voice-sample.mp3` *(path reserved, file pending upload)* | Public (once uploaded) |
 

@@ -64,6 +64,7 @@ import { whisperTranscribe, extractAudioMp3, downloadFile, probeDurationSeconds 
 import { buildTransitionsManifest } from "../lib/transitions-manifest.js";
 import { measureFrames } from "../lib/face-metrics.js";
 import { buildPhrases } from "../lib/phrase-grouper.js";
+import { buildRenderLifecyclePatch } from "../lib/render-lifecycle-patch.js";
 import { AVATAR_V5_FPS, AUDIO_BRIDGE_FRAMES, AVATAR_V5_WIDTH, AVATAR_V5_HEIGHT } from "../src/templates/avatar-v5/types.js";
 import { layoutClips } from "../src/templates/avatar-v5/AvatarV5Composition.js";
 import { pickAndPersistCombination, type PickAndPersistDeps } from "../lib/v5-init-combination.js";
@@ -215,6 +216,7 @@ async function phaseInit(args: Args): Promise<void> {
     location_id: combination.location_id,
     still_id: combination.still_id,
     start_image_url: combination.start_image_url,
+    voice_id: avCfg.voice_id ? String(avCfg.voice_id) : undefined,
   });
   saveState(state);
   console.log(`[init] state at ${statePath(workdir)}`);
@@ -233,6 +235,7 @@ async function phaseTts(args: Args): Promise<void> {
   const mp3s = await generatePerClipMp3s({
     clips: state.clips.map((c) => ({ id: c.id, expected_script: c.expected_script })),
     workdir: audioDir,
+    voice_id: state.voice_id,
   });
   for (const m of mp3s) {
     const clip = state.clips.find((c) => c.id === m.clip_id);
@@ -465,8 +468,25 @@ async function phaseUpload(args: Args): Promise<void> {
   const runTs = new Date().toISOString().replace(/[:.]/g, "-");
   const bucketPath = `avatar-full-v5/${state.content_id}/${runTs}/final.mp4`;
   state.final_public_url = await uploadToPostImages(bucketPath, state.final_local_path, "video/mp4");
+  const uploadCompletedAt = new Date().toISOString();
   saveState(state);
   console.log(`[upload] ${state.final_public_url}`);
+
+  // YAR-145 L1: close the render lifecycle. The MP4 is uploaded, so mark the
+  // row rendered so a later audit never concludes "never rendered" and
+  // re-renders a shipped piece. ONLY the three render-lifecycle columns —
+  // render_profile_id / metadata.video_url / status stay approval-gated.
+  // This runs BEFORE the best-effort metadata persist below (which has
+  // warn+return early-exits) so the lifecycle always closes once the MP4 is up.
+  const lifecycle = buildRenderLifecyclePatch(state.final_public_url, uploadCompletedAt);
+  const lifeUpd = await supa()
+    .from("content_queue")
+    .update(lifecycle)
+    .eq("id", state.content_id);
+  if (lifeUpd.error) {
+    throw new Error(`[upload] render-lifecycle writeback failed: ${lifeUpd.error.message}`);
+  }
+  console.log(`[upload] render lifecycle closed: render_status=complete final_asset_url set render_completed_at=${lifecycle.render_completed_at}`);
 
   // Persist caption + Whisper telemetry to content_queue.metadata so it
   // survives workdir cleanup. Source of truth stays in workdir/v5-state.json
@@ -479,8 +499,10 @@ async function phaseUpload(args: Args): Promise<void> {
   //   metadata.whisper_words: per-clip array of { clip_id, duration_s, transcript, words[] }
   //                           each words[] entry = { word, start, end } clip-local
   //
-  // NOT touched here: content_queue.status, render_profile_id. Those flip
-  // only after human approval (the DB-flip-on-approval invariant).
+  // Written ABOVE (render lifecycle): render_status / final_asset_url /
+  // render_completed_at. NOT touched anywhere here: content_queue.status,
+  // render_profile_id, metadata.video_url. Those flip only after human
+  // approval (the DB-flip-on-approval invariant).
   const phrases = state.clips
     .filter((c) => c.verify_status === "PASS")
     .flatMap((c) =>

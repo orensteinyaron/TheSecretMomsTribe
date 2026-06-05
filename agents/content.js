@@ -58,6 +58,13 @@ import {
   generateChannelCaptions,
   resolveTargetChannels,
 } from './lib/channels.js';
+import { readFileSync } from 'fs';
+import { parseContentArgs } from './lib/cli-args.js';
+import {
+  buildSyntheticBriefing,
+  supersedeOriginalPatch,
+  regeneratedFromMetadata,
+} from './lib/regenerate-row.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -240,7 +247,7 @@ const OUTPUT_SCHEMA_INSTRUCTIONS = `
 
 When render_profile_slug is "avatar-v1", you MUST generate an "avatar_config" field in the post JSON. The avatar variant is carried by avatar_config.format ("full_avatar" or "avatar_visual").
 
-CHARACTER: Marry, 36, mom of three (14, 9, 4). She's the friend in your group chat who always finds things out first. She's NOT a teacher. She gets frustrated, emotional, excited. She is NOT happy all the time.
+Rachel is the friend in your group chat who always finds things out first. She's NOT a teacher. She gets frustrated, emotional, excited. She is NOT happy all the time.
 
 SCRIPT RULES:
 - Write as NATURAL SPEECH, not a script. Include "okay wait", "I mean", pauses with dashes
@@ -260,7 +267,7 @@ AVATAR_CONFIG SCHEMA:
   "format": "full_avatar" | "avatar_visual",
   "avatar_look": "(pick one)",
   "avatar_background": "(pick one)",
-  "voice_id": "9JqF6OmJtGjHTDODKG2c",
+  "voice_id": "tRhabdS7JjlQ0lVEImuM",
   "duration_target": 30,
   "clips": [
     {"type": "avatar", "script": "spoken text", "purpose": "hook", "duration_estimate": 5},
@@ -433,7 +440,7 @@ async function validateBatch(posts) {
       if (!ac.avatar_background) {
         ac.avatar_background = AVATAR_BACKGROUNDS[Math.floor(Math.random() * AVATAR_BACKGROUNDS.length)];
       }
-      ac.voice_id = ac.voice_id || '9JqF6OmJtGjHTDODKG2c';
+      ac.voice_id = ac.voice_id || 'tRhabdS7JjlQ0lVEImuM';
 
       if (ac.format === 'full_avatar') {
         for (const clip of ac.clips) {
@@ -1057,9 +1064,9 @@ async function writeScheduledPosts(posts, insertedContentRows, captionsPerPost) 
   console.log(`[Content] ${allRows.length} scheduled_posts rows written (${insertedContentRows.length} pieces × channels)`);
 }
 
-// --- Main ---
+// --- Batch (daily cron) entrypoint ---
 
-async function main() {
+async function runBatch() {
   console.log('[Content Agent] Starting content generation...');
   console.log('[Content Agent] Greedy mode: generating for ALL good opportunities');
   const startTime = Date.now();
@@ -1222,6 +1229,198 @@ async function main() {
   }
 
   await printCostSummary(supabase);
+}
+
+// --- Single-row regenerate entrypoint (YAR-142) ---
+
+/**
+ * Regenerate exactly ONE existing content_queue row through the SAME
+ * pipeline as runBatch (generate → validate → gates → write), then
+ * supersede the original via metadata versioning.
+ *
+ * Inherited fields (content_pillar, age_range) are overwritten from the
+ * original row immediately after validation so gate routing never depends
+ * on the LLM faithfully reproducing them. source_urls is resolved from
+ * the synthetic briefing, which is itself built from the row.
+ *
+ * --dry-run prints each post's {render_profile_slug, avatar_config,
+ * slides} and writes nothing.
+ */
+async function runRegenerate(args) {
+  const startTime = Date.now();
+  console.log(`[Content Agent] Regenerate mode for content_id=${args.contentId}${args.dryRun ? ' (dry-run)' : ''}`);
+
+  const skill = await loadSkill('smt_content_text_gen');
+  console.log(`[Content Agent] Loaded skill smt_content_text_gen v${skill.skillVersion} (contract v${skill.contractVersion})`);
+
+  // Load the existing row.
+  const { data: row, error: rowErr } = await supabase
+    .from('content_queue')
+    .select('*')
+    .eq('id', args.contentId)
+    .single();
+  if (rowErr || !row) {
+    throw new Error(`Regenerate: content_queue row "${args.contentId}" not found${rowErr ? ` (${rowErr.message})` : ''}`);
+  }
+
+  // Build the synthetic briefing (override opportunity from --briefing-json).
+  let overrideOpp = null;
+  if (args.briefingJson) {
+    const parsed = JSON.parse(readFileSync(args.briefingJson, 'utf8'));
+    // Accept either a bare opportunity object or { opportunities: [...] }.
+    overrideOpp = Array.isArray(parsed?.opportunities) ? parsed.opportunities[0] : parsed;
+    if (!overrideOpp || typeof overrideOpp !== 'object') {
+      throw new Error(`Regenerate: --briefing-json ${args.briefingJson} did not yield an opportunity object`);
+    }
+  }
+  const syntheticBriefing = buildSyntheticBriefing(row, overrideOpp);
+  if (!syntheticBriefing.opportunities?.length) {
+    throw new Error('Regenerate: synthetic briefing has no opportunities.');
+  }
+
+  // Same context as runBatch (renderProfileMap is REQUIRED for writeContentQueue).
+  const [coverageGaps, recentHooks, directives, insights, renderProfileMap] = await Promise.all([
+    getCoverageGaps(),
+    getRecentHooks(),
+    fetchActiveDirectives(),
+    fetchConfirmedInsights(),
+    fetchRenderProfileMap(),
+  ]);
+
+  // Generate + shape-validate.
+  const genStart = Date.now();
+  const { posts: rawPosts, usage, systemPrompt, userPrompt } = await generateBatch(
+    syntheticBriefing, skill.systemPrompt, coverageGaps, recentHooks, directives, insights,
+  );
+  const genLatencyMs = Date.now() - genStart;
+  const posts = await validateBatch(rawPosts);
+
+  // Deterministic inheritance: pin routing fields to the original row so
+  // gate routing (e.g. ai_magic defensive gate) uses inherited values,
+  // not whatever the LLM happened to emit. BEFORE the gates.
+  for (const p of posts) {
+    p.content_pillar = row.content_pillar;
+    p.age_range = row.age_range;
+  }
+
+  // --force-profile: override render_profile_slug (validated) BEFORE gates.
+  if (args.forceProfile) {
+    if (!isValidRenderProfileSlug(args.forceProfile)) {
+      throw new Error(`Regenerate: --force-profile "${args.forceProfile}" is not a valid render_profile_slug (one of ${ALL_RENDER_PROFILE_SLUGS.join(', ')})`);
+    }
+    for (const p of posts) p.render_profile_slug = args.forceProfile;
+  }
+
+  // Same post-processing pipeline as runBatch.
+  for (const p of posts) {
+    normalizeImageFields(p);
+    p.source_urls = resolveSourceUrls(p, syntheticBriefing.opportunities);
+  }
+  await enforceCaptionLengthWithRetry(posts, { client: anthropic });
+  await enforceFormatGates(posts);
+  // enforceBatchDiversity is a clean no-op for n<=1 (auditBatchDiversity
+  // can't find a duplicate shot+lighting pair in a single piece), but we
+  // guard explicitly so a lone piece is never touched.
+  if (posts.length > 1) {
+    await enforceBatchDiversity(posts);
+  }
+  await revalidatePostSourceUrls(posts);
+  const { kept } = await enforceAiMagicDefensiveGate(posts, syntheticBriefing);
+  posts.length = 0;
+  posts.push(...kept);
+
+  if (posts.length === 0) {
+    throw new Error('Regenerate: post rejected by gate — nothing to write.');
+  }
+
+  // Dry run: print and bail before any DB write.
+  if (args.dryRun) {
+    const preview = posts.map((p) => ({
+      render_profile_slug: p.render_profile_slug,
+      content_pillar: p.content_pillar,
+      age_range: p.age_range,
+      avatar_config: p.avatar_config || null,
+      slides: p.slides || [],
+    }));
+    console.log('\n=== DRY RUN (no DB writes) ===');
+    console.log(JSON.stringify(preview, null, 2));
+    return;
+  }
+
+  // Write the new row(s).
+  const inserted = await writeContentQueue(posts, syntheticBriefing.id, renderProfileMap, {
+    systemPrompt,
+    userPrompt,
+    usage,
+    directives,
+    latencyMs: genLatencyMs,
+    skillVersion: skill.skillVersion,
+    contractVersion: skill.contractVersion,
+  });
+  if (!Array.isArray(inserted) || inserted.length === 0) {
+    throw new Error('Regenerate: writeContentQueue returned no inserted rows.');
+  }
+  const newId = inserted[0].id;
+
+  // Supersede the original (metadata-versioned; no supersedes_id column).
+  const { error: supErr } = await supabase
+    .from('content_queue')
+    .update(supersedeOriginalPatch(row.metadata, newId))
+    .eq('id', args.contentId);
+  if (supErr) throw new Error(`Regenerate: failed to supersede original ${args.contentId}: ${supErr.message}`);
+
+  // Stamp regenerated_from on the new row's metadata (merge into what the
+  // insert produced — re-SELECT to avoid clobbering generation_context etc.).
+  const { data: freshNew, error: freshErr } = await supabase
+    .from('content_queue')
+    .select('metadata, content_pillar, age_range, briefing_id')
+    .eq('id', newId)
+    .single();
+  if (freshErr || !freshNew) {
+    throw new Error(`Regenerate: failed to re-read new row ${newId}: ${freshErr?.message || 'not found'}`);
+  }
+  const { error: metaErr } = await supabase
+    .from('content_queue')
+    .update({ metadata: regeneratedFromMetadata(freshNew.metadata, args.contentId) })
+    .eq('id', newId);
+  if (metaErr) throw new Error(`Regenerate: failed to stamp regenerated_from on ${newId}: ${metaErr.message}`);
+
+  // Symmetric post-check: re-SELECT and assert the lineage + inherited fields.
+  const { data: verify, error: verifyErr } = await supabase
+    .from('content_queue')
+    .select('metadata, content_pillar, age_range, briefing_id')
+    .eq('id', newId)
+    .single();
+  if (verifyErr || !verify) {
+    throw new Error(`Regenerate: post-check re-SELECT failed for ${newId}: ${verifyErr?.message || 'not found'}`);
+  }
+  if (verify.metadata?.regenerated_from !== args.contentId) {
+    throw new Error(`Regenerate post-check FAILED: new row ${newId} metadata.regenerated_from=${verify.metadata?.regenerated_from} !== ${args.contentId}`);
+  }
+  if (verify.content_pillar !== row.content_pillar) {
+    throw new Error(`Regenerate post-check FAILED: content_pillar ${verify.content_pillar} !== original ${row.content_pillar}`);
+  }
+  if (verify.age_range !== row.age_range) {
+    throw new Error(`Regenerate post-check FAILED: age_range ${verify.age_range} !== original ${row.age_range}`);
+  }
+  if (verify.briefing_id !== row.briefing_id) {
+    throw new Error(`Regenerate post-check FAILED: briefing_id ${verify.briefing_id} !== original ${row.briefing_id}`);
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`\n[Content Agent] Regenerate done in ${elapsed}s.`);
+  console.log(`[Content Agent] New row ${newId} supersedes original ${args.contentId}.`);
+  console.log(`[Content Agent]   render_profile_slug=${posts[0].render_profile_slug} pillar=${verify.content_pillar} age=${verify.age_range}`);
+}
+
+// --- Main ---
+
+async function main() {
+  const args = parseContentArgs(process.argv.slice(2));
+  if (args.contentId) {
+    return runRegenerate(args);
+  }
+  return runBatch();
 }
 
 main().catch((err) => {
