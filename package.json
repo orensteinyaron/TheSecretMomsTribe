@@ -9,8 +9,9 @@
     "scrape:all": "node scripts/scrape-instagram.js && node scripts/scrape-tiktok.js",
     "report": "node scripts/baseline-report.js",
     "regenerate-drafts": "node scripts/regenerate-stale-drafts.js",
-    "test": "node --test agents/lib/__tests__/*.test.js scripts/__tests__/*.test.js && npx tsx --test video/lib/wardrobe-rotation/__tests__/*.test.ts video/lib/location/__tests__/*.test.ts video/lib/__tests__/*.test.ts",
-    "skills:test": "node agents/skills/regression_tests/run.js"
+    "test": "node --test agents/lib/__tests__/*.test.js scripts/__tests__/*.test.js && npx tsx --test video/lib/wardrobe-rotation/__tests__/*.test.ts video/lib/location/__tests__/*.test.ts video/lib/__tests__/*.test.ts && npm run lint:character",
+    "skills:test": "node agents/skills/regression_tests/run.js",
+    "lint:character": "node scripts/check-no-hardcoded-character.js"
   },
   "keywords": [],
   "author": "",

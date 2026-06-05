@@ -240,7 +240,7 @@ const OUTPUT_SCHEMA_INSTRUCTIONS = `
 
 When render_profile_slug is "avatar-v1", you MUST generate an "avatar_config" field in the post JSON. The avatar variant is carried by avatar_config.format ("full_avatar" or "avatar_visual").
 
-CHARACTER: Marry, 36, mom of three (14, 9, 4). She's the friend in your group chat who always finds things out first. She's NOT a teacher. She gets frustrated, emotional, excited. She is NOT happy all the time.
+Rachel is the friend in your group chat who always finds things out first. She's NOT a teacher. She gets frustrated, emotional, excited. She is NOT happy all the time.
 
 SCRIPT RULES:
 - Write as NATURAL SPEECH, not a script. Include "okay wait", "I mean", pauses with dashes
