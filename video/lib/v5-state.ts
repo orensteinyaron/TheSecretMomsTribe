@@ -24,6 +24,19 @@ export type V5ClipState = {
   // ── Phase: tts ──
   mp3_local_path?: string;
   mp3_public_url?: string;
+  /**
+   * MEASURED spoken-audio length (seconds) of the per-clip MP3 after any
+   * silence trim — sourced from ffprobe, never from an LLM/estimate. This is
+   * the real number the duration guardrails (plan-split / trim / anti-cram)
+   * reason about.
+   */
+  tts_audio_s?: number;
+  /**
+   * The integer `duration` to pass to Seedance for this clip, derived from
+   * tts_audio_s via seedanceDurationForAudio(). The per-clip Seedance
+   * `duration` MUST come from this field, NOT duration_target_s.
+   */
+  submit_duration_s?: number;
 
   // ── Phase: verify (set after the session runs MCP generate_video) ──
   seedance_job_id?: string;
@@ -42,7 +55,7 @@ export type V5ClipState = {
   whisper_words?: WhisperWord[];
   /** Grouped 2-4 word phrases derived from whisper_words. Clip-local timing. */
   phrases?: Phrase[];
-  verify_status?: "PASS" | "FAIL_WER" | "FAIL_COVERAGE";
+  verify_status?: "PASS" | "FAIL_WER" | "FAIL_COVERAGE" | "FAIL_CRAMMED";
   verify_mode_used?: "std" | "fast";
   verify_attempts?: number;
   surfaced_for_human?: boolean;

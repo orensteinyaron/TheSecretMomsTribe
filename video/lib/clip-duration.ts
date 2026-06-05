@@ -136,6 +136,63 @@ export function needsSilenceTrim(
   return { fits, trimmable, mustSplit };
 }
 
+/**
+ * Minimal shape a clip must have for plan-splitting: a stable id and the
+ * verbatim script. Any other per-clip fields are preserved verbatim on each
+ * produced sub-clip (generic over T).
+ */
+export type PlannableClip = { id: string; expected_script: string; duration_target_s: number };
+
+/**
+ * Plan-split pass for phaseInit: expand any clip whose ESTIMATED audio
+ * exceeds `planTargetS` into ordered, stably-suffixed sub-clips that each
+ * fit, so the pipeline plans never to exceed the Seedance ceiling.
+ *
+ * - Clips that already fit pass through UNCHANGED (same object, same id).
+ * - A clip that splits into N>1 chunks becomes N sub-clips with ids
+ *   `${id}a`, `${id}b`, … in original order. Each sub-clip:
+ *     expected_script = chunk
+ *     duration_target_s = ceil(estimateAudioSeconds(chunk))
+ *   All other fields on the source clip are preserved (spread).
+ * - `onSplit` (optional) is invoked once per split clip for logging.
+ *
+ * Pure: no I/O. The split itself uses splitScriptToFit(text, planTargetS).
+ */
+export function planClips<T extends PlannableClip>(
+  clips: T[],
+  planTargetS: number,
+  onSplit?: (info: { id: string; estSeconds: number; subIds: string[] }) => void,
+): T[] {
+  const out: T[] = [];
+  for (const clip of clips) {
+    const est = estimateAudioSeconds(clip.expected_script);
+    if (est <= planTargetS) {
+      out.push(clip);
+      continue;
+    }
+    const chunks = splitScriptToFit(clip.expected_script, planTargetS);
+    if (chunks.length <= 1) {
+      // Indivisible (e.g. a single over-long token). Keep intact rather than
+      // emit a degenerate single suffixed sub-clip.
+      out.push(clip);
+      continue;
+    }
+    const subIds: string[] = [];
+    chunks.forEach((chunk, i) => {
+      const subId = `${clip.id}${String.fromCharCode(97 + i)}`; // a, b, c, …
+      subIds.push(subId);
+      out.push({
+        ...clip,
+        id: subId,
+        expected_script: chunk,
+        duration_target_s: Math.ceil(estimateAudioSeconds(chunk)),
+      });
+    });
+    onSplit?.({ id: clip.id, estSeconds: est, subIds });
+  }
+  return out;
+}
+
 // ── internal helpers ───────────────────────────────────────────────────────
 
 /** Trim and collapse internal whitespace runs to a single space. */

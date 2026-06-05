@@ -59,6 +59,13 @@ import { renderMedia, selectComposition } from "@remotion/renderer";
 
 import { loadState, saveState, initState, statePath, type V5State } from "../lib/v5-state.js";
 import { generatePerClipMp3s } from "../lib/elevenlabs-per-clip.js";
+import {
+  seedanceDurationForAudio,
+  needsSilenceTrim,
+  planClips,
+  MAX_AUDIO_S,
+} from "../lib/clip-duration.js";
+import { trimSilenceToFit } from "../lib/audio-trim.js";
 import { computeWer, WER_PASS_THRESHOLD } from "../qa/base/helpers/wer.js";
 import { whisperTranscribe, extractAudioMp3, downloadFile, probeDurationSeconds } from "../lib/qa-helpers.js";
 import { buildTransitionsManifest } from "../lib/transitions-manifest.js";
@@ -187,14 +194,28 @@ async function phaseInit(args: Args): Promise<void> {
   if (!avCfg || !Array.isArray(avCfg.clips) || avCfg.clips.length < 2) {
     throw new Error(`content_queue ${contentId}.avatar_config.clips missing or < 2 entries`);
   }
-  const clips = avCfg.clips.map((c: any) => ({
+  const rawClips = avCfg.clips.map((c: any) => ({
     id: String(c.id),
     expected_script: String(c.expected_script ?? c.script ?? ""),
     duration_target_s: Number(c.duration_target_s ?? c.duration_s ?? 8),
   }));
-  for (const c of clips) {
+  for (const c of rawClips) {
     if (!c.expected_script) throw new Error(`avatar_config.clips[${c.id}].expected_script is empty`);
   }
+
+  // Duration guardrail — PLAN-SPLIT. Before TTS, split any clip whose
+  // ESTIMATED audio exceeds a conservative target into sentence-boundary
+  // sub-clips so we plan never to exceed the Seedance ceiling. The measured
+  // (real) trim/budget enforcement happens in phaseTts; this is the cheap
+  // planning layer that keeps post-TTS surprises rare.
+  //
+  // PLAN_TARGET_S is < MAX_AUDIO_S (13.5) to leave headroom for estimate
+  // error: a clip estimated at 12.0s can measure higher, and we want it to
+  // land in the trimmable band, not the mustSplit band.
+  const PLAN_TARGET_S = 12.0;
+  const clips = planClips(rawClips, PLAN_TARGET_S, ({ id, estSeconds, subIds }) => {
+    console.log(`[init] split ${id} (est ${estSeconds.toFixed(1)}s) → ${subIds.join(", ")}`);
+  });
 
   // PR-B: pick wardrobe × location combination, materialize start_image, and
   // persist all three IDs back to content_queue.avatar_config with post-write
@@ -241,6 +262,39 @@ async function phaseTts(args: Args): Promise<void> {
     const clip = state.clips.find((c) => c.id === m.clip_id);
     if (!clip) continue;
     clip.mp3_local_path = m.mp3_path;
+
+    // Duration guardrail — MEASURE the REAL audio length (never an estimate),
+    // then enforce the per-clip budget against it.
+    let audioS = probeDurationSeconds(m.mp3_path);
+    const { fits, trimmable, mustSplit } = needsSilenceTrim(audioS);
+    if (mustSplit) {
+      // Should be rare given the conservative plan-split margin in phaseInit.
+      // Loud failure (calibration safety net) rather than shipping crammed
+      // audio or attempting complex post-TTS re-splitting.
+      throw new Error(
+        `[tts] ${m.clip_id} audio ${audioS.toFixed(1)}s exceeds budget even after planning ` +
+        `— calibration miss; lower CHARS_PER_SECOND or shorten the script`,
+      );
+    }
+    if (trimmable) {
+      // Small miss → strip leading/trailing silence to fit rather than split.
+      const before = audioS;
+      audioS = trimSilenceToFit(m.mp3_path, MAX_AUDIO_S);
+      console.log(`[tts] ${m.clip_id} trimmed ${before.toFixed(1)}s → ${audioS.toFixed(1)}s`);
+    } else if (!fits) {
+      // Unreachable given the fits/trimmable/mustSplit partition, but keep the
+      // classifier honest if its contract ever changes.
+      throw new Error(`[tts] ${m.clip_id} audio ${audioS.toFixed(1)}s unclassified by needsSilenceTrim`);
+    }
+
+    // Persist measured audio + the integer Seedance duration derived from it.
+    // NOTE: the per-clip Seedance `duration` the orchestrating session passes
+    // to MCP generate_video MUST come from clip.submit_duration_s — NOT
+    // duration_target_s (which is a planning estimate, not measured truth).
+    clip.tts_audio_s = audioS;
+    clip.submit_duration_s = seedanceDurationForAudio(audioS);
+    console.log(`[tts] ${m.clip_id} audio=${audioS.toFixed(2)}s → submit_duration=${clip.submit_duration_s}s`);
+
     const bucketPath = `avatar-full-v5/audio/${state.content_id}/${m.clip_id}-${Date.now()}.mp3`;
     clip.mp3_public_url = await uploadToPostImages(bucketPath, m.mp3_path, "audio/mpeg");
     console.log(`[tts] ${m.clip_id} → ${clip.mp3_public_url}`);
@@ -313,11 +367,22 @@ async function phaseVerify(args: Args): Promise<void> {
     : 0;
   clip.whisper_speech_coverage = coverage;
 
-  if (wer.wer > WER_PASS_THRESHOLD) clip.verify_status = "FAIL_WER";
+  // Duration guardrail — ANTI-CRAM cross-check. If the rendered clip's audio
+  // is materially SHORTER than the source TTS we measured in phaseTts,
+  // Seedance sped the voice up to fit an under-sized `duration` — catch it
+  // instead of silently shipping garbled/chipmunked audio.
+  const rendered = clip.whisper_duration_s ?? 0;
+  const crammed = clip.tts_audio_s !== undefined && rendered < clip.tts_audio_s * 0.9;
+
+  if (crammed) clip.verify_status = "FAIL_CRAMMED";
+  else if (wer.wer > WER_PASS_THRESHOLD) clip.verify_status = "FAIL_WER";
   else if (coverage < 0.5) clip.verify_status = "FAIL_COVERAGE";
   else clip.verify_status = "PASS";
 
   saveState(state);
+  if (crammed) {
+    console.log(`[verify] ${clipId} CRAMMED: rendered ${rendered.toFixed(2)}s < tts ${clip.tts_audio_s!.toFixed(2)}s`);
+  }
   console.log(`[verify] ${clipId} WER=${(wer.wer * 100).toFixed(2)}% coverage=${(coverage * 100).toFixed(0)}% → ${clip.verify_status}`);
   if (clip.verify_status !== "PASS") {
     if (clip.verify_attempts === 1 && clip.verify_mode_used === "std") {
