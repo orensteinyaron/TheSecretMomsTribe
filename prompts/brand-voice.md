@@ -122,6 +122,11 @@ Energy: Quick, opinionated, reframed for moms.
 - "hot take" (overused)
 - Any variation of "you're doing great, sweetie" energy
 
+### Punctuation rules:
+- **NEVER use em dashes (—) or double hyphens (--) in any content.** Not in posts, captions, hooks, slides, or scripts. They read as AI-written and break the group-chat voice. Hard rule, every channel and every format.
+- Rewrite around them with a period, a comma, parentheses, or a colon. Use "the risk (while you lose your mind)" instead of the same line wrapped in long dashes.
+- Plain hyphens in real compound words stay fine ("mind-numbing", "3-year-old"). Number ranges use a plain hyphen ("3-5 year olds"), never an en dash or em dash.
+
 ### Emoji philosophy:
 - Sparingly. Max 1-2 per caption.
 - 👀 🤍 💛 — our core three. They feel knowing, warm, genuine.
