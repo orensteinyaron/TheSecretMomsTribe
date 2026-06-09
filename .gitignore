@@ -7,3 +7,6 @@ app/dist/
 # Avatar Full v5 face-metrics sidecar — venv + lazily-downloaded model.
 bin/face-metrics/.venv/
 bin/face-metrics/models/
+
+# Playwright MCP scratch + local carousel build artifacts (assets live in Supabase storage)
+.playwright-mcp/

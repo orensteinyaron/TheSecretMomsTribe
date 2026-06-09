@@ -18,6 +18,8 @@ Yaron approves. Claude executes. See `docs/chat-decisions.md` for context.
 - `/prompts/content-dna.md` — Content mix, hook formulas, quality gates, topic matrix
 - `/prompts/visual-design.md` — Colors, typography, layouts, image generation rules
 
+> **Hard content rule (no dashes):** NEVER use em dashes (—) or double hyphens (--) in published content: posts, captions, hooks, slides, scripts. Rewrite with periods, commas, parentheses, or colons. Full rule in `/prompts/brand-voice.md` (Punctuation rules). Applies to published content, not internal docs/code.
+
 ---
 
 ## Agent Skills v1.0.0 (lives under `/agents/skills/`)
@@ -93,6 +95,7 @@ that auto-triggers on matching phrases.
 | `content-lifecycle` | `skills/content-lifecycle/SKILL.md` | Piece lifecycle management — backfills, lifecycle transitions, status conventions |
 | `avatar-full-wardrobe-rotation` | `skills/avatar-full-wardrobe-rotation/SKILL.md` | Look axis + picker orchestration for Rachel: looks (cooldown=3) × locations (tier-aware 5/7 primary) → `pickCombination`. Look lifecycle (bootstrap + approve + retire). Look/still axis only — location lifecycle lives in the `location` skill. |
 | `location` | `skills/location/SKILL.md` | Location axis for Rachel: structured set definitions (camera, position, background, lighting, props, walls + floor) + Rachel-in-location canonical reference images via nano_banana_pro. Wardrobe-swap stills anchor against the locked canonical via `medias[role:image]` so the same kitchen/studio appears identically across every render. Sub-flows: `bootstrapLocation`, `generateAnchoredStill`, `getLocationReference`, `updateLocationReference`, `approveLocation`, `retireLocation`. |
+| `carousel-builder` | `skills/carousel-builder/SKILL.md` | Renderer for the `carousel` render profile (SMT_PIPELINE_CONTRACT Stage 4, currently "TBD"). Turns an approved `content_queue` row (`render_profile_slug='carousel'`) into a swipeable image set → IG 1080×1350 + TikTok 1080×1920 PNGs. Brand palette/typography loaded from canon (never asked), pillar drives slide arc, re-validates the pillar gate (verbatim `ai_magic` artifacts, `financial` disclaimer slide, `trending` 72h window). DB-flip-on-approval — no render field written until Yaron approves. When it ships, bump the contract to v2.2.0. |
 
 ---
 

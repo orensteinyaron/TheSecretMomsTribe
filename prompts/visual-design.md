@@ -13,6 +13,23 @@ The design should make moms think: "This account looks different from everything
 
 ---
 
+## Surfaces: two visual languages
+
+SMT runs **two distinct visual systems.** This guide documents the **video /
+composed-image** surface. Carousels use a separate system. See "Carousel Visual
+System" near the end, and `skills/carousel-builder/SKILL.md`, which is the source
+of truth for carousels.
+
+| Surface | Typography | Core palette |
+|---|---|---|
+| **Video + composed images** (Remotion templates, DALL-E stills, hook/caption overlays) | Georgia serif headlines, sans body | deep purple `#63246a`, mauve `#b74780` |
+| **Carousels** (IG 1080×1350 / TikTok 1080×1920) | Poppins, one heavy geometric sans | indigo `#220758`, violet `#7941EA`, gradient to magenta/coral |
+
+Everything below describes the **video / composed-image** surface unless a
+section says otherwise.
+
+---
+
 ## Brand Assets
 
 | Asset | Location | Use |
@@ -68,7 +85,7 @@ Fallback: 'Times New Roman', serif
 Fallback: Helvetica, Arial, sans-serif
 
 ### Rules:
-- Headlines/hooks are ALWAYS serif (Georgia). This is the brand signature.
+- Headlines/hooks are ALWAYS serif (Georgia) **on video and composed images**. This is the brand signature for those surfaces. Carousels are the exception: they use Poppins (see "Carousel Visual System").
 - Body text is ALWAYS sans-serif.
 - Never use more than 2 fonts in one piece of content.
 - Never use all-caps for more than 3 words in a row.
@@ -112,6 +129,8 @@ All pillars use the purple/pink brand family for cohesion:
 ```
 
 ### Instagram Carousel (1080x1350)
+
+> Note: this serif layout is the video-era reference. Live carousels now follow the **Carousel Visual System** (below) and the `carousel-builder` skill (Poppins, indigo/violet, no logo). Do not use this serif template for carousels.
 
 ```
 ┌─────────────────────┐
@@ -252,6 +271,30 @@ Row pattern (every 3 posts):
 - Random accent colors not from the brand palette
 - Cluttered layouts with borders, stamps, stickers
 - AI-generated images that look obviously AI
+
+---
+
+## Carousel Visual System
+
+Carousels do **not** use the Georgia-serif / `#63246a` video look. They run their
+own locked system, sampled from the live SMT carousels. **Source of truth:
+`skills/carousel-builder/SKILL.md` (Sections 2, 3, 7).** Summary, kept in sync
+with the skill:
+
+- **Typography:** Poppins, one heavy geometric sans for everything (no serif, no
+  pairing). Headlines + numerals 800, body 600, eyebrow 700 uppercase.
+- **Palette:** INK `#220758` (all text), violet `#7941EA` (wordmark + accent),
+  signature gradient `#7941EA → #B443AD → #E94B6C` (swipe arrow + divider line),
+  light bg `#FBFBFB` with dot-grid, dark bg `#160734`, coral `#E94B6C` (eyebrow
+  kickers).
+- **Chrome (v1.1):** counter pill top-right, coral eyebrow kicker top-left, big
+  item numeral, footer wordmark lockup flush at the left margin (logo removed in
+  v1.1), swipe arrow bottom-right vertically centered on the footer.
+- **Dimensions:** IG 1080×1350, TikTok 1080×1920 (the 4:5 slide centered on a
+  brand-banded 9:16 canvas).
+
+Do not edit these values here. Change them in the carousel skill, then mirror the
+summary above.
 
 ---
 
