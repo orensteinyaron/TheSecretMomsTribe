@@ -96,6 +96,23 @@ Each character record contains:
 - **Token economy** — use Haiku for QA framing, Sonnet only for the per-frame identity-markers vision call. Never call an LLM where deterministic code (ffmpeg, sharp, regex) suffices.
 - **Single render file for cross-posting** — the same final mp4 ships to both Instagram and TikTok. Do not re-export per platform.
 
+## Mandatory deterministic QA gates (added 2026-06-10 — every shipped defect left one behind)
+
+The identity-markers vision QA is necessary but not sufficient: it shipped renders with a chopped-word click, two different backgrounds, and an overflowing hook because nothing measured those. These deterministic gates run automatically (in `normalize-clips` / `--phase=compose`) and a render that fails them must NOT be presented as done:
+
+- **Audio-boundary gate** (`video/lib/audio-boundary-check.ts`, run in compose). Max sample-jump at each cut, counted ONLY in quiet/faded regions (a real splice click), must be ≤ 0.01. Gating by local energy is essential — an un-gated jump threshold false-positives on normal speech slope near the cut.
+- **Tail-trim** (`video/lib/tail-trim.ts`, run in normalize). Silence-aware: removes Seedance trailing transients (mouth-click/breath after the last word) that otherwise click at the stitch. NOT a fixed `last_word + 0.1 s` pad (Whisper under-counts word-ends).
+- **Background-scale gate** (`video/lib/background-consistency-check.ts`, run in normalize). All clips MUST share one normalize scale (ratio ≤ 1.02). Per-clip face-size scaling zooms clips differently → background decor cropped from some clips, kept in others → two different backgrounds. (A pixel/histogram output gate was tried and rejected: the intentional face-size variance dominates it.)
+- **Hook-overlay fit** (`SMTHookOverlay.tsx`). Length-responsive font + hard width cap — a fixed 124 px font overflows long hooks. Eyeball the 0.4 s hook frame on every render.
+
+## Debugging discipline for A/V artifacts (the expensive lessons)
+
+- **Measure, never guess.** Decode to PCM and scan sample-jump / short-window RMS; use Whisper word-timestamps; render waveform/spectrogram PNGs and read them; compare raw-vs-normalized frames. Guessing (disable the bridge, re-roll the clip) cost multiple wrong fixes and wasted Higgsfield credits before one measurement found the cause.
+- **A defect at a stitch/transition is a COMPOSITION bug, not a content bug.** Do not re-roll clips to fix a stitch — re-rolls waste credits AND introduce new Seedance variance (a re-roll here drifted Rachel's framing and face size, making things worse). Fix the compose.
+- **Trust the code, not the comment.** The "audio bridge ramps in / tails out" comment described a cross-fade that was never implemented.
+- **Remotion `volume` callbacks are per-frame (stepped) → they click on fast fades.** Bake sample-accurate `afade` cross-fades into the clip audio in `normalize-clips` instead; keep `OffthreadVideo` a pure passthrough (Finding 4).
+- **A transform that fixes one property can break another** — face-size normalization broke background framing. Check side effects.
+
 ## Cost budget per piece
 
 | Step | Cost |
@@ -257,5 +274,7 @@ SELECT * FROM chain ORDER BY version;
 To add a character: train Soul, generate locked still, store record in character library, run a calibration piece end-to-end before approving for production.
 
 ## Version
+
+v1.1 — Jun 10, 2026. Added the mandatory deterministic QA gates (audio-boundary, tail-trim, background-scale, hook-fit) and the A/V debugging-discipline section, from the first live create-from-url avatar render (YAR-153/155/156). The canonical pipeline is Avatar Full v5 (`docs/specs/AVATAR_FULL_V5.md`); this skill's v1.0 single-still / stitch description is conceptual — defer to the v5 spec on conflict.
 
 v1.0 — May 9, 2026. Built from Test 5 v2 pipeline.

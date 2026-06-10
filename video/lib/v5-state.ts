@@ -108,6 +108,8 @@ export type V5State = {
   final_local_path?: string;
   // Populated by --phase=upload.
   final_public_url?: string;
+  // Populated by --phase=compose: per-cut audio splice-discontinuity QA.
+  audio_boundary_report?: import("./audio-boundary-check.js").AudioBoundaryReport;
   // Populated by --phase=qa.
   qa_report_id?: string;
   qa_verdict?: string;

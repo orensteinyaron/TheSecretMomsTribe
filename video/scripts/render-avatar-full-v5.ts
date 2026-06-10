@@ -67,6 +67,7 @@ import { buildPhrases } from "../lib/phrase-grouper.js";
 import { buildRenderLifecyclePatch } from "../lib/render-lifecycle-patch.js";
 import { AVATAR_V5_FPS, AUDIO_BRIDGE_FRAMES, AVATAR_V5_WIDTH, AVATAR_V5_HEIGHT } from "../src/templates/avatar-v5/types.js";
 import { layoutClips } from "../src/templates/avatar-v5/AvatarV5Composition.js";
+import { checkAudioBoundaries } from "../lib/audio-boundary-check.js";
 import { pickAndPersistCombination, type PickAndPersistDeps } from "../lib/v5-init-combination.js";
 import {
   listActiveLooks,
@@ -454,6 +455,33 @@ async function phaseCompose(args: Args): Promise<void> {
     state.final_local_path = outPath;
     saveState(state);
     console.log(`[compose] rendered ${outPath} (${fs.statSync(outPath).size} bytes)`);
+
+    // Audio-boundary QA gate (2026-06-10): prove every cut is splice-clean.
+    // Catches the "chopped word" regression — an un-faded splice spikes the
+    // sample-to-sample delta at the cut; a clean cross-fade keeps it ~baseline.
+    const pcmPath = path.join(workdir, "final-audio.f32");
+    execFileSync("ffmpeg", ["-y", "-i", outPath, "-ac", "1", "-ar", "48000", "-f", "f32le", pcmPath], { stdio: "ignore" });
+    const pcmBuf = fs.readFileSync(pcmPath);
+    const pcm = new Float32Array(pcmBuf.buffer, pcmBuf.byteOffset, Math.floor(pcmBuf.length / 4));
+    const cuts = layout.entries.slice(1).map((e, i) => ({
+      label: `${passClips[i].id}→${passClips[i + 1].id}`,
+      time_s: e.from_frame / AVATAR_V5_FPS,
+    }));
+    const audioReport = checkAudioBoundaries(pcm, 48000, cuts);
+    fs.rmSync(pcmPath, { force: true });
+    state.audio_boundary_report = audioReport;
+    saveState(state);
+    console.log(`[compose] audio-boundary QA: ${audioReport.verdict} (max quiet-region jump threshold ${audioReport.threshold})`);
+    for (const b of audioReport.boundaries) {
+      console.log(`  ${b.cut_label.padEnd(16)} quiet_jump=${b.max_quiet_jump.toFixed(4)} ${b.ok ? "ok" : "⚠ SPLICE DISCONTINUITY"}`);
+    }
+    if (audioReport.verdict === "FAIL") {
+      console.error(
+        `[compose] ⚠ AUDIO-BOUNDARY QA FAILED at ${audioReport.failures.length} cut(s): ` +
+          `${audioReport.failures.map((f) => f.cut_label).join(", ")}. ` +
+          `Likely an un-faded splice (chopped-word click). Do NOT ship until resolved.`,
+      );
+    }
   } finally {
     server.close();
   }
