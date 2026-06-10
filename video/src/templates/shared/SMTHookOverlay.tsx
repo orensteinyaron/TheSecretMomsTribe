@@ -44,6 +44,28 @@ export interface SMTHookOverlayProps {
 
 const EDGE_BLEED_PX = 100;
 
+// Responsive primary sizing. The hook text MUST fit inside the visible 1080px
+// frame (with margin for the -2° rotation) regardless of length — a fixed
+// font-size overflowed long hooks (e.g. "THE LIE TRAP WE ALL FALL INTO").
+// PRIMARY_FIT_WIDTH constrains the text box so it physically cannot overflow
+// (it wraps), and the font-size scales down with length so a long hook lands
+// on ~2 balanced lines instead of 3. Mirrors the fit-to-width intent of the
+// canonical hook-card SVG (generate-hook-card.ts uses SVG textLength).
+const PRIMARY_FIT_WIDTH = 940; // px — safe inside 1080 visible frame at -2°
+const PRIMARY_MAX_FONT = 124;
+const PRIMARY_MIN_FONT = 64;
+const CAP_ADVANCE_RATIO = 0.64; // Helvetica-bold all-caps avg glyph advance / font-size
+
+function fitPrimaryFontSize(text: string): number {
+  const chars = text.trim().length;
+  if (chars === 0) return PRIMARY_MAX_FONT;
+  // Assume the hook lands on up to two balanced lines; size so the longer
+  // line fits PRIMARY_FIT_WIDTH.
+  const longestLineChars = chars <= 14 ? chars : Math.ceil(chars / 2);
+  const fit = Math.floor(PRIMARY_FIT_WIDTH / (longestLineChars * CAP_ADVANCE_RATIO));
+  return Math.max(PRIMARY_MIN_FONT, Math.min(PRIMARY_MAX_FONT, fit));
+}
+
 export const SMTHookOverlay: React.FC<SMTHookOverlayProps> = ({
   primary,
   secondary,
@@ -57,6 +79,8 @@ export const SMTHookOverlay: React.FC<SMTHookOverlayProps> = ({
 
   // Hard cut in/out — no fade.
   if (t < startSec || t >= startSec + durationSec) return null;
+
+  const primaryFontSize = fitPrimaryFontSize(primary);
 
   return (
     <AbsoluteFill
@@ -89,12 +113,18 @@ export const SMTHookOverlay: React.FC<SMTHookOverlayProps> = ({
           style={{
             fontFamily: '"Helvetica Neue", Helvetica, Arial, sans-serif',
             fontWeight: 900,
-            fontSize: 124,
+            fontSize: primaryFontSize,
             letterSpacing: 4,
             color: "#fcfcfa",
             textTransform: "uppercase",
-            lineHeight: 1,
+            lineHeight: 1.04,
             textAlign: "center",
+            // Hard width cap so long hooks wrap instead of overflowing the
+            // frame. Combined with fitPrimaryFontSize this keeps the hook on
+            // ~2 balanced lines and fully inside the 1080px canvas.
+            maxWidth: PRIMARY_FIT_WIDTH,
+            whiteSpace: "normal",
+            overflowWrap: "break-word",
           }}
         >
           {primary}

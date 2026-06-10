@@ -60,4 +60,11 @@ export const AVATAR_V5_FPS = 30;
 export const AVATAR_V5_WIDTH = 1080;
 export const AVATAR_V5_HEIGHT = 1920;
 export const AUDIO_BRIDGE_FRAMES = 4;
+/**
+ * Fade length applied at a HARD-CUT boundary (bridge disabled). Short enough to
+ * be imperceptible as a fade but long enough to de-click the bare splice
+ * between two independently-encoded Seedance audio tracks. Bridged cuts use the
+ * full AUDIO_BRIDGE_FRAMES overlap as a cross-fade instead.
+ */
+export const AUDIO_HARDCUT_DECLICK_FRAMES = 2;
 export const MOTION_BLUR_FRAMES = 3;

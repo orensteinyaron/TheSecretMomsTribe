@@ -13,8 +13,8 @@ description: >
   "remix this <url>", "recreate this for us", "here's a viral one, do our version".
   Loads SMT_PIPELINE_CONTRACT.md; the contract wins on conflict. It remixes, it
   never copies — and the AI Magic verbatim gate still applies.
-version: 1.0.0
-last_updated: 2026-06-09
+version: 1.1.0
+last_updated: 2026-06-10
 owner: Yaron Orenstein
 ---
 
@@ -151,14 +151,49 @@ only what he flags; don't rebuild the whole concept on a small note.
 
 ## 5. RENDER — reuse the existing renderers
 
-Hand the approved concept to the right skill — do not reimplement rendering:
-- `carousel` → **carousel-builder** (it already loads brand tokens, builds the
-  preview, exports IG 1080×1350 + TikTok 1080×1920).
-- `avatar-v1` → the **avatar/video pipeline** (`full-avatar-profile`): script →
-  Soul stills → Seedance → stitch → QA.
-- `moving-images` → the slideshow pipeline.
+Hand the approved concept to the right renderer — do not reimplement rendering.
 
-Run that skill's own preview/QA. Surface the result.
+> **Critical (YAR-154): the renderers are content_queue-ROW-driven, not loose
+> script.** The earlier wording here ("hand the script to `full-avatar-profile`,
+> render, *then* insert a row in §7") is wrong and circular — the v5 renderer
+> needs a row that §7 only created after rendering. The real flow creates a
+> **draft** row first, renders against it, and §7 only flips it to approved.
+> `video/scripts/write-avatar-config.ts` exists precisely to force a draft row
+> through the renderer "without flipping `render_profile_id`."
+
+**`avatar-v1` → Avatar Full v5** (`docs/specs/AVATAR_FULL_V5.md`; the
+`full-avatar-profile` skill is the conceptual layer, v5 is the implementation):
+
+1. **Create a DRAFT `content_queue` row** — status NOT `approved` (e.g. `draft`),
+   `render_profile_id` left NULL. Pillar, hook (= the `hook_overlay`), caption,
+   and provenance metadata (`source_url`, `creator_handle`) go on it now.
+2. **Author `avatar_config`** and write it (via `write-avatar-config.ts` or a
+   guarded SQL update — never flip status/`render_profile_id`):
+   - `clips`: segment the approved script into ≥2 clips, each `{ id,
+     expected_script }` — text VERBATIM, split only.
+   - `look_id` + `location_id`: pin a render-ready Soul still (a `rachel_stills`
+     row that already exists for that combo, so `init` doesn't try to generate
+     one — `generateAnchoredStill` throws inside the Node renderer).
+   - `voice_id` (Rachel), `register`, `hook`.
+3. **Drive the v5 phases** (`render-avatar-full-v5.ts --phase=…` interleaved with
+   Higgsfield MCP `generate_video`): `init → tts → (generate_video + record +
+   verify per clip) → face-metrics → normalize-clips → face-metrics → manifest →
+   compose → upload`. `upload` writes the final MP4 + `final_asset_url` +
+   `render_status='complete'` but does **NOT** flip `render_profile_id` /
+   `metadata.video_url` (those wait for approval #2).
+4. **The deterministic QA gates are mandatory** (run automatically; a failing
+   render is NOT done): audio-boundary, tail-trim, background-scale, hook-fit —
+   see `full-avatar-profile/SKILL.md` "Mandatory deterministic QA gates".
+
+Env prereqs the renderer needs (preflight): `video/` deps installed, the
+`bin/face-metrics/.venv`, `ELEVENLABS_API_KEY` + `OPENAI_API_KEY` (in
+`video/.env`), and Higgsfield credits.
+
+- `carousel` → **carousel-builder**; `moving-images` → the slideshow pipeline.
+  (Verify whether these are also row-driven before relying on the §7 "insert"
+  wording for them — only the avatar path is confirmed here.)
+
+Run the renderer's own preview/QA. Surface the result.
 
 ---
 
@@ -166,25 +201,29 @@ Run that skill's own preview/QA. Surface the result.
 
 Yaron reviews the rendered asset. This is the **same human gate** that web-app
 approval provides for agent content, and it is what authorizes publishing. He
-approves / requests fixes / rejects. Only an approved asset proceeds.
+approves / requests fixes / rejects. Only an approved asset proceeds. Until then
+the draft row stays `draft` / `render_profile_id` NULL — rendered but not live.
 
 ---
 
 ## 7. ENQUEUE + HANDOFF — rejoin the standard rails
 
-On asset approval, persist exactly like an agent-generated, approved piece:
-1. Insert a `content_queue` row: `render_profile_slug`, pillar, captured source
-   reference (for provenance), `render_status='complete'`, `final_asset_url` +
-   `render_completed_at` written atomically, and the human-approved flag set.
+On asset approval, the draft row from §5 **already exists** — do NOT insert a
+second row. **UPDATE the existing draft row:**
+1. Set status → `approved`, flip `render_profile_id` to the canonical render
+   profile, confirm `final_asset_url` + `render_completed_at` (set by `upload`)
+   and the human-approved flag. (`lib/create-from-url/enqueue.ts`'s
+   `enqueuePiece` currently CREATEs a row with `finalAssetUrl` — for the
+   avatar path it must be reconciled to update the pre-existing draft, not
+   create a duplicate. Tracked in YAR-154.)
 2. Insert one `scheduled_posts` row per target channel (`pending`), with the
    per-channel caption and `scheduled_for`.
 3. Respect the §3 TikTok-carousel rule from the publisher: a carousel skips TikTok
    (Phase 1 browser) or converts to a slideshow MP4 — Yaron's call at approval #2.
 4. Hand off to **smt_publisher**. From here it's the normal publish path.
 
-Provenance: store the `source_url` + `creator_handle` on the row's metadata for
-internal traceability (so we can always tell what a remix was based on, and dedupe
-later). This is internal only — it is not surfaced as public credit.
+Provenance: `source_url` + `creator_handle` were stored on the row's metadata at
+§5 (internal traceability / dedupe). This is internal only — not public credit.
 
 ---
 

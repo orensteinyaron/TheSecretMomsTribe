@@ -24,6 +24,13 @@ import { MOTION_BLUR_FRAMES, type V5Clip } from "./types";
 // to soften the snap at high-drift cuts. Anisotropic blur via SVG filter
 // is a v5.1 polish item if needed.
 
+// Audio cross-fade is NOT done here. A Remotion `volume` callback is evaluated
+// per-FRAME (piecewise-constant within each frame), so a fast fade steps at
+// every frame boundary → a small click at each step. Instead, a sample-accurate
+// `afade` is baked into each clip's audio in `normalize-clips.ts`, and the
+// 4-frame Sequence overlap cross-fades those pre-faded edges. So OffthreadVideo
+// here is a pure passthrough (Finding 4) — no `volume`, no `<Audio>`.
+
 type Props = {
   clip: V5Clip;
   /** Frames of incoming blur ramp (in from MAX → 0). 0 = no incoming blur. */
@@ -36,7 +43,12 @@ type Props = {
 
 const MAX_BLUR_PX = 12;
 
-export const AvatarV5Clip: React.FC<Props> = ({ clip, blur_in_frames, blur_out_frames, duration_in_frames }) => {
+export const AvatarV5Clip: React.FC<Props> = ({
+  clip,
+  blur_in_frames,
+  blur_out_frames,
+  duration_in_frames,
+}) => {
   const frame = useCurrentFrame();
   let blur = 0;
   if (blur_in_frames > 0 && frame < blur_in_frames) {
@@ -52,6 +64,9 @@ export const AvatarV5Clip: React.FC<Props> = ({ clip, blur_in_frames, blur_out_f
     <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
       <OffthreadVideo
         src={clip.video_url}
+        // Pure embedded-audio passthrough (Finding 4). Edge cross-fades are
+        // baked into the clip audio upstream (normalize-clips afade), so no
+        // per-frame `volume` envelope is needed here (and would click).
         style={{
           width: "100%",
           height: "100%",
