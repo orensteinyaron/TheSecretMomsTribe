@@ -199,12 +199,11 @@ Rules:
 - Max 15 words per slide
 
 ### Images (DALL-E prompts):
-- NO FACES (Model B)
+- Faces welcome when emotional (the old "no faces / Model B" rule is retired) — one expressive subject, full anatomically-correct body, no distorted/merged parts
 - Warm, golden-hour lighting
-- Close-ups: hands, backs of heads, over-shoulder
 - Real environments: kitchens, living rooms, parks
 - Muted warm palette: amber, cream, dusty blush, muted sage
-- Style: editorial photography, not stock
+- Style: editorial photography, not stock, not AI-looking
 
 ---
 

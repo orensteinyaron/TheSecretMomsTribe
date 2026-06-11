@@ -90,7 +90,7 @@ Default the \`channels\` array to ${JSON.stringify([...DEFAULT_CHANNELS])} for e
 
 Return image_prompt as an OBJECT shaped like:
 {
-  "prompt": "Full DALL-E prompt. Describe angle, subject, gesture, environment, light, palette, mood, style. NO FACES EVER. No stock, no AI-looking.",
+  "prompt": "Full DALL-E prompt. Describe angle, subject (+ expression if emotional), gesture, environment, light, palette, mood, style. Faces are welcome when the emotion is the point; keep one expressive subject with a full, anatomically correct body (no missing/merged/distorted parts). No stock, no AI-looking.",
   "axes": {
     "shot_type": one of ${JSON.stringify(AXES.shot_type)},
     "lighting": one of ${JSON.stringify(AXES.lighting)},
@@ -154,7 +154,7 @@ Each object:
   "caption": "Base caption. Write to the TARGET for your chosen render_profile_slug. Targets/caps — ${capsSchemaLine()}. Count chars. Over target = retry; over cap = REJECTED.",
   "hashtags": ["#example1", "#example2", "... 5-8 relevant hashtags"],
   "ai_magic_output": "For wow: FULL magic content, min 200 words. Show input AND output for AI Magic. null for trust/cta.",
-  "image_prompt": { "prompt": "...NO FACES EVER...", "axes": { "shot_type": "...", "lighting": "...", "palette": "...", "subject": "...", "mood": "...", "rachel_mode": "rachel_in_frame|broll" } },
+  "image_prompt": { "prompt": "...faces welcome when emotional; one full anatomically-correct body, no distorted/merged parts; real, not AI-looking...", "axes": { "shot_type": "...", "lighting": "...", "palette": "...", "subject": "...", "mood": "...", "rachel_mode": "rachel_in_frame|broll" } },
   "slides": [{"slide_number": 1, "text": "...", "type": "hook", "image_prompt": "...or null"}],
   "audio_suggestion": "TikTok-channel hint. null otherwise.",
   "source_signal_ids": ["uuid-of-primary-opp"],  // REQUIRED: signal_id(s) of the briefing opportunity/opportunities that ACTUALLY inspired this post. Only include signals that directly informed the content. First element is the primary inspiration.

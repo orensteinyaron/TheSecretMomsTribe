@@ -241,7 +241,7 @@ export function buildImagePromptGuidelines(rachelMode) {
 
 Return image_prompt as an OBJECT (not a string) with this shape:
 {
-  "prompt": "Full DALL-E prompt. NO FACES EVER.",
+  "prompt": "Full DALL-E prompt. Faces welcome when emotional; one full anatomically-correct body, no distorted/merged parts; real, not AI-looking.",
   "axes": {
     "shot_type": one of [${fmt(AXES.shot_type)}],
     "lighting": one of [${fmt(AXES.lighting)}],

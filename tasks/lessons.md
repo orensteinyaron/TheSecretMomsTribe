@@ -5,6 +5,24 @@ Mirrored to Supabase `lessons` table.
 
 ---
 
+## 2026-06-11 — create-from-url: don't force the 5-7 carousel cap on a long source (Yaron correction)
+
+1. **Match the source's slide count when the content needs it; don't compress to fit the SMT 5-7 guideline.** Remixing a 13-slide tantrum carousel (@thepositiveparenting) into 7 slides was rejected: compressing that much "guts" a piece built on simple, sequential, one-idea-per-slide teaching. Went to 11 slides instead. The 5-7 rule in `content-dna.md` / carousel-builder is a default for original SMT pieces, NOT a hard cap to enforce on a proven long-form source. Remix should preserve the structure that made the original work.
+
+2. **Keep remix copy SIMPLE and plain, not clever.** First draft was too compressed/stylized ("a different animal", layered sub-clauses). The source worked because anyone could understand it instantly. Mirror that plainness: one clean idea per slide, reword in SMT voice but don't over-engineer the lines.
+
+3. **Apify IG capture: `apify/instagram-post-scraper` requires `username`, not `directUrls`.** The canonical `lib/create-from-url/capture.ts` passes `directUrls` to that actor and fails ("Field input.username is required"). The actor that accepts `directUrls` + returns full `childPosts` is `apify/instagram-scraper` (resultsType:'details'). Capture lib has a latent bug here. Slide alt-text comes back null, so to get per-slide on-screen text you must download the `childPosts[].displayUrl` images and Read them.
+
+4. **Faces policy RETIRED (Yaron, 2026-06-11).** The strict "no faces ever" / "Model B" image rule made covers abstract and hard to resonate with. Faces are now allowed and encouraged for scene/cover imagery when the emotion is the point (a crying toddler, a tired parent). Updated across the MD canon: `prompts/visual-design.md` (Image Rules), `skills/carousel-builder/SKILL.md`, `profiles/static-image/*`, `profiles/moving-images/STYLE_GUIDE.md`, `docs/content-strategy.md`. **Agent CODE still hard-codes "NO FACES EVER"** in DALL-E prompt builders (`agents/content.js`, `agents/lib/content-prompt.js`, `agents/lib/image-diversity.js`, `scripts/image-gen.js`, `scripts/regenerate-stale-drafts.js`, `video/scripts/generate-video.ts`) — flagged, awaiting explicit go before rewriting automated behavior.
+
+5. **`gpt-image-1` moderation hard-blocks distressed-child imagery; use Gemini.** A crying/tantrum toddler returns `moderation_blocked` on OpenAI (and our key has no `dall-e-3` — it 404s, only `gpt-image-1` exists). **Gemini 2.5 Flash Image ("nano banana", `gemini-2.5-flash-image`, `GEMINI_API_KEY`)** generates it cleanly with `imageConfig.aspectRatio:"3:4"`. Now the carousel-builder cover-image primary generator (matches the avatar cover-stage architecture).
+
+6. **Cover image needs an anatomy/hallucination QA gate.** A candidate came back as a "baby with no lower body" merged into the rug; Yaron caught it, the flow should have. Now mandatory in carousel-builder Section 4.1: generate ≥2 candidates, Read each, fail-closed on missing/merged/distorted body parts before showing. Plus anti-hallucination prompt language ("one full, complete, anatomically correct body... no missing/merged/distorted parts") appended to every cover brief.
+
+7. **ALWAYS display generated assets before asking approval.** Yaron repeatedly could not see images shown only via the Read tool (his client doesn't render tool-result images). Reliable path: upload to Supabase Storage (`post-images`) and share public URLs / markdown image embeds in the response, THEN ask. Saved as a memory (`feedback_always_display_generated_assets`).
+
+---
+
 ## 2026-06-10 — Avatar v5 audio "chopped word" at clip stitches (debugging discipline)
 
 1. **Measure audio, never guess.** A "voice hiccup / chopped word" at cuts 2→3

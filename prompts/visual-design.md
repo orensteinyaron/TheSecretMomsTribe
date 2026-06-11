@@ -202,7 +202,7 @@ Logo: bottom-right, 60px, 60% opacity
 ### Template: Photo (DALL-E background)
 For: Scene-based posts (hands, kitchens, bedtime)
 ```
-Background: DALL-E photo (warm, no text, no faces)
+Background: generated photo (warm, no text; faces welcome when emotional)
 Gradient: black 45% top, 55% bottom (text readability)
 Hook text: #fcfcfa, Georgia serif, bold, subtle text shadow
 Pillar chip: #63246a at 90% opacity
@@ -212,30 +212,41 @@ Logo: bottom-right, 60px, 80% opacity
 
 ---
 
-## Image Rules (for DALL-E generation)
+## Image Rules (for generated scene imagery)
+
+> **Faces policy (updated 2026-06-11 — supersedes the old "no faces ever" rule).**
+> Faces are **allowed and encouraged** when the emotion is the point of the image
+> (a child mid-tantrum, a tired parent, a tender exchange). The previous strict
+> faceless aesthetic ("Model B") is **retired** for scene/cover imagery — it made
+> our covers abstract and hard to resonate with. The single most important driver
+> of a save/click is a parent recognizing the moment, and that usually means a
+> readable, expressive face. Rachel's avatar-identity rules are separate and
+> unaffected (see `FACE_OF_SMT_V1.md`).
 
 ### What we generate:
-- Warm, lifestyle-adjacent scenes with NO FACES visible
-- Close-ups: hands, backs of heads, feet, over-shoulder angles
-- Soft, golden-hour lighting always
-- Muted, warm color palette — never oversaturated
-- Real environments: kitchens, living rooms, cars, parks, bedrooms
+- Warm, real, emotionally resonant moments. **Show faces and expressions** when
+  they carry the feeling (crying, overwhelmed, relieved, delighted).
+- Real, lived-in environments: kitchens, living rooms, cars, parks, bedrooms.
+- Soft, golden-hour lighting always.
+- Muted, warm color palette — never oversaturated.
+- Tight focus, usually one subject (one child), so the emotion reads instantly.
 
 ### What we NEVER generate:
-- Faces (never)
-- Overly posed or stock-photo-feeling scenes
-- AI-looking artifacts (weird hands, uncanny textures)
-- Sterile/clinical environments
-- Bright, oversaturated colors
-- Multiple children in frame (keep focus tight)
+- AI-looking artifacts (malformed hands, extra fingers, uncanny/melted faces,
+  garbled textures). If a face is in frame it must read as a **real photograph**.
+- Overly posed or stock-photo-feeling scenes.
+- Sterile/clinical environments.
+- Bright, oversaturated colors.
+- Cluttered frames with competing subjects.
 
 ### Image prompt structure:
 ```
-[Camera angle], [subject without face], [action/gesture],
-[environment], [lighting: warm/golden hour],
+[Camera angle / shot type], [subject + expression if emotional],
+[action/gesture], [environment], [lighting: warm/golden hour],
 [color palette: warm amber, soft cream, dusty blush, muted sage],
 [mood: tender/real/quiet/editorial-warm],
-[style: editorial photography, not stock]
+[composition note: where the subject sits in frame, where text space goes],
+[style: editorial photography, real, not stock, not AI-looking]
 ```
 
 ---
@@ -260,7 +271,7 @@ Row pattern (every 3 posts):
 - Clean text on warm, breathing backgrounds
 - Serif headlines that feel magazine-editorial
 - Purple/pink brand family with warm neutrals
-- Photos with golden light and no faces
+- Photos with golden light; real, expressive faces welcome when they carry the emotion
 - Generous white space
 - Logo watermark on every composed image
 
@@ -290,6 +301,12 @@ with the skill:
 - **Chrome (v1.1):** counter pill top-right, coral eyebrow kicker top-left, big
   item numeral, footer wordmark lockup flush at the left margin (logo removed in
   v1.1), swipe arrow bottom-right vertically centered on the footer.
+- **Cover hero image (v1.2):** slide 1 carries a full-bleed, brand-compliant
+  narrative photo (warm, golden-hour, emotionally resonant per the "Image Rules"
+  above — faces welcome) under a bottom scrim, with the cover flipping to
+  dark-slide chrome. The subject sits high in frame so the bottom scrim + headline
+  never cover the face. Interior slides keep the dot-grid. Source of truth:
+  carousel skill Section 4.1.
 - **Dimensions:** IG 1080×1350, TikTok 1080×1920 (the 4:5 slide centered on a
   brand-banded 9:16 canvas).
 

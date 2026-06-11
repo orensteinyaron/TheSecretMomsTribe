@@ -10,13 +10,22 @@ description: >
   from SMT canon, never asked. Conforms to the pipeline contract — the contract
   wins on any conflict, and this skill re-validates the pillar gate before
   rendering. Does NOT write any DB render field until Yaron approves.
-version: 1.1.0
-last_updated: 2026-06-09
+version: 1.2.0
+last_updated: 2026-06-11
 owner: Yaron Orenstein
 ---
-# SMT Carousel Builder v1.1.0
+# SMT Carousel Builder v1.2.0
 
 ## Changelog
+- **v1.2.0 (2026-06-11):** Cover hero image. Slide 1 now carries a full-bleed,
+  brand-compliant narrative background image (a warm, golden-hour scene that
+  represents the carousel's story — an expressive face that makes a parent
+  recognize the moment is encouraged, not avoided), with the cover flipping to
+  dark-slide chrome over a brand-tinted **bottom** scrim. The subject sits **high
+  in frame** so the scrim + headline never cover the face. Interior slides are
+  unchanged (dot-grid system). See Section 4.1. No change to pillar logic, copy
+  rules, or the approval/DB gates. (Faces policy: the old "no faces" rule is
+  retired for scene/cover imagery — see `prompts/visual-design.md` Image Rules.)
 - **v1.1.0 (2026-06-09):** Design-system update. Footer globe logo removed; the
   wordmark lockup now sits flush at the left content margin (80px). Swipe arrow
   re-anchored to be vertically centered on the footer lockup (was floating high).
@@ -151,6 +160,87 @@ Hook formats (mom audience, English):
 | Question that lands | "Why does bedtime feel like a hostage negotiation?" |
 | Concrete result | "This 2-line prompt planned our whole week" |
 | Expectation flip | "The 'lazy' parenting move that actually worked" |
+
+### 4.1 Cover hero image (mandatory on slide 1)
+The cover slide carries a **full-bleed background image that represents the
+carousel's narrative** — the editorial "magazine cover" for the piece. This
+applies to **slide 1 only**; interior slides keep the dot-grid system (Section 7).
+
+**The image follows SMT brand image rules** (`prompts/visual-design.md` → "Image
+Rules"). Non-negotiable:
+- **Show the emotional moment — faces welcome.** A parent has to recognize the
+  situation in half a second, so a readable, expressive face (a crying toddler, a
+  worn-out parent) is the goal, not something to avoid. Keep it to **one subject**
+  (one child) so the feeling reads instantly. (The old "no faces" rule is retired
+  for scene/cover imagery.)
+- **Compose for the overlay.** The hero subject (face + upper body) sits **high in
+  the frame** with calmer negative space in the **lower third**, because the
+  legibility scrim + headline live at the **bottom**. The face must stay clear of
+  the scrim.
+- **Warm, golden-hour light.** Muted warm palette (amber, soft cream, dusty
+  blush, muted sage). Never neon, cool, clinical, or oversaturated.
+- **Editorial photography that reads real, not AI** — real, lived-in environments
+  (kitchen, living room, car, park, bedroom). No text or words baked into the image.
+- **Anti-hallucination prompt language (always append).** Image models drop or
+  merge body parts, especially with children and emotional poses. Every cover scene
+  brief MUST include: *"one full, complete, anatomically correct body with natural
+  proportions; head, torso, both arms and both legs all present and connected;
+  correct hands with five fingers; no missing, extra, merged, or distorted body
+  parts; subject fully separated from the floor and background."* This is not
+  optional — a vague brief is how you get the "torso with no lower body melting
+  into the rug" failure.
+- **Scene = the piece's story (the moment, not the solution).** Derive a one-line
+  scene brief from the carousel's emotional hook (e.g. a tantrum/calm piece → "a
+  cute toddler mid-meltdown, red flushed face, teary, messy hair, standing in a
+  warm living room, a parent watching with empathy in the soft background").
+  The scene shows the recognizable moment; it does not illustrate the literal hook text.
+
+**Brand-tint via the scrim, not the photo.** Do not recolor the photograph. Tie
+it to the carousel's violet/indigo family with the legibility scrim below.
+
+**Cover legibility + chrome — the cover renders as a DARK slide:**
+- Full-bleed `<img>` (`object-fit:cover`, `z-index:0`), per Section 8 (base64
+  `data:` URI, generated via Python, MIME verified with `file`).
+- A bottom-anchored scrim for text contrast: `linear-gradient(to top, #160734 0%,
+  rgba(22,7,52,0.86) 38%, rgba(22,7,52,0) 72%)` over the photo (`z-index:1`). The
+  brand-tinted near-black (`DARK_BG #160734`) is what ties the photo to the palette.
+- Headline sits in the **lower third** over the scrim (mirrors the editorial cover
+  band), Poppins 800, color `LIGHT_BG #FBFBFB`, with a subtle shadow
+  `0 2px 8px rgba(0,0,0,0.45)`. Optional one-line sub in `BRAND_LIGHT #9B6BF0`.
+- Use the **dark-slide chrome variants** (Section 7): counter pill in `#FBFBFB`,
+  wordmark `BRAND_LIGHT #9B6BF0`, handle white ~72%, gradient arrow unchanged. The
+  cover still omits the eyebrow kicker; a "PART N" tag stays optional bottom-right.
+
+**Generation (DB-flip rules unchanged — this is a render asset, not a DB write):**
+- Primary: **Gemini 2.5 Flash Image** ("nano banana", `gemini-2.5-flash-image`,
+  `GEMINI_API_KEY`) with `generationConfig.imageConfig.aspectRatio:"3:4"` and
+  `responseModalities:["IMAGE"]`. This is the same model family the avatar cover
+  stage uses. **Why primary, not DALL-E:** OpenAI's `gpt-image-1` (the only image
+  model on our key — `dall-e-3` 404s) **moderation-blocks emotional child imagery**
+  (a crying/distressed toddler returns `moderation_blocked`). Since covers now lead
+  with a recognizable emotional moment, Gemini is the reliable path.
+- Fallback: `gpt-image-1` (`size:"1024x1536"`) for non-distress scenes, then
+  Higgsfield `generate_image`. Save the cover into the per-piece output dir.
+- Cover-crop to 4:5 biased toward the top so the subject's face stays high and the
+  bottom scrim never covers it (`object-position:50% ~22%`).
+- If no scene can be generated (no key, all tiers fail), fall back to the plain
+  `LIGHT_BG` dot-grid cover (pre-1.2 behavior) and flag it in the preview — never
+  ship a blank or off-brand cover, and never bake text into the generated image.
+
+**Cover QA gate (MANDATORY — runs on every candidate before it is shown).**
+Generate ≥2 candidates and **inspect each one** (Read the image) before surfacing
+anything to Yaron. Fail closed on:
+- **Anatomy / hallucination:** the subject must be one coherent, complete body —
+  head + torso + both arms + both legs present and connected, body clearly
+  separated from floor/furniture, hands with a plausible finger count, no warped or
+  doubled faces, no merged/extra/missing limbs. (This is the check that should have
+  caught the "baby with no lower body" candidate. If you would not believe it was a
+  real photo, it fails.)
+- **Brand + composition:** warm/golden-hour, on-palette, face high enough that the
+  bottom scrim won't cover it, no baked-in text.
+A failing candidate is discarded and regenerated with a corrected prompt (up to ~3
+tries). Only candidates that pass the gate are shown for approval. **Never surface,
+and never let Yaron have to catch, a hallucinated asset.**
 ---
 ## 5. Pillar → slide sequence (the SMT core)
 The pillar on the row picks the sequence. This replaces generic "7-slide
@@ -379,6 +469,11 @@ of banding it.
 On approval:
 - Assets in a per-piece dir: `ig_slide_1..N.png` (1080×1350),
   `tiktok_slide_1..N.png` (1080×1920).
+- **Always also copy the finals to the local posting folder:**
+  `~/Desktop/SMT-carousels/<YYYY-MM-DD>_<slug>/` with `ig/` + `tt/` subfolders and
+  the `contact_sheet.png`. Yaron posts carousels manually, so the final PNGs must
+  land in this predictable per-piece folder with BOTH channels present. This is in
+  addition to the hosted Supabase URLs / `metadata.slide_images`, not a replacement.
 - Manifest: which `content_queue` row, pillar, slide count, per-channel caption.
 - The pipeline may then flip `render_status='complete'` with `final_asset_url`
   and `render_completed_at` set together (the contract's atomic write). The

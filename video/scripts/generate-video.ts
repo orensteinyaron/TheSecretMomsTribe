@@ -281,9 +281,8 @@ You will receive a hook and slide texts. Return ${slides.length + 1} scenes: the
 
 CRITICAL RULES:
 - The FIRST scene (hook) must be the most intimate, emotionally compelling close-up. This is the thumbnail people see first.
-- ABSOLUTELY NO FACES. Never describe faces, expressions, tears, mouths, eyes.
-- NEVER use: face, tears, crying, upset, fist, clenching, grabbing, holding tight, clinging
-- ALWAYS include a HUMAN ELEMENT: hands, arms in sleeves, backs of heads, small feet, a lap, shoulders from behind
+- Faces and expressions are welcome when the emotion is the point (the old "no faces" rule is retired). Keep one expressive subject with a full, anatomically correct body (no missing/merged/distorted parts); never uncanny or AI-looking.
+- ALWAYS include a HUMAN ELEMENT: a face mid-feeling, hands, arms in sleeves, small feet, a lap, shoulders
 - Focus on the INTERACTION or MOMENT, not just objects in a room
 - Every scene should make a mom think "that's my life right now"
 
@@ -323,6 +322,11 @@ Respond with JSON array of ${slides.length + 1} strings. No markdown fences.`,
 
 // ---- DALL-E Image Generation (Fix 1: orientation check) ----
 
+// NOTE: faces policy is RETIRED (2026-06-11) — we no longer strip face/expression
+// words. The child-noun + distress euphemisms below remain ONLY as an OpenAI
+// image-moderation workaround (gpt-image-1 blocks emotional/distressed minors). For
+// scenes that genuinely need an emotional child face, route to Gemini 2.5 Flash
+// Image (like the carousel cover stage) instead of DALL-E, and skip this sanitizer.
 function sanitizeScene(scene: string): string {
   return scene
     .replace(/\bchild('?s)?\b/gi, "small person's")
@@ -334,7 +338,6 @@ function sanitizeScene(scene: string): string {
     .replace(/\b5-year-old('?s)?\b/gi, "small person's")
     .replace(/\b(grabbing|holding onto|clutching|hugging|clinging|clenching)\b/gi, "near")
     .replace(/\b(meltdown|tantrum|crying|screaming|sobbing|tears|upset|distress)\b/gi, "quiet moment")
-    .replace(/\b(face|faces|facial|expression|mouth|eyes|tear-streaked)\b/gi, "")
     .replace(/\b(parent|mother|father|mom|dad)\b/gi, "adult")
     .replace(/\bfist\b/gi, "hand")
     .replace(/\bwrapped around\b/gi, "near")
@@ -348,8 +351,7 @@ function buildImagePrompt(scene: string): string {
   return [
     "PORTRAIT ORIENTATION vertical photograph (taller than wide, 9:16 aspect ratio).",
     "Intimate close-up lifestyle photograph of a real domestic moment.",
-    "Human hands or body parts MUST be visible but NO faces shown.",
-    "Shot from behind, above, or over-shoulder angle.",
+    "A human element MUST be visible. Faces and expressions are welcome when emotional; one expressive subject with a full, anatomically correct body (no missing/merged/distorted parts), never AI-looking.",
     "NO TEXT, NO WORDS, NO LETTERS, NO WATERMARKS.",
     "Warm natural indoor lighting, soft golden hour shadows.",
     "35mm film aesthetic, slightly desaturated warm tones, deep purple and mauve pink color grading.",
