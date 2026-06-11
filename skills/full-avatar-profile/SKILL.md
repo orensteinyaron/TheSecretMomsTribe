@@ -11,9 +11,10 @@ Takes two inputs:
 1. **Approved script** — JSON with scenes, dialogue, emotion tags, durations, and a `hook_overlay` field
 2. **Character selection** — character ID from the avatar library (e.g. Rachel)
 
-Produces two outputs:
-1. **Final mp4** — 9:16, 1080×1920, with: 2s hook card opening → 6 avatar clips with smooth crossfades → phrase captions → watermark
-2. **Thumbnail PNG** — 1080×1920 hook card (matches the video's opening frame)
+Produces three outputs (the **three-asset contract**: video + thumbnail + cover, all on the same `content_queue` row):
+1. **Final mp4** — 9:16, 1080×1920, with: 2s hook card opening → 6 avatar clips with smooth crossfades → phrase captions → watermark (`final_asset_url`)
+2. **Thumbnail PNG** — 1080×1920, the video's opening frame + purple hook banner (`thumbnail_asset_url`). This is the frame-faithful cover; TikTok uses it (its API/composer only supports frame-based covers).
+3. **Cover PNG** — 1080×1920, a purpose-generated image (`cover_asset_url`): same woman, same room, same lighting and wardrobe as the reel, but different expression/pose/framing, so the IG grid doesn't read as N identical frontal Rachels. Staged as the IG Reels cover. See [Cover stage](#cover-stage-phasecover) below.
 
 ## When to use
 
@@ -83,9 +84,82 @@ Each character record contains:
    - Hook card PNG as 2s held opening
    - PhraseCaptions style (no background band, white text + shadow)
    - BrandWatermark
-8. **Upload to Drive** — push final assets to `Yarono/SMT/content/{content_id}/` (folder created if missing). See [Storage](#storage).
-9. **Write `content_assets` rows** — one Supabase row per uploaded asset, joined to `content_queue` by `content_id`. See [Storage](#storage).
-10. **Output** — return local paths + Drive IDs + QA verdict + cost. See [Outputs](#outputs).
+8. **Generate the cover** — after the video upload completes, run the cover stage (`render-avatar-full-v5.ts --phase=cover`). Never blocks or alters the video flow. See [Cover stage](#cover-stage-phasecover).
+9. **Upload to Drive** — push final assets to `Yarono/SMT/content/{content_id}/` (folder created if missing). See [Storage](#storage).
+10. **Write `content_assets` rows** — one Supabase row per uploaded asset, joined to `content_queue` by `content_id`. See [Storage](#storage).
+11. **Output** — return local paths + Drive IDs + QA verdict + cost. See [Outputs](#outputs).
+
+## Cover stage (phaseCover)
+
+Added 2026-06-11. The IG grid crops reel covers to 3:4 and, with first-frame
+thumbnails only, every tile was a near-identical frontal Rachel — reading as
+AI-replicated content. The cover stage generates a second, purpose-made visual
+per piece. Implementation: `video/lib/cover/` + `--phase=cover` /
+`--phase=cover-record` in `render-avatar-full-v5.ts`.
+
+**Architecture — external model, reference-based (NOT Higgsfield):**
+- Primary: **Gemini Nano Banana** (`gemini-2.5-flash-image`), called directly
+  with `GEMINI_API_KEY` in `.env`. Cost reduction + future migration off
+  Higgsfield.
+- Identity comes ONLY from the reference image: the render's Soul-locked
+  `start_image` (same `look_id`, `location_id`, lighting as the reel) is
+  passed as the edit reference. The prompt says "same woman, same room, same
+  lighting and wardrobe" + the expression/pose/framing directive. **Never
+  describe Rachel's facial features in text** — same hallucination rule as
+  Seedance prompts.
+- Expression directive: when the concept brief carries `tone` metadata
+  (`avatar_config.tone` ?? `metadata.tone`), it maps deterministically to
+  {expression, gaze, pose} — no LLM call. Otherwise one cheap Haiku call maps
+  {hook, script summary} → the same small JSON.
+
+**Fallback chain** (registered in the `services` table:
+`gemini_nano_banana` → `fallback_service_id` → `higgsfield_soul`):
+1. Gemini Nano Banana
+2. Gemini retry with an adjusted (identity-anchored) prompt
+3. Soul 2.0 via Higgsfield — last resort, session-driven: `--phase=cover`
+   exits 5, the Claude session generates via Higgsfield MCP using
+   `state.cover.soul_fallback_prompt`, then records it with
+   `--phase=cover-record --image-url=<url>`.
+
+The tier that produced the final cover is logged in `metadata.cover.source`
+(`gemini` | `gemini_retry` | `soul_higgsfield`).
+
+**Variance rules** (`metadata.cover` stores {expression, framing,
+composition_side}): any combination used in the last 5 covers is excluded;
+framing rotates close-up → medium → three-quarter; composition drifts
+slightly off-center. Same atmosphere as the reel — different energy in the
+face and frame.
+
+**Output spec:** 9:16 (1080×1920); the face and the hook text sit fully
+inside the IG 3:4 center-crop safe zone (rows 240–1680); the purple hook
+banner uses brand styling (band `BRAND_PRIMARY #7941EA`, shadow `INK
+#220758`, Poppins ExtraBold, off-white text) with the same `hook_overlay`
+text as the video.
+
+**QA — mandatory gate, not advisory** (reference-based generation drifts
+more than Soul):
+- Identity scored as **"matches reference"** against the start_image (1–5;
+  pass ≥ 3, the same bar as the clip identity-markers gate) — never
+  feature-presence. Below threshold → next fallback tier.
+- Scene continuity: location / wardrobe / lighting must match the reference
+  still.
+- Sameness: flag if the expression/framing combo matches the previous cover.
+- Unmeasurable dimensions return `"unmeasured"` and the gate **fails closed**.
+
+**Persistence + post-check:** one `content_queue` update writes
+`thumbnail_asset_url` (the first-frame + hook PNG, previously transient, now
+extracted from final.mp4 at 0.5s and uploaded) + `cover_asset_url` +
+`metadata.cover`. The post-check re-reads the row, asserts both URLs are
+non-null AND fetchable (HTTP HEAD) — any failure throws. No silent passes.
+
+**Publishing routing:** IG Reels passes `cover_asset_url` as the cover
+(browser composer "Edit cover" in Phase 1; `cover_url` on the container in
+Phase 2). **TikTok limitation:** its API only supports frame-based covers
+(`video_cover_timestamp_ms`), so TikTok keeps the current behavior — the
+default first frame, which matches `thumbnail_asset_url` by construction.
+
+**Cover cost per piece:** directive $0–0.001 (tone path is free) + Gemini
+$0.039/image + Sonnet QA ~$0.02 ≈ **$0.06** (one-attempt happy path).
 
 ## Hard rules (do not violate)
 
@@ -149,9 +223,15 @@ Local paths point to the tmp working directory and are valid for the duration of
     "drive_path": "Yarono/SMT/content/{content_id}/final.mp4"
   },
   "thumbnail_png": {
-    "local_path": "/tmp/hook-card-<runId>/option-a-bold-block.png",
+    "local_path": "/tmp/avatar-stitch-<runId>/thumbnail.png",
+    "public_url": "https://.../thumbnail.png  (also persisted to content_queue.thumbnail_asset_url)",
     "drive_file_id": "1xyz...",
     "drive_path": "Yarono/SMT/content/{content_id}/thumbnail.png"
+  },
+  "cover_png": {
+    "local_path": "/tmp/avatar-stitch-<runId>/cover.png",
+    "public_url": "https://.../cover.png  (also persisted to content_queue.cover_asset_url)",
+    "source": "gemini | gemini_retry | soul_higgsfield"
   },
   "qa_report": {
     "verdict": "PASS|FAIL|REVIEW",
@@ -263,7 +343,9 @@ SELECT * FROM chain ORDER BY version;
 - `video/scripts/generate-hook-card.ts` — thumbnail PNG
 - `video/scripts/stitch-avatar.ts` — clip stitching
 - `video/scripts/qa-agent-avatar.ts` — QA pass
-- Higgsfield MCP — Seedance generation, media upload
+- `video/scripts/render-avatar-full-v5.ts --phase=cover` / `--phase=cover-record` — cover stage
+- `video/lib/cover/` — Gemini client, directive + variance, banner, cover QA, fallback chain
+- Higgsfield MCP — Seedance generation, media upload, Soul 2.0 cover fallback (tier 3)
 
 ## Character library (current)
 
@@ -274,6 +356,14 @@ SELECT * FROM chain ORDER BY version;
 To add a character: train Soul, generate locked still, store record in character library, run a calibration piece end-to-end before approving for production.
 
 ## Version
+
+v1.2 — Jun 11, 2026. Added the cover stage (phaseCover): three-asset contract
+(video + thumbnail + cover), external-model cover generation (Gemini Nano
+Banana, reference-based — NOT Higgsfield), the
+gemini_nano_banana → retry → higgsfield_soul fallback chain (services table),
+variance rules (last-5 exclusion, framing rotation), the mandatory
+matches-reference cover QA gate, and the IG-cover / TikTok-frame publishing
+split. Requires GEMINI_API_KEY in .env.
 
 v1.1 — Jun 10, 2026. Added the mandatory deterministic QA gates (audio-boundary, tail-trim, background-scale, hook-fit) and the A/V debugging-discipline section, from the first live create-from-url avatar render (YAR-153/155/156). The canonical pipeline is Avatar Full v5 (`docs/specs/AVATAR_FULL_V5.md`); this skill's v1.0 single-still / stitch description is conceptual — defer to the v5 spec on conflict.
 

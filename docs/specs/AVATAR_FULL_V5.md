@@ -119,6 +119,7 @@ The v5 render is **hybrid** — Claude Code session + Node helpers.
 - ffmpeg concat → final MP4
 - Supabase upload of final MP4 to `post-images/avatar-full-v5/<content_id>/<run-ts>/final.mp4`
 - avatar-v1 QA agent invocation (`video/qa/profiles/avatar-full.ts`)
+- Cover stage (`--phase=cover` / `--phase=cover-record`, `video/lib/cover/*`) — see "Cover stage" section below
 - `cost_log` and `prompt_executions` writes
 
 ---
@@ -355,6 +356,8 @@ Whisper, ffmpeg, Supabase, mediapipe are effectively free. The cost is Higgsfiel
 | Final composited MP4 | Supabase `post-images/avatar-full-v5/<content_id>/<run-ts>/final.mp4` |
 | **Caption + Whisper telemetry** | **`content_queue.<id>.metadata.phrases` + `metadata.whisper_words`** — written automatically by `--phase=upload`. See "Upload contract" below. |
 | avatar-v1 QA report | `qa_reports` table |
+| **Thumbnail PNG** (first frame + hook banner) | Supabase `post-images/avatar-full-v5/<content_id>/<run-ts>/thumbnail.png` + `content_queue.thumbnail_asset_url` — written by `--phase=cover` |
+| **Cover PNG** (purpose-generated) | Supabase `post-images/avatar-full-v5/<content_id>/<run-ts>/cover.png` + `content_queue.cover_asset_url` + `metadata.cover` — written by `--phase=cover` |
 | All costs | `cost_log` (per-vendor, per-step) |
 | Human-review summary | stdout at end of render |
 
@@ -395,6 +398,23 @@ Storage cost is negligible: ~16 KB JSON per piece for a 7-clip Avatar Full at 60
 - **Timestamps are clip-local**, not composition-global. `start_s = 0` means "the start of clip X" not "the start of the final video". To compute composition-global time, the consumer must walk the clips in order and account for the 4-frame audio-bridge overlap per cut (see "Audio bridge between clips" section).
 - **Phrase text is mixed-case** as Whisper produced it (e.g. `"Okay wait"`, not `"OKAY WAIT"`). The `AvatarV5Captions` component applies `textTransform: uppercase` at render time. Downstream consumers that want the as-rendered string should uppercase themselves; tools that want to edit captions get the natural case to work with.
 - **Phrase boundaries follow the `phrase-grouper.ts` rules** (MAX_WORDS=4 hard cap, GAP_THRESHOLD=0.3s pause split). A caption editor that wants to merge or split phrases should regenerate the array rather than expecting these rules to be re-applied.
+
+---
+
+## Cover stage (`--phase=cover` / `--phase=cover-record`, added 2026-06-11)
+
+Runs AFTER `--phase=upload` — the video flow is complete and untouched; a cover failure never blocks or alters it. Produces the two grid-facing assets of the **three-asset contract** (video + thumbnail + cover on the same row):
+
+- **`thumbnail_asset_url`** — the video's opening frame + hook banner, extracted from `final.mp4` at 0.5 s (inside `SMTHookOverlay`'s 1.0 s window) and uploaded. Previously transient. TikTok's cover path (frame-based covers only).
+- **`cover_asset_url`** — a purpose-generated 1080×1920 cover: same woman / room / lighting / wardrobe as the reel (identity anchored to `state.start_image_url` as a REFERENCE image — facial features are never described in text), different expression/pose/framing. Staged as the IG Reels cover.
+
+Mechanics (full behavioral spec lives in `skills/full-avatar-profile/SKILL.md` "Cover stage"):
+
+- **Fallback chain** (services table `gemini_nano_banana` → `higgsfield_soul`): Gemini Nano Banana direct API (`GEMINI_API_KEY`) → retry with adjusted prompt → Soul 2.0 via Higgsfield MCP. Tier 3 is session-driven: `--phase=cover` exits **5**, the session generates from `state.cover.soul_fallback_prompt`, then runs `--phase=cover-record --image-url=<url>`. Final tier recorded in `metadata.cover.source`.
+- **Directive**: deterministic from concept-brief `tone` (`avatar_config.tone` ?? `metadata.tone`) or one Haiku call; variance excludes any {expression, framing, composition_side} used in the last 5 covers, rotates framing close-up → medium → three-quarter.
+- **Mandatory QA gate** (fails closed; unmeasured ≠ pass): identity "matches reference" ≥ 3/5 vs the start_image; scene continuity (location/wardrobe/lighting); sameness flag vs the previous cover. A Soul-tier QA FAIL exits **3** (surface-to-human — end of chain).
+- **Banner/safe zone**: brand hook band (`BRAND_PRIMARY #7941EA` / `INK #220758` / Poppins ExtraBold), same `hook_overlay` text as the video, everything inside the IG 3:4 center-crop safe zone (rows 240–1680).
+- **Persistence**: ONE update writes `thumbnail_asset_url` + `cover_asset_url` + `metadata.cover`, then a post-check re-reads the row and HTTP-HEADs both URLs. Any failure throws. The DB-flip-on-approval invariant is untouched (`status` / `render_profile_id` / `metadata.video_url` stay approval-gated).
 
 ---
 

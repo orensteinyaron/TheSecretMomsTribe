@@ -24,6 +24,12 @@
 //   compose      Renders AvatarV5Composition to workdir/final.mp4
 //   upload       Uploads final.mp4 to Supabase post-images/avatar-full-v5/
 //   qa           Runs avatar-v1 QA agent on final.mp4 (informational)
+//   cover        Generates the cover image (Gemini Nano Banana, reference-
+//                based on start_image) + persists thumbnail_asset_url and
+//                cover_asset_url with a fetchability post-check. Exits 5
+//                when the Soul 2.0 fallback is needed (session MCP action).
+//   cover-record Records a session-generated Soul 2.0 fallback cover
+//                Args: --image-url=<url> [--cost-usd=<n>]
 //   summary      Prints the human-review summary including per-bridge
 //                timestamps (Phase 9 ear-check requirement)
 //
@@ -60,7 +66,7 @@ import { renderMedia, selectComposition } from "@remotion/renderer";
 import { loadState, saveState, initState, statePath, type V5State } from "../lib/v5-state.js";
 import { generatePerClipMp3s } from "../lib/elevenlabs-per-clip.js";
 import { computeWer, WER_PASS_THRESHOLD } from "../qa/base/helpers/wer.js";
-import { whisperTranscribe, extractAudioMp3, downloadFile, probeDurationSeconds } from "../lib/qa-helpers.js";
+import { whisperTranscribe, extractAudioMp3, downloadFile, probeDurationSeconds, imageFromFile } from "../lib/qa-helpers.js";
 import { buildTransitionsManifest } from "../lib/transitions-manifest.js";
 import { measureFrames } from "../lib/face-metrics.js";
 import { buildPhrases } from "../lib/phrase-grouper.js";
@@ -76,6 +82,19 @@ import {
   getRecentLocationPicks,
 } from "../lib/wardrobe-rotation/index.js";
 import { listActiveLocations } from "../lib/location/index.js";
+import {
+  buildCoverPrompt,
+  composeCoverWithBanner,
+  GEMINI_IMAGE_MODEL,
+  parseRecentCovers,
+  productionCoverChainDeps,
+  qaCover,
+  runCoverChain,
+  type CoverDirective,
+  type CoverMetadata,
+  type CoverQaReport,
+  type CoverSource,
+} from "../lib/cover/index.js";
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────
 
@@ -635,6 +654,256 @@ async function phaseQa(args: Args): Promise<void> {
   }
 }
 
+// ─── Phase: cover (+ cover-record) ──────────────────────────────────────
+//
+// Runs AFTER --phase=upload — the video flow (compose/upload/qa) is already
+// complete and untouched; a cover failure never blocks or alters it.
+//
+// Produces the TWO grid-facing assets of the three-asset contract:
+//   thumbnail_asset_url — the video's opening frame + hook banner (extracted
+//                         from final.mp4, where SMTHookOverlay is baked into
+//                         the first 1.0s). Previously transient; TikTok's
+//                         frame-based covers use this path.
+//   cover_asset_url     — the purpose-generated cover: Gemini Nano Banana
+//                         (direct API, identity from the reference still) →
+//                         retry with adjusted prompt → Soul 2.0 via Higgsfield
+//                         (session MCP, recorded via --phase=cover-record).
+//
+// Persistence is a single content_queue update + a hard post-check (re-read
+// + HTTP-fetch both URLs). Fails loudly — no silent passes.
+
+/** Build the ≤400-char script summary the directive call uses. */
+function scriptSummary(state: V5State): string {
+  return state.clips.map((c) => c.expected_script).join(" ").slice(0, 400);
+}
+
+async function getRecentCovers(): Promise<ReturnType<typeof parseRecentCovers>> {
+  const { data, error } = await supa()
+    .from("content_queue")
+    .select("metadata")
+    .not("metadata->cover", "is", null)
+    .order("updated_at", { ascending: false })
+    .limit(5);
+  if (error) throw new Error(`[cover] recent-cover query failed: ${error.message}`);
+  return parseRecentCovers(data ?? []);
+}
+
+async function readToneFromRow(contentId: string): Promise<string | null> {
+  const { data, error } = await supa()
+    .from("content_queue")
+    .select("avatar_config, metadata")
+    .eq("id", contentId)
+    .single();
+  if (error || !data) throw new Error(`[cover] content_queue ${contentId} read failed: ${error?.message ?? "no row"}`);
+  const av = (data.avatar_config as Record<string, unknown> | null) ?? {};
+  const meta = (data.metadata as Record<string, unknown> | null) ?? {};
+  const tone = (av.tone ?? meta.tone) as string | undefined;
+  return tone ? String(tone) : null;
+}
+
+/**
+ * Banner + upload + persist + post-check, shared by --phase=cover (Gemini
+ * tiers) and --phase=cover-record (Soul fallback). Throws on any failure.
+ */
+async function finalizeCoverAndPersist(
+  state: V5State,
+  rawCover: Buffer,
+  directive: CoverDirective,
+  source: CoverSource,
+  qa: CoverQaReport,
+  costUsd: number,
+): Promise<void> {
+  if (!state.thumbnail_local_path || !fs.existsSync(state.thumbnail_local_path)) {
+    throw new Error("[cover] thumbnail_local_path missing — run --phase=cover before cover-record");
+  }
+  const bannered = await composeCoverWithBanner({
+    baseImage: rawCover,
+    hookPrimary: state.hook_primary,
+    hookSecondary: state.hook_secondary,
+  });
+  const coverPath = path.join(state.workdir, "cover.png");
+  fs.writeFileSync(coverPath, bannered);
+
+  const runTs = new Date().toISOString().replace(/[:.]/g, "-");
+  const thumbnailUrl = await uploadToPostImages(
+    `avatar-full-v5/${state.content_id}/${runTs}/thumbnail.png`,
+    state.thumbnail_local_path,
+    "image/png",
+  );
+  const coverUrl = await uploadToPostImages(
+    `avatar-full-v5/${state.content_id}/${runTs}/cover.png`,
+    coverPath,
+    "image/png",
+  );
+
+  const coverMeta: CoverMetadata = {
+    expression: directive.expression,
+    gaze: directive.gaze,
+    pose: directive.pose,
+    framing: directive.framing,
+    composition_side: directive.composition_side,
+    source,
+    model: source === "soul_higgsfield" ? "soul_2" : GEMINI_IMAGE_MODEL,
+    qa: {
+      verdict: qa.verdict,
+      identity_score: qa.identity.score,
+      scene_continuity_pass: qa.scene_continuity.pass,
+      sameness_flagged: qa.sameness.flagged,
+    },
+    generated_at: new Date().toISOString(),
+    cost_usd: Number(costUsd.toFixed(4)),
+  };
+
+  // Single-row update: both asset columns + metadata.cover. Unlike the
+  // best-effort caption-telemetry persist in phaseUpload, this write is a
+  // HARD gate — any failure throws.
+  const cur = await supa().from("content_queue").select("metadata").eq("id", state.content_id).single();
+  if (cur.error) throw new Error(`[cover] metadata read failed: ${cur.error.message}`);
+  const merged = { ...((cur.data?.metadata as Record<string, unknown>) ?? {}), cover: coverMeta };
+  const upd = await supa()
+    .from("content_queue")
+    .update({ thumbnail_asset_url: thumbnailUrl, cover_asset_url: coverUrl, metadata: merged })
+    .eq("id", state.content_id);
+  if (upd.error) throw new Error(`[cover] asset persist failed: ${upd.error.message}`);
+
+  // POST-CHECK (fail loudly, no silent passes): re-read the row, assert both
+  // URLs landed, then assert both are actually fetchable.
+  const chk = await supa()
+    .from("content_queue")
+    .select("thumbnail_asset_url, cover_asset_url")
+    .eq("id", state.content_id)
+    .single();
+  if (chk.error || !chk.data) throw new Error(`[cover] post-check re-read failed: ${chk.error?.message ?? "no row"}`);
+  if (chk.data.thumbnail_asset_url !== thumbnailUrl || chk.data.cover_asset_url !== coverUrl) {
+    throw new Error(
+      `[cover] post-check MISMATCH: row has thumbnail=${chk.data.thumbnail_asset_url} cover=${chk.data.cover_asset_url}, ` +
+        `expected thumbnail=${thumbnailUrl} cover=${coverUrl}`,
+    );
+  }
+  for (const [label, url] of [["thumbnail_asset_url", thumbnailUrl], ["cover_asset_url", coverUrl]] as const) {
+    const res = await fetch(url, { method: "HEAD" });
+    if (!res.ok) throw new Error(`[cover] post-check: ${label} not fetchable (HTTP ${res.status}): ${url}`);
+  }
+
+  state.thumbnail_public_url = thumbnailUrl;
+  state.cover = {
+    ...(state.cover ?? {}),
+    directive,
+    source,
+    final_local_path: coverPath,
+    public_url: coverUrl,
+    cost_usd: Number(costUsd.toFixed(4)),
+    needs_soul_fallback: false,
+  };
+  saveState(state);
+  console.log(`[cover] PASS post-check — thumbnail=${thumbnailUrl}`);
+  console.log(`[cover]                  cover=${coverUrl} (source=${source})`);
+}
+
+async function phaseCover(args: Args): Promise<void> {
+  const workdir = requireArg(args, "workdir");
+  const state = loadState(workdir);
+  if (!state.final_local_path || !fs.existsSync(state.final_local_path)) {
+    throw new Error("final.mp4 missing — run --phase=compose first (cover runs after the video flow completes)");
+  }
+  if (!state.final_public_url) {
+    throw new Error("final_public_url missing — run --phase=upload first (cover never blocks or alters the video flow)");
+  }
+
+  // 1. Thumbnail: the opening frame at 0.5s — inside SMTHookOverlay's 1.0s
+  //    window, so this IS the first-frame + hook-banner visual.
+  const thumbPath = path.join(workdir, "thumbnail.png");
+  extractFrameToPng(state.final_local_path, 0.5, thumbPath);
+  state.thumbnail_local_path = thumbPath;
+  saveState(state);
+  console.log(`[cover] thumbnail extracted → ${thumbPath}`);
+
+  // 2. Reference still — the SAME Soul-locked start_image the video used
+  //    (same look_id, location_id, lighting). Identity comes ONLY from this
+  //    image; the prompt never describes Rachel's features.
+  const refPath = path.join(workdir, "cover-reference.png");
+  await downloadFile(state.start_image_url, refPath);
+
+  // 3. Tone (deterministic directive when the concept brief carries it) +
+  //    recent covers for the variance exclusion.
+  const tone = await readToneFromRow(state.content_id);
+  const recentCovers = await getRecentCovers();
+  console.log(`[cover] tone=${tone ?? "(none — Haiku directive)"} recent_covers=${recentCovers.length}`);
+
+  const result = await runCoverChain(
+    {
+      hook: state.hook_text,
+      scriptSummary: scriptSummary(state),
+      tone,
+      recentCovers,
+      referenceImage: fs.readFileSync(refPath),
+    },
+    productionCoverChainDeps(imageFromFile(refPath)),
+  );
+
+  state.cover = {
+    directive: result.directive,
+    attempts: result.attempts.map((a) => ({ tier: a.tier, verdict: a.qa.verdict })),
+    cost_usd: Number(result.cost_usd.toFixed(4)),
+  };
+
+  if (result.status === "NEEDS_SOUL_FALLBACK") {
+    state.cover.needs_soul_fallback = true;
+    state.cover.soul_fallback_prompt = buildCoverPrompt(result.directive, 2);
+    saveState(state);
+    console.error(
+      `[cover] both Gemini tiers failed (${result.attempts.length} QA'd attempt(s)) — Soul 2.0 fallback required.\n` +
+        `  From the Claude session: generate via Higgsfield MCP generate_image (model soul_2, Rachel's soul_id,\n` +
+        `  the reference still as start frame) using state.cover.soul_fallback_prompt, then run:\n` +
+        `    --phase=cover-record --workdir=${workdir} --image-url=<generated-url> [--cost-usd=<n>]`,
+    );
+    process.exit(5); // signal: soul-fallback-needed (session MCP action)
+  }
+
+  const rawPath = path.join(workdir, "cover-raw.png");
+  fs.writeFileSync(rawPath, result.rawCover);
+  state.cover.raw_local_path = rawPath;
+  await finalizeCoverAndPersist(state, result.rawCover, result.directive, result.source, result.qa, result.cost_usd);
+}
+
+async function phaseCoverRecord(args: Args): Promise<void> {
+  const workdir = requireArg(args, "workdir");
+  const imageUrl = requireArg(args, "image-url");
+  const state = loadState(workdir);
+  if (!state.cover?.directive) throw new Error("state.cover.directive missing — run --phase=cover first");
+  if (!state.cover.needs_soul_fallback) {
+    console.warn("[cover-record] state does not flag needs_soul_fallback — recording anyway (manual override)");
+  }
+  const costUsd = Number(args["cost-usd"] ?? 0.015) + (state.cover.cost_usd ?? 0);
+
+  const rawPath = path.join(workdir, "cover-raw-soul.png");
+  await downloadFile(imageUrl, rawPath);
+  state.cover.raw_local_path = rawPath;
+
+  // The QA gate is mandatory on every tier. Soul is the LAST tier — a FAIL
+  // here has nowhere to fall back to, so it surfaces to human instead of
+  // silently passing.
+  const refPath = path.join(workdir, "cover-reference.png");
+  if (!fs.existsSync(refPath)) await downloadFile(state.start_image_url, refPath);
+  const recentCovers = await getRecentCovers();
+  const qa = await qaCover({
+    coverImage: imageFromFile(rawPath),
+    referenceImage: imageFromFile(refPath),
+    directive: state.cover.directive,
+    previousCover: recentCovers[0] ?? null,
+  });
+  state.cover.attempts = [...(state.cover.attempts ?? []), { tier: "soul_higgsfield", verdict: qa.verdict }];
+  saveState(state);
+  console.log(
+    `[cover-record] soul tier QA: identity=${qa.identity.score} scene=${qa.scene_continuity.pass ? "ok" : "MISMATCH"} → ${qa.verdict}`,
+  );
+  if (qa.verdict === "FAIL") {
+    console.error("[cover-record] Soul fallback FAILED QA — end of fallback chain. Surfacing to human.");
+    process.exit(3); // signal: surface-to-human
+  }
+  await finalizeCoverAndPersist(state, fs.readFileSync(rawPath), state.cover.directive, "soul_higgsfield", qa, costUsd + qa.cost_usd);
+}
+
 // ─── Phase: manifest ────────────────────────────────────────────────────
 
 async function phaseManifest(args: Args): Promise<void> {
@@ -727,6 +996,11 @@ async function phaseSummary(args: Args): Promise<void> {
   console.log(`hard cuts         : ${hardCuts.length > 0 ? hardCuts.join(", ") : "none"}`);
   console.log(`total cost        : $${totalUsd.toFixed(2)} (${totalCr} Higgsfield credits)`);
   if (state.qa_verdict) console.log(`avatar-v1 QA      : ${state.qa_verdict} (report ${state.qa_report_id ?? "n/a"}, informational only)`);
+  console.log(`thumbnail         : ${state.thumbnail_public_url ?? "(not generated — run --phase=cover)"}`);
+  console.log(
+    `cover             : ${state.cover?.public_url ?? (state.cover?.needs_soul_fallback ? "(NEEDS Soul fallback — see --phase=cover output)" : "(not generated — run --phase=cover)")}` +
+      (state.cover?.source ? `  [source=${state.cover.source}, $${(state.cover.cost_usd ?? 0).toFixed(2)}]` : ""),
+  );
   console.log("");
   console.log("To disable a specific bridge that sounds rough:");
   console.log("  edit workdir/v5-state.json, set transitions_manifest.transitions[i].bridge_enabled=false");
@@ -746,6 +1020,8 @@ const PHASES: Record<string, (args: Args) => Promise<void>> = {
   compose: phaseCompose,
   upload: phaseUpload,
   qa: phaseQa,
+  cover: phaseCover,
+  "cover-record": phaseCoverRecord,
   summary: phaseSummary,
 };
 

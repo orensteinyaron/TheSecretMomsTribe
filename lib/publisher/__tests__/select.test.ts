@@ -7,7 +7,8 @@ function row(over: Partial<DueRowRaw>): DueRowRaw {
   return {
     content_id: 'cq_1', cq_status: 'approved', render_status: 'complete',
     render_profile_slug: 'carousel', content_pillar: 'parenting',
-    final_asset_url: 'https://x/a.png', cq_caption: 'base', metadata: { source: 'create-from-url' },
+    final_asset_url: 'https://x/a.png', thumbnail_asset_url: null, cover_asset_url: null,
+    cq_caption: 'base', metadata: { source: 'create-from-url' },
     sp_channel: 'instagram', sp_status: 'pending', sp_caption: 'ig', sp_scheduled_for: null, sp_external_post_id: null,
     ...over,
   };
@@ -38,4 +39,12 @@ test('groupDueRows: separates distinct pieces and preserves per-channel fields',
 
 test('groupDueRows: empty input → empty', () => {
   assert.deepEqual(groupDueRows([]), []);
+});
+
+test('groupDueRows: carries thumbnail_asset_url + cover_asset_url onto the piece', () => {
+  const pieces = groupDueRows([
+    row({ thumbnail_asset_url: 'https://x/thumb.png', cover_asset_url: 'https://x/cover.png' }),
+  ]);
+  assert.equal(pieces[0].thumbnailAssetUrl, 'https://x/thumb.png');
+  assert.equal(pieces[0].coverAssetUrl, 'https://x/cover.png');
 });

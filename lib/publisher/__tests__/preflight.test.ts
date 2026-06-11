@@ -9,7 +9,8 @@ function piece(over: Partial<DuePiece> = {}): DuePiece {
   return {
     contentId: 'cq_1', status: 'approved', renderStatus: 'complete',
     renderProfileSlug: 'avatar-v1', pillar: 'parenting',
-    finalAssetUrl: 'https://x/a.mp4', caption: 'base', metadata: {},
+    finalAssetUrl: 'https://x/a.mp4', thumbnailAssetUrl: null, coverAssetUrl: null,
+    caption: 'base', metadata: {},
     channels: [
       { channel: 'instagram', status: 'pending', caption: 'ig', scheduledFor: null, externalPostId: null },
     ],

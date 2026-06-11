@@ -85,6 +85,13 @@ export interface RemixEnqueuePlan {
   /** Canonical SKILL pillar; translated to the DB pillar at the boundary. */
   pillar: CanonicalPillar;
   hook: string;
+  /**
+   * Optional concept-brief tone (e.g. "warm", "concerned", "playful").
+   * Persisted to content_queue.metadata.tone; the avatar cover stage
+   * (--phase=cover) uses it to derive the expression directive
+   * deterministically and skip the Haiku call.
+   */
+  tone?: string;
   /** Base/storytelling caption (content_queue.caption fallback). */
   baseCaption: string;
   finalAssetUrl: string;

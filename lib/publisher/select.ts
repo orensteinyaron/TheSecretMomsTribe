@@ -27,6 +27,8 @@ export function groupDueRows(rows: DueRowRaw[]): DuePiece[] {
         renderProfileSlug: (r.render_profile_slug as RenderProfileSlug | null) ?? null,
         pillar: r.content_pillar as ContentPillar,
         finalAssetUrl: r.final_asset_url,
+        thumbnailAssetUrl: r.thumbnail_asset_url,
+        coverAssetUrl: r.cover_asset_url,
         caption: r.cq_caption,
         metadata: r.metadata ?? {},
         channels: [],
@@ -56,6 +58,8 @@ interface EmbeddedRow {
     render_status: string;
     content_pillar: string;
     final_asset_url: string | null;
+    thumbnail_asset_url: string | null;
+    cover_asset_url: string | null;
     caption: string | null;
     metadata: Record<string, unknown> | null;
     render_profiles: { slug: string | null } | null;
@@ -71,6 +75,8 @@ function toRaw(row: EmbeddedRow): DueRowRaw {
     render_profile_slug: cq?.render_profiles?.slug ?? null,
     content_pillar: cq?.content_pillar ?? 'uncategorized',
     final_asset_url: cq?.final_asset_url ?? null,
+    thumbnail_asset_url: cq?.thumbnail_asset_url ?? null,
+    cover_asset_url: cq?.cover_asset_url ?? null,
     cq_caption: cq?.caption ?? null,
     metadata: cq?.metadata ?? null,
     sp_channel: row.channel,
@@ -87,7 +93,7 @@ export async function selectDuePieces(sb: SupabaseClient, now: Date): Promise<Du
     .from('scheduled_posts')
     .select(
       'content_id, status, caption, scheduled_for, channel, external_post_id, ' +
-        'content_queue!inner ( status, render_status, content_pillar, final_asset_url, caption, metadata, ' +
+        'content_queue!inner ( status, render_status, content_pillar, final_asset_url, thumbnail_asset_url, cover_asset_url, caption, metadata, ' +
         'render_profiles ( slug ) )',
     )
     .eq('content_queue.status', 'approved')

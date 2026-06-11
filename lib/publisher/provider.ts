@@ -20,6 +20,8 @@ export interface BuildStagingInput {
   channel: Channel;
   /** Local temp path of the downloaded asset. */
   assetPath: string;
+  /** IG only: local temp path of the downloaded cover image (cover_asset_url). */
+  coverAssetPath?: string | null;
   caption: string;
   media: MediaPlan;
 }
@@ -44,6 +46,7 @@ export class BrowserAssistedProvider implements PublishProvider {
       channel: input.channel,
       composerUrl: COMPOSER_URLS[input.channel],
       assetPath: input.assetPath,
+      coverAssetPath: input.coverAssetPath ?? null,
       caption: input.caption,
       media: input.media,
       stopAtPublish: true,

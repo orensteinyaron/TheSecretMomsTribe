@@ -10,6 +10,7 @@
 | Instagram Graph API | NOT configured | High | Needed for Publishing Agent |
 | TikTok Content API | NOT configured | High | Needed for Publishing Agent |
 | Image Gen API | NOT configured | Medium | Flux or DALL-E for visual content |
+| Gemini API (`GEMINI_API_KEY`) | Configured | High | Avatar cover generation (Nano Banana, `--phase=cover`). Key in root `.env`. Verified 2026-06-11: live smoke generation through `video/lib/cover/gemini.ts` returned a 768×1344 PNG. `services.gemini_nano_banana` = `active`. |
 
 ---
 
