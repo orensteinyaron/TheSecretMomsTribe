@@ -1,7 +1,9 @@
 // Cover hook-banner overlay — the purple SMT hook band applied to the
-// generated cover image, with brand styling from the carousel visual system
-// (skills/carousel-builder/SKILL.md): INK #220758, BRAND_PRIMARY #7941EA,
-// Poppins ExtraBold. Same hook_overlay text as the video.
+// generated cover image. Band fill is BRAND_PURPLE #63246a — the SAME plum the
+// video hook overlay / thumbnails use (SMTHookOverlay), so the cover matches
+// the thumbnails on the IG grid. (It deliberately does NOT use the brighter
+// carousel BRAND_PRIMARY #7941EA — mixing the two clashed on the grid.) INK
+// #220758 under-shadow, Poppins ExtraBold. Same hook_overlay text as the video.
 //
 // IG GRID SAFE ZONE: the grid crops reel covers to 3:4. On a 1080×1920
 // canvas the surviving region is the vertical center 1080×1440 — rows
@@ -13,9 +15,10 @@ import sharp from "sharp";
 export const COVER_W = 1080;
 export const COVER_H = 1920;
 
-// Brand styling (carousel visual system).
+// Brand styling. BRAND_PURPLE is the canonical hook-band plum shared with the
+// video overlay (SMTHookOverlay / BRAND_PURPLE in src/templates/v2/types.ts).
 export const INK = "#220758";
-export const BRAND_PRIMARY = "#7941EA";
+export const BRAND_PURPLE = "#63246a";
 export const OFF_WHITE = "#FCFCFA";
 
 // IG 3:4 center-crop safe zone on a 9:16 canvas.
@@ -85,7 +88,7 @@ export function bannerSvg(hookPrimary: string, hookSecondary?: string): string {
   return `<svg width="${COVER_W}" height="${COVER_H}" xmlns="http://www.w3.org/2000/svg">
   <g transform="rotate(${BAND_ROTATION_DEG} ${COVER_W / 2} ${BAND_CENTER_Y})">
     <rect x="${-BAND_EDGE_BLEED_PX}" y="${BAND_TOP_Y + BAND_SHADOW_OFFSET_PX}" width="${COVER_W + 2 * BAND_EDGE_BLEED_PX}" height="${BAND_HEIGHT}" fill="${INK}" fill-opacity="0.55"/>
-    <rect x="${-BAND_EDGE_BLEED_PX}" y="${BAND_TOP_Y}" width="${COVER_W + 2 * BAND_EDGE_BLEED_PX}" height="${BAND_HEIGHT}" fill="${BRAND_PRIMARY}"/>
+    <rect x="${-BAND_EDGE_BLEED_PX}" y="${BAND_TOP_Y}" width="${COVER_W + 2 * BAND_EDGE_BLEED_PX}" height="${BAND_HEIGHT}" fill="${BRAND_PURPLE}"/>
     <text x="${COVER_W / 2}" y="${primaryBaseline}"
           font-family="${fontFamily}"
           font-size="${fontSize}"

@@ -40,6 +40,14 @@ async function wer() {
   const punct = computeWer("Okay—wait. I genuinely can't believe this.", "okay wait i genuinely can't believe this");
   assert(punct.wer === 0, "punctuation/casing invariant: WER = 0");
 
+  // ASCII apostrophes used as quote marks must not leak into tokens
+  // (the c94dc045 clip_05 false FAIL_WER: 'you're overreacting.' vs you're overreacting)
+  const quoted = computeWer(
+    "Skip the 'you're overreacting.' Try this instead: 'You feel things big, and that's okay.'",
+    "Skip the you're overreacting. Try this instead. You feel things big, and that's okay.",
+  );
+  assert(quoted.wer === 0, "quote-mark apostrophes stripped at token edges: WER = 0");
+
   const oneSub = computeWer("Mom of three kids", "Mom of two kids");
   assert(oneSub.wer > 0 && oneSub.wer < 0.5, "one-word substitution: WER between 0 and 0.5");
   assertApprox(oneSub.wer, 0.25, 0.01, "one-word substitution: WER = 1/4 reference words");

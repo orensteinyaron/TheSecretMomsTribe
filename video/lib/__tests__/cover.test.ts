@@ -22,7 +22,7 @@ import {
   BAND_ROTATION_OVERSHOOT_PX,
   BAND_SHADOW_OFFSET_PX,
   BAND_TOP_Y,
-  BRAND_PRIMARY,
+  BRAND_PURPLE,
   COVER_H,
   COVER_W,
   IG_GRID_SAFE_BOTTOM_Y,
@@ -121,9 +121,10 @@ test("banner: font size is length-responsive with a floor (hook-fit lesson)", ()
   assert.ok(long >= 56);
 });
 
-test("banner: SVG uses brand styling (BRAND_PRIMARY band, INK shadow, Poppins ExtraBold, uppercase)", () => {
+test("banner: SVG uses brand styling (BRAND_PURPLE band matching thumbnails, INK shadow, Poppins ExtraBold, uppercase)", () => {
   const svg = bannerSvg("my teen finally talks", "here is why");
-  assert.ok(svg.includes(BRAND_PRIMARY));
+  assert.ok(svg.includes(BRAND_PURPLE));
+  assert.equal(BRAND_PURPLE, "#63246a"); // plum, same as SMTHookOverlay — NOT the bright #7941EA
   assert.ok(svg.includes(INK));
   assert.ok(svg.includes("Poppins"));
   assert.ok(svg.includes('font-weight="800"'));

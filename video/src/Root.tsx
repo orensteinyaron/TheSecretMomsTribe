@@ -6,6 +6,8 @@ import { SyncTest } from "./templates/SyncTest";
 import { AvatarComposition } from "./templates/avatar/AvatarComposition";
 import { type AvatarCompositionProps, AVATAR_FPS } from "./templates/avatar/types";
 import { AvatarV5Composition, layoutClips } from "./templates/avatar-v5/AvatarV5Composition";
+import { ColdOpenCaptioned } from "./templates/coldopen/ColdOpenCaptioned";
+import { ThumbnailCard } from "./templates/coldopen/ThumbnailCard";
 import {
   AVATAR_V5_FPS,
   AVATAR_V5_WIDTH,
@@ -136,6 +138,39 @@ export const RemotionRoot: React.FC = () => {
           />
         );
       })()}
+      {(() => {
+        const durFrames = Math.max(
+          1,
+          Math.round(((inputProps.duration_s as number) ?? 1) * AVATAR_V5_FPS),
+        );
+        return (
+          <Composition
+            id="ColdOpenCaptioned"
+            component={ColdOpenCaptioned as any}
+            durationInFrames={durFrames}
+            fps={AVATAR_V5_FPS}
+            width={AVATAR_V5_WIDTH}
+            height={AVATAR_V5_HEIGHT}
+            defaultProps={{
+              video_url: (inputProps.video_url as string) ?? "",
+              phrases: (inputProps.phrases as any) ?? [],
+            }}
+          />
+        );
+      })()}
+      <Composition
+        id="ThumbnailCard"
+        component={ThumbnailCard as any}
+        durationInFrames={30}
+        fps={AVATAR_V5_FPS}
+        width={AVATAR_V5_WIDTH}
+        height={AVATAR_V5_HEIGHT}
+        defaultProps={{
+          image_url: (inputProps.image_url as string) ?? "",
+          primary: (inputProps.primary as string) ?? "",
+          secondary: (inputProps.secondary as string) ?? undefined,
+        }}
+      />
     </>
   );
 };

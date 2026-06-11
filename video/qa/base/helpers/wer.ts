@@ -16,7 +16,13 @@ export function normalize(s: string): string {
 export function tokenize(s: string): string[] {
   const n = normalize(s);
   if (n === "") return [];
-  return n.split(" ");
+  // Apostrophes survive normalize() for contractions (you're, don't), but an
+  // ASCII apostrophe doubling as a quote mark ('you're overreacting.') leaves
+  // edge apostrophes that Whisper never produces — strip them per token.
+  return n
+    .split(" ")
+    .map((t) => t.replace(/^'+|'+$/g, ""))
+    .filter((t) => t !== "");
 }
 
 // Levenshtein distance on token arrays. O(m*n) time and space; fine for

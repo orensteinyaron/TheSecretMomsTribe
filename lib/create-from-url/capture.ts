@@ -15,7 +15,9 @@ import { detectPlatform } from './platform.js';
 import type { CaptureDeps, CaptureObject, CaptureSlide, SourceFormat } from './types.js';
 
 export const APIFY_ACTORS = {
-  instagram: 'apify/instagram-post-scraper',
+  // instagram-scraper is the actor that accepts directUrls; instagram-post-scraper
+  // only scrapes by username and rejects this input shape.
+  instagram: 'apify/instagram-scraper',
   tiktok: 'clockworks/free-tiktok-scraper',
 } as const;
 
@@ -51,7 +53,7 @@ export async function capture(url: string, deps: CaptureDeps): Promise<CaptureOb
   const actor = APIFY_ACTORS[platform];
   const input =
     platform === 'instagram'
-      ? { directUrls: [url], resultsLimit: 1 }
+      ? { directUrls: [url], resultsType: 'posts', resultsLimit: 1 }
       : { postURLs: [url], resultsPerPage: 1, shouldDownloadVideos: false, shouldDownloadCovers: false };
   const items = await deps.runApifyActor(actor, input);
   const item = items?.[0] as Record<string, unknown> | undefined;
