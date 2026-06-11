@@ -469,6 +469,11 @@ of banding it.
 On approval:
 - Assets in a per-piece dir: `ig_slide_1..N.png` (1080×1350),
   `tiktok_slide_1..N.png` (1080×1920).
+- **Always also copy the finals to the local posting folder:**
+  `~/Desktop/SMT-carousels/<YYYY-MM-DD>_<slug>/` with `ig/` + `tt/` subfolders and
+  the `contact_sheet.png`. Yaron posts carousels manually, so the final PNGs must
+  land in this predictable per-piece folder with BOTH channels present. This is in
+  addition to the hosted Supabase URLs / `metadata.slide_images`, not a replacement.
 - Manifest: which `content_queue` row, pillar, slide count, per-channel caption.
 - The pipeline may then flip `render_status='complete'` with `final_asset_url`
   and `render_completed_at` set together (the contract's atomic write). The
