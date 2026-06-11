@@ -4,7 +4,8 @@
 Each video has a consistent "visual world" — setting, lighting, color palette, textures. Not shot-by-shot, but atmospheric.
 
 ## Photography Rules
-- **NO faces** — hands, backs of heads, over-shoulder, feet, silhouettes only
+- **Faces welcome** when they carry the emotion (the old "no faces" rule is retired
+  — see `prompts/visual-design.md` Image Rules). Keep it to one expressive subject.
 - **70%+ parent images should show mothers**
 - Warm, golden-hour lighting always
 - Real, lived-in environments (kitchens, living rooms, parks)

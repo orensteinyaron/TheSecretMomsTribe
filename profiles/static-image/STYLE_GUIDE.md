@@ -2,10 +2,11 @@
 
 ## Photography Rules
 Same as Moving Images:
-- NO faces — hands, backs of heads, silhouettes only
+- Faces welcome when they carry the emotion (the old "no faces" rule is retired —
+  see `prompts/visual-design.md` Image Rules). One subject, expressive, real.
 - Warm, golden-hour lighting
-- Real environments, editorial feel
-- DALL-E prompt enhanced with brand rules automatically
+- Real environments, editorial feel, never AI-looking
+- Image prompt enhanced with brand rules automatically
 
 ## Text Composition
 - Brand typography applied by compose.js

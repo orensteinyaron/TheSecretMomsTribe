@@ -301,7 +301,7 @@ Axes enum values:
   "slides": [{"slide_number": 1, "text": "...", "type": "hook|content|cta", "image_prompt": null}],
   "audio_suggestion": "Suggested audio for moving-images / avatar-v1. Empty string otherwise.",
   "image_prompt": {
-    "prompt": "Full DALL-E prompt, NO FACES EVER.",
+    "prompt": "Full DALL-E prompt. Faces welcome when emotional; one full anatomically-correct body, no distorted/merged parts; real, not AI-looking.",
     "axes": {
       "shot_type": "...", "lighting": "...", "palette": "...",
       "subject": "...", "mood": "...", "rachel_mode": "${rachelMode}"

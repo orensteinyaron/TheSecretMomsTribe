@@ -288,7 +288,7 @@ CLIP RULES:
 
 VISUAL QUERY SAFETY:
 - NEVER: crying, meltdown, tantrum, distress, screaming
-- NEVER: medical terms, studio photos, direct-to-camera faces
+- NEVER: medical terms, studio photos, stock-posed group shots
 - NEVER: seasonal/holiday content
 - ALWAYS: warm natural light, candid, specific objects/gestures
 - PREFER MOMS: 70%+ parent images should be mothers
@@ -525,7 +525,7 @@ REQUIRED axes (override any previous choice):
 
 Return ONLY valid JSON, no code fences:
 {
-  "prompt": "Full DALL-E prompt. NO FACES EVER.",
+  "prompt": "Full DALL-E prompt. Faces welcome when the emotion is the point; one expressive subject with a full, anatomically correct body (no missing/merged/distorted parts); real photo, not AI-looking.",
   "axes": {
     "shot_type": "${targetAxes.shot_type}",
     "lighting": "${targetAxes.lighting}",

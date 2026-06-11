@@ -23,7 +23,7 @@
 ~$0.04-0.08/image (DALL-E 3 HD)
 
 ## Image Prompt Enhancement
-- NO faces rule enforced
+- Faces welcome when emotional (old "no faces" rule retired — see visual-design Image Rules)
 - Golden-hour lighting
 - Color palette: warm amber, soft cream, dusty blush, muted sage
 - Editorial photography style

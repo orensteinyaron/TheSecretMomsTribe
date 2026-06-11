@@ -51,10 +51,11 @@ function profileSizeFor(post) {
 // --- Image prompt enhancement ---
 
 const PROMPT_PREFIX = `CRITICAL RULES:
-- NO faces visible anywhere. Show only: hands, backs of heads, over-shoulder angles, feet, silhouettes.
+- Faces are allowed and encouraged when the emotion is the point (a crying toddler, a tired parent, a tender exchange). Keep it to one expressive subject.
+- One full, complete, anatomically correct body with natural proportions: head, torso, both arms and both legs present and connected; correct hands with five fingers; no missing, extra, merged, or distorted body parts; subject clearly separated from floor and background.
 - Warm, golden-hour lighting. Never harsh, clinical, or cool-toned.
 - Color palette: warm amber, soft cream, dusty blush, muted sage. Never oversaturated.
-- Style: editorial photography. Must look like a real photograph, NOT AI-generated.
+- Style: editorial photography. Must look like a real photograph, NOT AI-generated. No uncanny or warped faces.
 - Environments should feel real and lived-in: kitchens, living rooms, cars, parks, bedrooms.
 - No text or words in the image.
 - Soft focus backgrounds. Subject in focus.
@@ -99,11 +100,9 @@ function stripTextInstructions(rawPrompt) {
 }
 
 function enhancePrompt(rawPrompt) {
-  let prompt = stripTextInstructions(rawPrompt);
-  // Ensure no-faces rule is explicit
-  if (!prompt.toLowerCase().includes('no face')) {
-    prompt = prompt + ' No faces visible.';
-  }
+  const prompt = stripTextInstructions(rawPrompt);
+  // Faces are allowed (policy retired 2026-06-11). The anti-hallucination /
+  // full-body guidance lives in PROMPT_PREFIX so every prompt carries it.
   return PROMPT_PREFIX + prompt;
 }
 

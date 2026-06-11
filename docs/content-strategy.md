@@ -7,7 +7,7 @@
 - **Hook in 0-3 seconds. Magic in 3-10. Payoff in 10-15.**
 - **Content mix:** 60% Wow / 30% Trust / 10% CTA
 - **Cadence:** 3 posts/day TikTok, 1 post/day IG
-- **Aesthetic:** Model B (no face) → evolve to Model A later
+- **Aesthetic:** Model A (faces welcome) — the old faceless "Model B" rule is retired (2026-06-11); see `prompts/visual-design.md` Image Rules
 - **Voice:** Warm, insider, like a smart mom friend who knows things
 
 ---
