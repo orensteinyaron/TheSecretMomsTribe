@@ -40,7 +40,7 @@ test('capture(instagram): routes to the IG post scraper and normalizes a carouse
     },
   }));
   assert.equal(usedActor, APIFY_ACTORS.instagram);
-  assert.deepEqual(usedInput, { directUrls: ['https://www.instagram.com/p/ABC/'], resultsLimit: 1 });
+  assert.deepEqual(usedInput, { directUrls: ['https://www.instagram.com/p/ABC/'], resultsType: 'posts', resultsLimit: 1 });
   assert.equal(cap.format, 'carousel');
   assert.equal(cap.slides.length, 3);
   assert.equal(cap.creator_handle, 'somemom');

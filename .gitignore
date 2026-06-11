@@ -10,3 +10,6 @@ bin/face-metrics/models/
 
 # Playwright MCP scratch + local carousel build artifacts (assets live in Supabase storage)
 .playwright-mcp/
+
+# avatar render working dir (transient artifacts)
+video/workdir/

@@ -83,6 +83,7 @@ import {
 } from "../lib/wardrobe-rotation/index.js";
 import { listActiveLocations } from "../lib/location/index.js";
 import {
+  assertBandIsBrandPurple,
   buildCoverPrompt,
   composeCoverWithBanner,
   GEMINI_IMAGE_MODEL,
@@ -354,6 +355,18 @@ async function phaseVerify(args: Args): Promise<void> {
 
 // ─── Phase: face-metrics ────────────────────────────────────────────────
 
+function probeVideoStreamDurationSeconds(mp4Path: string): number | null {
+  // Container duration can exceed the video stream's (audio tail runs longer);
+  // seeking end frames off the container duration lands past the last frame.
+  const out = execFileSync(
+    "ffprobe",
+    ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "csv=p=0", mp4Path],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  ).toString().trim();
+  const n = Number(out);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function extractFrameToPng(mp4Path: string, timestampS: number, outPath: string): void {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   execFileSync(
@@ -380,7 +393,7 @@ async function phaseFaceMetrics(args: Args): Promise<void> {
       // Re-download if --phase=verify cleaned up.
       await downloadFile(clip.seedance_video_url!, localMp4);
     }
-    const dur = probeDurationSeconds(localMp4);
+    const dur = probeVideoStreamDurationSeconds(localMp4) ?? probeDurationSeconds(localMp4);
     const startPng = path.join(framesDir, `${clip.id}-start.png`);
     const endPng = path.join(framesDir, `${clip.id}-end.png`);
     extractFrameToPng(localMp4, 0.0, startPng);
@@ -723,6 +736,13 @@ async function finalizeCoverAndPersist(
   });
   const coverPath = path.join(state.workdir, "cover.png");
   fs.writeFileSync(coverPath, bannered);
+
+  // Band-color guard (2026-06-11): both assets must carry the plum #63246a hook
+  // band. A thumbnail once shipped with the bright #7941EA cover-primary and
+  // reached the live IG grid because nothing checked band color. Fail loudly
+  // BEFORE persisting if either band is the wrong purple.
+  await assertBandIsBrandPurple(fs.readFileSync(state.thumbnail_local_path), { label: "thumbnail (video first frame)" });
+  await assertBandIsBrandPurple(bannered, { label: "cover banner" });
 
   const runTs = new Date().toISOString().replace(/[:.]/g, "-");
   const thumbnailUrl = await uploadToPostImages(
