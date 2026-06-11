@@ -38,7 +38,8 @@ function piece(over: Partial<DuePiece> = {}): DuePiece {
   return {
     contentId: 'cq_1', status: 'approved', renderStatus: 'complete',
     renderProfileSlug: 'carousel', pillar: 'parenting',
-    finalAssetUrl: 'https://x/a.png', caption: 'base', metadata: {},
+    finalAssetUrl: 'https://x/a.png', thumbnailAssetUrl: null, coverAssetUrl: null,
+    caption: 'base', metadata: {},
     channels: [
       { channel: 'instagram', status: 'pending', caption: 'ig native', scheduledFor: null, externalPostId: null },
       { channel: 'tiktok', status: 'pending', caption: 'tt native', scheduledFor: null, externalPostId: null },
@@ -81,4 +82,25 @@ test('plan: caption falls back to the base caption when the channel caption is n
     channels: [{ channel: 'instagram', status: 'pending', caption: null, scheduledFor: null, externalPostId: null }] });
   const ig = planChannel(p, 'instagram', NOW);
   assert.equal(ig.action === 'stage' && ig.caption, 'base');
+});
+
+// ── cover routing (three-asset contract) ─────────────────────────────────────
+
+test('plan: IG stage carries cover_asset_url; TikTok stays frame-based (null)', () => {
+  const p = piece({
+    renderProfileSlug: 'avatar-v1', finalAssetUrl: 'https://x/a.mp4',
+    thumbnailAssetUrl: 'https://x/thumb.png', coverAssetUrl: 'https://x/cover.png',
+  });
+  const ig = planChannel(p, 'instagram', NOW);
+  assert.equal(ig.action === 'stage' && ig.coverAssetUrl, 'https://x/cover.png');
+  const tt = planChannel(p, 'tiktok', NOW);
+  // TikTok covers are frame-based only (API: video_cover_timestamp_ms) — the
+  // staged plan never carries a cover file for it.
+  assert.equal(tt.action === 'stage' && tt.coverAssetUrl, null);
+});
+
+test('plan: IG stage with no cover yet → coverAssetUrl null (publish not blocked)', () => {
+  const p = piece({ renderProfileSlug: 'avatar-v1', finalAssetUrl: 'https://x/a.mp4' });
+  const ig = planChannel(p, 'instagram', NOW);
+  assert.equal(ig.action === 'stage' && ig.coverAssetUrl, null);
 });

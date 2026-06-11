@@ -137,7 +137,14 @@ Re-express the idea through brand + DNA:
   disclaimer).
 
 Output a **concept brief**: pillar, format, hook, hook_overlay, the slide texts or
-the script, and the proposed caption.
+the script, the proposed caption, and an optional **tone** (one word from the
+emotional register of the piece, e.g. `warm`, `concerned`, `excited`, `playful`,
+`reassuring`, `urgent`, `curious`). The tone rides to
+`content_queue.metadata.tone` at enqueue (`RemixEnqueuePlan.tone`); the avatar
+cover stage (`--phase=cover`) uses it to derive the cover's expression
+directive deterministically and skip the Haiku call. Optional — when omitted,
+the cover stage derives the directive from {hook, script summary} with one
+cheap Haiku call.
 
 ---
 

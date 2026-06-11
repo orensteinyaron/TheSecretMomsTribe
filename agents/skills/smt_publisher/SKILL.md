@@ -14,8 +14,8 @@ description: >
   double-posts), closes the row lifecycle with an atomic writeback + post-check,
   fails closed with a logged reason. Use whenever building/running/debugging
   publishing.
-version: 1.1.0
-last_updated: 2026-06-09
+version: 1.2.0
+last_updated: 2026-06-11
 owner: Yaron Orenstein
 ---
 
@@ -208,7 +208,16 @@ IG/TikTok session. Per channel:
 2. Open the platform's web composer (IG create / TikTok upload).
 3. Upload the file via the file picker; wait for the platform to finish
    processing/preview.
-4. Paste the exact caption (and cover/thumbnail selection if offered).
+4. Paste the exact caption. **Cover selection (three-asset contract):**
+   - **Instagram Reels:** if the piece has `cover_asset_url` (the
+     purpose-generated cover; staged as `coverAssetPath` on the
+     `StagingPlan`), upload it in the composer's "Edit cover" → "Add from
+     device" step. If null (older pieces), leave the default frame.
+   - **TikTok:** leave the default frame-based cover. The TikTok composer
+     (and API) only supports covers picked from a video frame — there is no
+     custom-image upload. The default first frame already matches
+     `thumbnail_asset_url` (the first-frame + hook-banner asset), so the
+     visual is correct by construction.
 5. **Stop at the publish button. Do not click it.** Surface the staged post to
    Yaron and wait.
 6. Yaron reviews and clicks publish himself.
@@ -243,7 +252,8 @@ Container model, three steps:
 1. **Create container** — `POST /{ig-user-id}/media`
    - image: `image_url`, `caption`
    - reel: `media_type=REELS`, `video_url`, `caption`, `share_to_feed=true`,
-     optional `cover_url`
+     `cover_url` = the piece's `cover_asset_url` (the purpose-generated
+     cover from the avatar three-asset contract; omit when null)
    - carousel child: `is_carousel_item=true` per image (up to 10), then a parent
      `media_type=CAROUSEL` with `children=[childIds]`, `caption` on the parent
 2. **Poll status** (video/reels/carousel) — `GET /{container-id}?fields=status_code`
@@ -286,7 +296,12 @@ Three steps via `open.tiktokapis.com`:
      verification)
    - `post_info`: `title` (caption + hashtags), `privacy_level=SELF_ONLY` (locked
      while unaudited), `disable_comment` / `disable_duet` / `disable_stitch`,
-     `video_cover_timestamp_ms`
+     `video_cover_timestamp_ms`. **Cover limitation (documented):** the TikTok
+     Content Posting API only supports FRAME-BASED covers
+     (`video_cover_timestamp_ms`) — it cannot take a custom cover image, so
+     `cover_asset_url` is NOT usable here. Keep the default/first-frame cover:
+     it matches `thumbnail_asset_url` (the first-frame + hook-banner asset),
+     which is exactly the thumbnail path for TikTok.
    - returns a `publish_id`
 3. **Poll** — `POST /v2/post/publish/status/fetch/` with `publish_id` until
    `PUBLISH_COMPLETE`. Capture the resulting post id/url.

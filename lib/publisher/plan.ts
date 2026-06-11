@@ -29,7 +29,13 @@ export function planChannel(
   }
   const ch = piece.channels.find((c) => c.channel === channel);
   const caption = ch?.caption ?? piece.caption ?? '';
-  return { channel, action: 'stage', media, caption };
+  // Cover routing (three-asset contract): IG stages the purpose-generated
+  // cover (cover_asset_url) as the Reels cover. TikTok keeps its current
+  // frame-based behavior — the TikTok API/composer only supports covers
+  // picked from a video frame, and the default first frame already matches
+  // thumbnail_asset_url (the first-frame + hook-banner asset).
+  const coverAssetUrl = channel === 'instagram' ? (piece.coverAssetUrl ?? null) : null;
+  return { channel, action: 'stage', media, caption, coverAssetUrl };
 }
 
 /** Plan every channel attached to a piece. */

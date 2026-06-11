@@ -35,3 +35,14 @@
 - [ ] Implement performance data fetching
 - [ ] Implement Learning Agent (agents/learning.js)
 - [ ] Weekly report generation
+
+## Avatar cover stage (2026-06-11)
+
+- [x] Migration: `content_queue.thumbnail_asset_url` + `cover_asset_url`; services fallback chain `gemini_nano_banana` → `higgsfield_soul` (applied to fvxaykkmzsbrggjgdfjj + mirrored in `supabase/migrations/`)
+- [x] `video/lib/cover/` — Gemini Nano Banana client, tone/Haiku directive + last-5 variance, brand banner (IG 3:4 safe zone), matches-reference QA gate, fallback-chain runner
+- [x] `render-avatar-full-v5.ts --phase=cover` / `--phase=cover-record` — thumbnail persistence + cover generation + hard post-check (both URLs non-null + fetchable)
+- [x] Publisher: IG stages `cover_asset_url`, TikTok keeps frame-based thumbnail (documented limitation)
+- [x] create-from-url concept brief: optional `tone` field → `metadata.tone`
+- [x] Approval UI: video + thumbnail + cover side-by-side in ContentDetailPage
+- [ ] Yaron: add `GEMINI_API_KEY` to `.env`, then flip `services.gemini_nano_banana` to `active`
+- [ ] First live cover render: eyeball grid-crop framing + calibrate the identity QA threshold on 2 covers before trusting auto-pass

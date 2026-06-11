@@ -79,6 +79,12 @@ export interface ContentItem {
   render_error: string | null;
   render_cost_usd: number;
   final_asset_url: string | null;
+  // Three-asset contract (avatar pieces): video + thumbnail + cover.
+  // thumbnail = first frame + hook banner (TikTok's frame-based cover path);
+  // cover = purpose-generated image (IG Reels cover_url). Set by the avatar
+  // renderer's --phase=cover; null for older pieces / other profiles.
+  thumbnail_asset_url: string | null;
+  cover_asset_url: string | null;
   rejection_reason: string | null;
   created_at: string;
   updated_at: string;

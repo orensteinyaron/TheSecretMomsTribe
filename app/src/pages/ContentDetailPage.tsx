@@ -784,6 +784,48 @@ function RenderPanel({
         )}
       </div>
 
+      {/* Three-asset contract (avatar pieces): Yaron reviews video + thumbnail
+          + cover together before approval. thumbnail = first frame + hook
+          banner (TikTok's frame-based cover); cover = purpose-generated image
+          (staged as the IG Reels cover). Hidden for pieces without them. */}
+      {(piece.thumbnail_asset_url || piece.cover_asset_url) && (
+        <div data-testid="render-visual-assets">
+          <h4 className="text-[11px] font-semibold tracking-wide uppercase text-text-tertiary mb-2">Covers</h4>
+          <div className="flex gap-4">
+            {piece.thumbnail_asset_url && (
+              <figure className="m-0">
+                <a href={piece.thumbnail_asset_url} target="_blank" rel="noopener">
+                  <img
+                    src={piece.thumbnail_asset_url}
+                    alt="Thumbnail (first frame + hook banner)"
+                    className="h-64 rounded-md border border-border-subtle"
+                    data-testid="render-thumbnail-asset"
+                  />
+                </a>
+                <figcaption className="text-[11px] text-text-tertiary mt-1">
+                  Thumbnail — first frame + hook (TikTok cover)
+                </figcaption>
+              </figure>
+            )}
+            {piece.cover_asset_url && (
+              <figure className="m-0">
+                <a href={piece.cover_asset_url} target="_blank" rel="noopener">
+                  <img
+                    src={piece.cover_asset_url}
+                    alt="Generated cover"
+                    className="h-64 rounded-md border border-border-subtle"
+                    data-testid="render-cover-asset"
+                  />
+                </a>
+                <figcaption className="text-[11px] text-text-tertiary mt-1">
+                  Cover — generated{piece.metadata?.cover?.source ? ` (${piece.metadata.cover.source})` : ''} (IG Reels cover)
+                </figcaption>
+              </figure>
+            )}
+          </div>
+        </div>
+      )}
+
       {queue_row.render_error && (
         <div>
           <h4 className="text-[11px] font-semibold tracking-wide uppercase text-error mb-1">Render error</h4>

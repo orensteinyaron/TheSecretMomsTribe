@@ -28,6 +28,10 @@ export interface DueRowRaw {
   render_profile_slug: string | null;
   content_pillar: string;
   final_asset_url: string | null;
+  /** First-frame + hook-banner PNG — TikTok's cover path (frame-based covers only). */
+  thumbnail_asset_url: string | null;
+  /** Purpose-generated cover PNG — passed as cover_url on IG Reels. */
+  cover_asset_url: string | null;
   cq_caption: string | null;
   metadata: Record<string, unknown> | null;
   sp_channel: Channel;
@@ -53,6 +57,15 @@ export interface DuePiece {
   renderProfileSlug: RenderProfileSlug | null;
   pillar: ContentPillar;
   finalAssetUrl: string | null;
+  /**
+   * The two grid-facing visual assets of the avatar three-asset contract
+   * (video + thumbnail + cover). IG uses coverAssetUrl as the Reels cover;
+   * TikTok keeps the thumbnail path — its API only supports frame-based
+   * covers (video_cover_timestamp_ms), and thumbnail_asset_url IS the
+   * video's opening frame, so the visual matches.
+   */
+  thumbnailAssetUrl: string | null;
+  coverAssetUrl: string | null;
   /** content_queue.caption — fallback when a per-channel caption is null. */
   caption: string | null;
   metadata: Record<string, unknown>;
@@ -99,6 +112,13 @@ export interface StagingPlan {
   composerUrl: string;
   /** Local temp path of the downloaded asset (browser uploads via file picker). */
   assetPath: string;
+  /**
+   * Instagram only: local temp path of the downloaded cover image
+   * (cover_asset_url) to set in the composer's cover selector. TikTok stays
+   * null — its composer/API supports frame-based covers only, so the agent
+   * leaves the default first frame (which matches thumbnail_asset_url).
+   */
+  coverAssetPath: string | null;
   caption: string;
   media: MediaPlan;
   readonly stopAtPublish: true;
@@ -113,7 +133,14 @@ export interface StagingPlan {
  *   - 'noop'  → leave the row untouched (already done / not due / not approved).
  */
 export type ChannelAction =
-  | { channel: Channel; action: 'stage'; media: MediaPlan; caption: string }
+  | {
+      channel: Channel;
+      action: 'stage';
+      media: MediaPlan;
+      caption: string;
+      /** IG: cover_asset_url to stage as the Reels cover; null elsewhere. */
+      coverAssetUrl: string | null;
+    }
   | { channel: Channel; action: 'skip' | 'fail' | 'noop'; reason?: string };
 
 /** Outcome of attempting to close a channel after the human acts. */

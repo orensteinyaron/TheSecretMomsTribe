@@ -107,6 +107,7 @@ export async function enqueueRemix(
     source: 'create-from-url',
     source_url: plan.provenance.sourceUrl,
     creator_handle: plan.provenance.creatorHandle ?? null,
+    ...(plan.tone ? { tone: plan.tone } : {}),
     ...(plan.aiMagic ? { ai_magic: plan.aiMagic } : {}),
     ...(plan.extraMetadata ?? {}),
   };

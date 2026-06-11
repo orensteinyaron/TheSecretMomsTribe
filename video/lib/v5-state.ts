@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { Phrase, WhisperWord } from "./phrase-grouper.js";
+import type { CoverDirective, CoverSource } from "./cover/types.js";
 
 export type V5ClipState = {
   /** Stable id from avatar_config.clips[].id (e.g. "SCENE_01"). */
@@ -113,6 +114,24 @@ export type V5State = {
   // Populated by --phase=qa.
   qa_report_id?: string;
   qa_verdict?: string;
+  // ── Populated by --phase=cover (runs AFTER upload; never blocks the video flow) ──
+  /** First-frame + hook-banner PNG extracted from final.mp4 (the legacy thumbnail, now persisted). */
+  thumbnail_local_path?: string;
+  thumbnail_public_url?: string;
+  cover?: {
+    directive?: CoverDirective;
+    attempts?: Array<{ tier: CoverSource; verdict: "PASS" | "FAIL" }>;
+    /** Both Gemini tiers failed QA (or Gemini is unavailable) — the session must
+     *  generate via Soul 2.0 (Higgsfield MCP) and run --phase=cover-record. */
+    needs_soul_fallback?: boolean;
+    /** Prompt for the session's Soul fallback generation. */
+    soul_fallback_prompt?: string;
+    source?: CoverSource;
+    raw_local_path?: string;
+    final_local_path?: string;
+    public_url?: string;
+    cost_usd?: number;
+  };
   // Cumulative cost across all phases for the cost-ceiling check.
   total_higgsfield_credits?: number;
   total_usd?: number;

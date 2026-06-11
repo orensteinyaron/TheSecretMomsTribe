@@ -10,6 +10,7 @@
 | Instagram Graph API | NOT configured | High | Needed for Publishing Agent |
 | TikTok Content API | NOT configured | High | Needed for Publishing Agent |
 | Image Gen API | NOT configured | Medium | Flux or DALL-E for visual content |
+| Gemini API (`GEMINI_API_KEY`) | NOT configured | High | Avatar cover generation (Nano Banana, `--phase=cover`). Add to `.env`; flip `services.gemini_nano_banana` to `active` once set. Until then covers fall through to the Soul 2.0 (Higgsfield) fallback tier. |
 
 ---
 
