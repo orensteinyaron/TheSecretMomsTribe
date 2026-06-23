@@ -135,9 +135,14 @@ Re-express the idea through brand + DNA:
   story video → `avatar-v1`; a text/slideshow video → `moving-images`.
 - Honor the pillar gate (esp. `ai_magic` verbatim rule; `financial` first-person +
   disclaimer).
+- For `avatar-v1`: do NOT auto-pick a look/location and do NOT run the renderer
+  (`--phase=init`) to pick one. The look and location are chosen **interactively
+  by Yaron** from visual grids in §4 Gate B. Just gather the catalogs to show
+  there: active `rachel_looks` (+ a representative `rachel_stills.soul_still_url`
+  thumbnail per look) and active `rachel_locations` (+ `reference_image_url`).
 
 Output a **concept brief**: pillar, format, hook, hook_overlay, the slide texts or
-the script, the proposed caption, and an optional **tone** (one word from the
+the script (all scenes, verbatim), the proposed caption, and an optional **tone** (one word from the
 emotional register of the piece, e.g. `warm`, `concerned`, `excited`, `playful`,
 `reassuring`, `urgent`, `curious`). The tone rides to
 `content_queue.metadata.tone` at enqueue (`RemixEnqueuePlan.tone`); the avatar
@@ -148,11 +153,83 @@ cheap Haiku call.
 
 ---
 
-## 4. APPROVAL #1 — concept
+## 4. APPROVAL #1 — concept (TWO mandatory gates: script + look/location)
 
-Show Yaron the concept brief next to a short note on the source (what it was, why
-it worked). He approves / edits / rejects. Do not render until he approves. Fix
-only what he flags; don't rebuild the whole concept on a small note.
+Nothing downstream runs until Yaron **explicitly approves BOTH gates**.
+"Downstream" = authoring `avatar_config`, any `render-avatar-full-v5.ts
+--phase=…` call (including `init`), any Higgsfield MCP `generate_video` /
+`generate_image`, any carousel render. Auto-picking a look/location and
+rendering on it without asking is the exact failure this gate prevents — a
+wrong combo or unapproved script burns a full re-render in credits + tokens.
+
+Present, in one message next to a short source note (what it was, why it worked):
+
+**Gate A — the script, ALL scenes.** Every clip/scene shown **verbatim and in
+order** (clip_1, clip_2, …), plus pillar, `hook_overlay`, and caption. For a
+carousel, every slide's text. Not summarized, not paraphrased, and **not
+bundled inside another question** (e.g. a format A/B/C choice) — the literal
+lines that will be spoken/rendered, presented as their own approvable thing.
+
+**Gate B — the look + location** (avatar pieces). NOT plain words — a **two-step
+visual grid picker** (look first, then location). See "Gate B grid picker" below
+for the exact widget. Yaron clicks a card (or types an ID) at each step; he may
+also pick the trailing "➕ New …" card to create one. Look is chosen before the
+location grid is shown.
+
+He approves / edits / rejects. Fix only what he flags; don't rebuild the whole
+concept on a small note. **Only once BOTH gates are approved do you proceed to
+§5.** A reply that approves one but is silent on the other is not approval of
+the other — ask again.
+
+**Red flags — STOP, you are about to violate this gate:**
+- "I'll just pick a sensible look and start rendering." → No. Gate B first.
+- "Script approval is implied by the format/overlap choice he answered." → No.
+  Gate A is a standalone, explicit approval of the verbatim scenes.
+- "Rotation cooldown already determines the look, so I needn't ask." → Cooldown
+  narrows options; Yaron still confirms the actual pick.
+- "It's just one clip / a cheap render / only `init`." → `init` + TTS + the
+  first `generate_video` already spend credits on an unapproved basis. Ask first.
+
+### Gate B grid picker (the look/location selection UI)
+
+Two grids in sequence, each rendered inline with `show_widget` (mcp__visualize).
+The widget is **selection-only — it never writes the DB**; every DB effect
+happens in the agent turn that handles the resulting click.
+
+**Step 1 — Look grid.** One card per active `rachel_looks` row:
+- the look's thumbnail (latest `rachel_stills.soul_still_url` for that look),
+- an **ID badge** (`look_01`) + the wardrobe/hair label,
+- a recency hint when the look is inside the rotation `cooldown=3` window,
+- `onclick="sendPrompt('pick look_03')"`.
+Plus a trailing **"➕ New look"** card → `sendPrompt('create a new look')`.
+
+**Step 2 — Location grid** (only after a look is chosen). One card per active
+`rachel_locations` row:
+- the `reference_image_url` thumbnail (the generic Rachel-in-location canonical —
+  NOT re-rendered for the chosen look; the look-specific composite is Step 3),
+- an **ID badge** (`location_01`) + name (kitchen, home_studio),
+- `onclick="sendPrompt('pick location_01')"`.
+Plus a trailing **"➕ New location"** card → `sendPrompt('create a new location')`.
+
+**"➕ New …" handoffs** (each persists for all future renders):
+- New look → **avatar-full-wardrobe-rotation** bootstrap (candidates → Yaron
+  approves → saved as `look_NN`), then re-show Step 1 with it available.
+- New location → **location** skill `bootstrapLocation` (→ saved as
+  `location_NN`), then re-show Step 2.
+
+**Step 3 — combo resolution (after both picked).** Compute the `still_id`:
+- a `rachel_stills` row exists for (look, location) with a `soul_still_url` → pin
+  its `still_id`;
+- none exists (e.g. `look_04` × `location_01`) → run the **location** skill's
+  `generateAnchoredStill(look_id, location_id)` (nano_banana_pro + Soul
+  pass-through), INSERT it into `rachel_stills` so the combo is reusable, surface
+  the generated still inline, then pin the new `still_id`.
+This guarantees a render-ready still exists **before** §5, so `init` never has to
+generate one (`generateAnchoredStill` throws inside the Node renderer).
+
+On `generateAnchoredStill` failure: surface and stop — do NOT silently swap to a
+different combo (that would discard Yaron's explicit pick). Offer retry or a
+re-pick.
 
 ---
 
@@ -178,9 +255,11 @@ Hand the approved concept to the right renderer — do not reimplement rendering
    guarded SQL update — never flip status/`render_profile_id`):
    - `clips`: segment the approved script into ≥2 clips, each `{ id,
      expected_script }` — text VERBATIM, split only.
-   - `look_id` + `location_id`: pin a render-ready Soul still (a `rachel_stills`
-     row that already exists for that combo, so `init` doesn't try to generate
-     one — `generateAnchoredStill` throws inside the Node renderer).
+   - `look_id` + `location_id` + `still_id`: pin EXACTLY the combo + still Yaron
+     selected in §4 Gate B — either the pre-existing `rachel_stills` row or the
+     one generated in Gate B Step 3. Because Gate B guarantees the still exists,
+     `init` never generates one (`generateAnchoredStill` throws inside the Node
+     renderer). Do NOT re-pick a different combo here.
    - `voice_id` (Rachel), `register`, `hook`.
 3. **Drive the v5 phases** (`render-avatar-full-v5.ts --phase=…` interleaved with
    Higgsfield MCP `generate_video`): `init → tts → (generate_video + record +
