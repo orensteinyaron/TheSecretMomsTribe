@@ -9,14 +9,14 @@ import OpenAI from "openai";
 // Env vars are read lazily — module load happens before the caller's
 // dotenv.config() call, so capturing them at module top-level would always
 // see empty strings.
-const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+const CLAUDE_MODEL = "claude-sonnet-4-6";
 
 // Per-profile QA agents pass a specific model (Sonnet for hard composition
 // judgments, Haiku for structured-checklist dimensions per the cost split
 // in PR 0). Existing sonnetVisionJson callers default to Sonnet for
 // backwards compatibility.
 export const CLAUDE_VISION_MODELS = {
-  sonnet: "claude-sonnet-4-20250514",
+  sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5-20251001",
 } as const;
 export type ClaudeVisionModelKey = keyof typeof CLAUDE_VISION_MODELS;

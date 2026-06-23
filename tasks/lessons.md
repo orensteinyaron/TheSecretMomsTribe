@@ -5,6 +5,35 @@ Mirrored to Supabase `lessons` table.
 
 ---
 
+## 2026-06-23 — Cover thumbnails were converging on the same calm frontal Rachel (Yaron correction, "we've already discussed this")
+
+The cover stage exists to break "the wall of identical frontal Rachels" on the IG grid, but covers kept coming out as the same calm, static, frontal portrait (comfort piece + backtalk both got "calm closed-lip smile, soft eyes, center"). Root cause in `video/lib/cover/directive.ts`:
+
+1. **`TONE_DIRECTIVES` poses were static** — `reassuring` was literally "upright and steady, hands out of frame." The expression/pose (the visually dominant part) is fixed per tone, so every same-tone cover looked identical.
+2. **Variance only rotated `framing` + `composition_side`, never expression/pose**, and `FRAMING_ROTATION` led with `close_up` (tight portrait = least in-action).
+
+Fix applied: rewrote every `TONE_DIRECTIVES` entry to be **in-action** (mid-gesture, hands visible, candid, "caught mid-sentence"), and reordered `FRAMING_ROTATION` to `medium → three_quarter → close_up` so body + hands show. Regenerated the comfort cover → three-quarter shot, hand over heart, mid-sentence — clearly differs from the calm-frontal grid. All 22 `cover.test.ts` pass. **Covers must be lively/in-action by default, not posed portraits.** (Applied in the active branch + the sweet-cartwright render worktree; needs to reach `main`.)
+
+---
+
+## 2026-06-23 — Avatar v5: per-clip framing drift ("too much zoom" on clip 3) + the neutral_warm "AI-ish" problem (Yaron correction)
+
+Source: create-from-url remix of @themompsychologist "comfort is not spoiling" reel (row `3ff03a6c`).
+
+1. **`neutral_warm` register + bounded-motion reads as AI/dead.** First render felt "AI-ish, less human" (Yaron). Cause: `motion-prompt-builder` `neutral_warm` + the anti-drift `BOUNDED_MOTION` envelope = Rachel barely blinks/gestures → "talking photo." Re-rolling all 3 clips with a **custom expressive direction** (explicit natural blinking, warm smile, moving eyebrows, hands gesturing near chest, head tilt + weight shift, "real woman talking heart-to-heart, never frozen") fixed it: identity_consistency 5.00/5, identity_markers clip_1 2/5→5/5, hands SUSPECT→NATURAL. **For heartfelt/intimate pieces, drive performance explicitly; don't trust the canned register.**
+
+2. **"Lean in slightly" in the prompt can read as a zoom-in.** The expressive prompt's "she leans in slightly" likely pushed clip 3 to a tighter Seedance framing → QA flagged framing_drift=major on clip 3, Yaron confirmed "too much zoom." Avoid lean-in language; prefer explicit **subject-distance lock** instead.
+
+3. **Framing drift is a GENERATION problem, fix it on the prompt side (YAR-137 distance-lock follow-up).** Seedance renders per-clip subject distance variance from the same start image. The normalizer uses ONE uniform scale on purpose (YAR-153 background-consistency) and deliberately does NOT equalize face size, so a clip Seedance framed closer STAYS closer. Next time: add distance-lock language to the motion prompt — "framed from mid-chest up, the same size in frame across the whole piece, no push-in, she stays the same distance from the camera."
+
+4. **There is no clean post-only fix for one clip being too zoomed.** Lowering that clip's scale in the normalizer trips the background-consistency gate (kitchen zooms differently → two backgrounds) and removes eye-line crop room (cut jumps vertically). Max zoom-out is bounded by the clip's raw frame anyway. Decision: ship as-is for a 22s piece; fix on generation next time. **Don't reintroduce per-clip scaling to "rescue" a tight clip.**
+
+5. **The vision QA gate has been silently failing repo-wide on a retired model id.** `video/lib/qa-helpers.ts` pins `claude-sonnet-4-20250514`, which 404s (present in `main` too). Every avatar + cover vision QA was returning FAIL/unmeasured for the wrong reason. Patched locally to `claude-sonnet-4-6` to get a real verdict. **Needs a real fix in `main`.**
+
+6. **CODIFIED 2026-06-24 (Yaron):** the lively prompt is no longer a manual one-off — it's baked into `video/lib/motion-prompt-builder.ts` (`buildMotionPrompt`). The builder now adds a tone-safe ALIVENESS floor (blink, engaged eyes, expressive micro-expressions, head movement, "never stiff or wooden"), upgrades `neutral_warm` with natural hand gestures + a smile that comes and goes, and adds a subject-DISTANCE lock ("same size in frame, no push-in") for the framing drift. Tests updated (15 pass). `full-avatar-profile` SKILL.md hard rule now mandates building prompts via `buildMotionPrompt` and forbids "lean in" language. **Lives in the active branch + render worktree; needs to reach `main`.**
+
+---
+
 ## 2026-06-11 — create-from-url: don't force the 5-7 carousel cap on a long source (Yaron correction)
 
 1. **Match the source's slide count when the content needs it; don't compress to fit the SMT 5-7 guideline.** Remixing a 13-slide tantrum carousel (@thepositiveparenting) into 7 slides was rejected: compressing that much "guts" a piece built on simple, sequential, one-idea-per-slide teaching. Went to 11 slides instead. The 5-7 rule in `content-dna.md` / carousel-builder is a default for original SMT pieces, NOT a hard cap to enforce on a proven long-form source. Remix should preserve the structure that made the original work.

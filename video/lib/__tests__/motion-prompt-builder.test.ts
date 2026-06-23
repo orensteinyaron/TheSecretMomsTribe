@@ -22,12 +22,15 @@ test("every register includes framing-lock language", () => {
   }
 });
 
-// ─── YAR-129 Finding 3: bounded-motion, NOT pose-lock ──────────────────
+// ─── Position-stability (cheap normalization), NOT pose-lock ───────────
+// Replaces the old "bounded motion within a small envelope" instruction,
+// which over-suppressed motion and made Rachel read as a frozen photo
+// (2026-06-23 Yaron correction). We now bound POSITION DRIFT only.
 
-test("every register includes bounded-motion language", () => {
+test("every register bounds position drift for normalization", () => {
   for (const register of ALL_REGISTERS) {
     const p = buildMotionPrompt({ register, script_excerpt: "x" });
-    assert.match(p, /subtle natural motion within a small envelope/i, `${register}: missing bounded-motion phrase`);
+    assert.match(p, /position barely drifts/i, `${register}: missing position-stability phrase`);
   }
 });
 
@@ -38,6 +41,41 @@ test("no register contains pose-lock or torso-lock language", () => {
     assert.doesNotMatch(p, /torso position is locked/i, `${register}: torso-lock language must NOT appear`);
     assert.doesNotMatch(p, /\bfrozen\b/i, `${register}: "frozen" language must NOT appear`);
   }
+});
+
+// ─── 2026-06-23 ALIVENESS floor (Yaron: "make Rachel more live") ───────
+
+test("every register includes the aliveness floor (blink + alive + engaged)", () => {
+  for (const register of ALL_REGISTERS) {
+    const p = buildMotionPrompt({ register, script_excerpt: "x" });
+    assert.match(p, /\balive\b/i, `${register}: missing 'alive' language`);
+    assert.match(p, /blinks?/i, `${register}: missing blink language`);
+    assert.match(p, /never stiff or wooden/i, `${register}: missing not-stiff language`);
+  }
+});
+
+test("aliveness floor is tone-safe: never mandates a smile (would break dry_reflective/urgent)", () => {
+  // The floor must not force a positive smile; smile is register-controlled.
+  // dry_reflective legitimately says "no smile" in its own marker — what must
+  // NOT appear is a positive smile mandate leaking from the shared floor.
+  const dry = buildMotionPrompt({ register: "dry_reflective", script_excerpt: "x" });
+  assert.doesNotMatch(dry, /genuine smile|warm smile|smile (coming|breaking)/i, "no positive smile mandate may leak into dry_reflective");
+  assert.match(dry, /no smile/i, "dry_reflective keeps its own 'no smile' marker");
+});
+
+// ─── 2026-06-23 subject-DISTANCE lock (Yaron: clip-3 "too much zoom") ──
+
+test("every register locks subject distance / size in frame", () => {
+  for (const register of ALL_REGISTERS) {
+    const p = buildMotionPrompt({ register, script_excerpt: "x" });
+    assert.match(p, /same size in frame/i, `${register}: missing size-in-frame lock`);
+    assert.match(p, /no push-in/i, `${register}: missing no-push-in lock`);
+  }
+});
+
+test("neutral_warm default now carries lively hand gestures", () => {
+  const p = buildMotionPrompt({ register: "neutral_warm", script_excerpt: "x" });
+  assert.match(p, /gestures?.*hands|hands.*gestures?/i, "neutral_warm should describe natural hand gestures");
 });
 
 // ─── Register-specific markers (YAR-129 Gap 1) ──────────────────────────

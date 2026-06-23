@@ -14,22 +14,29 @@
 import { claudeVisionJson, priceClaudeVisionCall } from "../qa-helpers.js";
 import type { CompositionSide, CoverDirective, CoverFraming, RecentCover } from "./types.js";
 
-export const FRAMING_ROTATION: CoverFraming[] = ["close_up", "medium", "three_quarter"];
+// Framing leads with medium/three-quarter (body + hands visible) so covers
+// read as in-action, not tight static portraits — see lessons 2026-06-23.
+export const FRAMING_ROTATION: CoverFraming[] = ["medium", "three_quarter", "close_up"];
 export const COMPOSITION_ROTATION: CompositionSide[] = ["center", "left", "right"];
 
 /**
  * Deterministic tone → directive base (framing/side filled by variance).
  * Keys are lowercase; lookup is case-insensitive and tolerant of suffixes
  * (e.g. "concerned_insider" matches "concerned").
+ *
+ * Every pose is IN-ACTION (mid-gesture, hands visible, candid, caught
+ * mid-sentence) so the grid cover differs from the wall of calm frontal
+ * thumbnails — never a still, hands-out-of-frame portrait (lessons 2026-06-23,
+ * Yaron correction).
  */
 export const TONE_DIRECTIVES: Record<string, Pick<CoverDirective, "expression" | "gaze" | "pose">> = {
-  warm:       { expression: "soft genuine smile, eyes relaxed", gaze: "direct to camera", pose: "shoulders relaxed, leaning slightly toward camera" },
-  concerned:  { expression: "earnest, slightly furrowed brow, lips parted as if mid-confidence", gaze: "direct to camera", pose: "leaning in, one hand near collarbone" },
-  excited:    { expression: "bright open-mouth smile, eyebrows lifted", gaze: "direct to camera", pose: "energetic, head tilted a touch" },
-  playful:    { expression: "conspiratorial half-smile, one eyebrow raised", gaze: "glancing just off-lens", pose: "head tilted, shoulder dipped toward camera" },
-  reassuring: { expression: "calm closed-lip smile, soft eyes", gaze: "direct to camera", pose: "upright and steady, hands out of frame" },
-  urgent:     { expression: "serious, focused, no smile", gaze: "direct to camera", pose: "leaning forward, squared shoulders" },
-  curious:    { expression: "intrigued, slight squint, hint of a smile", gaze: "glancing just off-lens", pose: "chin slightly lowered, head turned a few degrees" },
+  warm:       { expression: "warm genuine smile caught mid-conversation", gaze: "direct to camera", pose: "one hand open mid-gesture near her chest, leaning in like talking to a friend" },
+  concerned:  { expression: "earnest, brow softly furrowed, caught mid-sentence", gaze: "direct to camera", pose: "both hands open mid-gesture, leaning toward camera" },
+  excited:    { expression: "bright open-mouth laugh, eyebrows lifted", gaze: "direct to camera", pose: "hands animated mid-gesture, shoulders turned, energetic" },
+  playful:    { expression: "conspiratorial grin mid-laugh", gaze: "glancing just off-lens", pose: "one hand near her face, shoulder dipped, caught mid-gesture" },
+  reassuring: { expression: "warm reassuring half-smile, soft engaged eyes, caught mid-sentence", gaze: "direct to camera", pose: "one hand open over her heart mid-gesture, leaning in gently" },
+  urgent:     { expression: "serious and focused, caught mid-sentence", gaze: "direct to camera", pose: "one hand raised mid-point, leaning forward, squared shoulders" },
+  curious:    { expression: "intrigued, hint of a smile, caught mid-thought", gaze: "glancing just off-lens", pose: "head turned, one hand lifted as if about to make a point" },
 };
 
 export function directiveFromTone(tone: string): Pick<CoverDirective, "expression" | "gaze" | "pose"> | null {
