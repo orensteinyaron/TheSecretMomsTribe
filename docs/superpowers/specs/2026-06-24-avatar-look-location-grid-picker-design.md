@@ -38,7 +38,7 @@ Gate B becomes a **two-step visual picker**, look first then location, each step
    - thumbnail image,
    - the **ID** (`look_01`) shown as a visible label,
    - the wardrobe + hair description,
-   - the recency hint if the look was used in the last N pieces (so rotation is visible).
+   - a recency hint if the look was used within the rotation cooldown window (the wardrobe-rotation `cooldown=3` last-pieces window, so the hint matches the autonomous picker).
    - clickable: `onclick → sendPrompt("pick look_03")`.
 3. A trailing **"➕ New look"** card → `sendPrompt("create a new look")` → hands off to the `avatar-full-wardrobe-rotation` bootstrap (generates candidates → human approves → saved as a new `look_NN`, then re-enter Step 1 with it pre-selected).
 4. The user clicks a card or types an ID. Result: a chosen `look_id`.
@@ -48,7 +48,7 @@ Gate B becomes a **two-step visual picker**, look first then location, each step
 Identical pattern, shown **after** the look is chosen:
 
 1. Query active `rachel_locations` (all of them; independent of the chosen look).
-2. Grid of cards: `reference_image_url` thumbnail + **ID** (`location_01`) + name + clickable `sendPrompt("pick location_01")`.
+2. Grid of cards: `reference_image_url` thumbnail + **ID** (`location_01`) + name + clickable `sendPrompt("pick location_01")`. Note: these thumbnails are the generic Rachel-in-location canonicals (not re-rendered for the chosen look) — the look-specific composite is only produced at Step 3.
 3. Trailing **"➕ New location"** card → `sendPrompt("create a new location")` → `location` skill `bootstrapLocation` → saved as new `location_NN`, then re-enter Step 2 with it pre-selected.
 4. Result: a chosen `location_id`.
 
