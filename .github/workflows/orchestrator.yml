@@ -1,8 +1,11 @@
 name: System Orchestrator
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'
+  # Manual trigger only. The */15 cron was removed 2026-08-16: GitHub fired it
+  # roughly every 28 min, and every pipeline run calls 4 Apify actors from
+  # agents/research.js (2x reddit, tiktok, google-trends) at ~$0.52 a cycle.
+  # That ran to $50 of Apify spend in 3 days against a $100 plan limit.
+  # Before restoring any schedule, rate-limit the research stage first.
   workflow_dispatch:
 
 jobs:
