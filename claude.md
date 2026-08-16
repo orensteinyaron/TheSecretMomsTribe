@@ -73,11 +73,16 @@ raw LLM output preserved.
 
 ### Trigger
 
-The pipeline is triggered by the existing GitHub Actions cron workflow
-(`.github/workflows/orchestrator.yml`, unchanged); the orchestrator's
-mode-based CLI is invoked directly from the workflow as before. The
-orchestrator defaults to `--mode=daily` when no mode flag is passed, so
-the existing `node agents/orchestrator.js` invocation continues to work.
+The pipeline is triggered **manually only** (`.github/workflows/orchestrator.yml`,
+`workflow_dispatch`). The `*/15` cron was removed on 2026-08-16 because every
+pipeline run calls 4 Apify actors from `agents/research.js`, which cost ~$50 in
+3 days. The orchestrator's mode-based CLI is invoked directly from the workflow
+as before, and defaults to `--mode=daily` when no mode flag is passed, so the
+existing `node agents/orchestrator.js` invocation continues to work.
+
+**Before restoring any schedule:** rate-limit the research stage (skip the Apify
+calls when signals were pulled in the last N hours) and budget the cadence.
+At ~$0.52 an orchestrator cycle, hourly costs ~$12/day.
 
 ---
 
